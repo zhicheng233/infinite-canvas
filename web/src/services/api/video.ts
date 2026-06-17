@@ -1,4 +1,5 @@
 import axios from "axios";
+import { isLoggedIn, proxyAiPost, proxyAiGet, proxyAiGetPath } from "./ai-proxy";
 
 import { dataUrlToFile } from "@/lib/image-utils";
 import { getMediaBlob, uploadMediaFile, type UploadedFile } from "@/services/file-storage";
@@ -24,14 +25,20 @@ export type VideoGenerationTask = { id: string; provider: "openai" | "seedance";
 export type VideoGenerationTaskState = { status: "pending" } | { status: "completed"; result: VideoGenerationResult } | { status: "failed"; error: string };
 
 function aiApiUrl(config: AiConfig, path: string) {
+    if (isLoggedIn()) return (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080/api") + "/proxy?path=" + encodeURIComponent(path);
     return buildApiUrl(config.baseUrl, path);
 }
 
 function aiHeaders(config: AiConfig, contentType?: string) {
-    return {
-        Authorization: `Bearer ${config.apiKey}`,
-        ...(contentType ? { "Content-Type": contentType } : {}),
-    };
+    const headers: Record<string, string> = {};
+    if (isLoggedIn()) {
+        const token = typeof window !== "undefined" ? localStorage.getItem("infinite-canvas:auth_token") : null;
+        if (token) headers["Authorization"] = "Bearer " + token;
+    } else {
+        headers["Authorization"] = "Bearer " + config.apiKey;
+    }
+    if (contentType) headers["Content-Type"] = contentType;
+    return headers;
 }
 
 export async function requestVideoGeneration(config: AiConfig, prompt: string, references: ReferenceImage[] = [], videoReferences: ReferenceVideo[] = [], audioReferences: ReferenceAudio[] = [], options?: RequestOptions): Promise<VideoGenerationResult> {

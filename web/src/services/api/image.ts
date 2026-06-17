@@ -1,4 +1,5 @@
 import axios from "axios";
+import { isLoggedIn, proxyAiPost, proxyAiGet, proxyAiGetPath } from "./ai-proxy";
 
 import { buildApiUrl, resolveModelRequestConfig, type AiConfig, type ModelChannel } from "@/stores/use-config-store";
 import { nanoid } from "nanoid";
@@ -210,14 +211,20 @@ function withSystemPrompt(config: AiConfig, prompt: string) {
 }
 
 function aiApiUrl(config: AiConfig, path: string) {
+    if (isLoggedIn()) return ;
     return buildApiUrl(config.baseUrl, path);
 }
 
 function aiHeaders(config: AiConfig, contentType?: string) {
-    return {
-        Authorization: `Bearer ${config.apiKey}`,
-        ...(contentType ? { "Content-Type": contentType } : {}),
-    };
+    const headers: Record<string, string> = {};
+    if (isLoggedIn()) {
+        const token = typeof window !== "undefined" ? localStorage.getItem("infinite-canvas:auth_token") : null;
+        if (token) headers["Authorization"] = "Bearer " + token;
+    } else {
+        headers["Authorization"] = "Bearer " + config.apiKey;
+    }
+    if (contentType) headers["Content-Type"] = contentType;
+    return headers;
 }
 
 function withSystemMessage<T extends ResponseInputMessage>(config: AiConfig, messages: T[]): ResponseInputMessage[] {

@@ -1,7 +1,46 @@
 services:
   app:
-    image: ghcr.io/basketikun/infinite-canvas:latest
+    image: infinite-canvas-app:latest
     container_name: infinite-canvas
+    environment:
+      NEXT_PUBLIC_API_URL: http://8.219.243.189:18080/api
     ports:
-      - "3000:3000"
+      - "3001:3000"
     restart: unless-stopped
+
+  mysql:
+    image: mysql:8.4
+    container_name: ic-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: infinite_canvas
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: ic-redis
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: ic-backend
+    ports:
+      - "18080:18080"
+    depends_on:
+      - mysql
+      - redis
+    restart: unless-stopped
+    environment:
+      PORT: "18080"
+      DB_DSN: root:root@tcp(mysql:3306)/infinite_canvas?charset=utf8mb4&parseTime=True&loc=Local
+      JWT_KEY: change-me-in-production
+      REDIS_ADDR: redis:6379
+
+volumes:
+  mysql_data:

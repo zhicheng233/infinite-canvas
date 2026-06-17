@@ -1,9 +1,22 @@
 services:
-  app:
-    image: infinite-canvas:local
-    build:
-      context: .
-      dockerfile: Dockerfile
+  mysql:
+    image: mysql:8.4
+    container_name: ic-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: infinite_canvas
     ports:
-      - "3000:3000"
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
     restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: ic-redis
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+
+volumes:
+  mysql_data:

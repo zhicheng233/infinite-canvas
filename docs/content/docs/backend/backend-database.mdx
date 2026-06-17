@@ -1,0 +1,63 @@
+---
+title: 后端数据库结构
+description: 多租户积分系统的数据库表结构设计
+---
+
+# 后端数据库结构
+
+## tenants 表
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | uint | 主键 |
+| name | string(100) | 租户名称 |
+| domain | string(200) | 租户域名，唯一 |
+| plan | enum(free/basic/pro/enterprise) | 套餐计划 |
+| status | enum(active/inactive) | 状态 |
+
+## users 表
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | uint | 主键 |
+| tenant_id | uint | 所属租户 |
+| username | string(64) | 用户名 |
+| password_hash | string(256) | bcrypt 密码哈希 |
+| display_name | string(64) | 显示名称 |
+| avatar_url | string(512) | 头像 URL |
+| role | enum(super_admin/tenant_admin/user) | 角色 |
+| status | enum(active/inactive) | 状态 |
+
+## credit_accounts 表
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | uint | 主键 |
+| tenant_id | uint | 所属租户 |
+| user_id | uint | 用户 ID，唯一 |
+| balance | int | 当前余额 |
+| total_earned | int | 累计获得 |
+| total_spent | int | 累计消费 |
+
+## credit_transactions 表
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | uint | 主键 |
+| account_id | uint | 关联账户 |
+| type | enum(earn/spend/refund/adjust) | 交易类型 |
+| amount | int | 交易金额 |
+| balance_after | int | 交易后余额 |
+| ref_type | string(50) | 关联业务类型 |
+| ref_id | string(100) | 关联业务 ID |
+| note | string(500) | 备注 |
+
+## credit_pricing 表
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | uint | 主键 |
+| tenant_id | uint | 所属租户 |
+| model | string(100) | AI 模型名称 |
+| credits_per_unit | int | 每次消耗积分 |
+| unit_type | enum(per_image/per_video/per_token) | 计费单位 |

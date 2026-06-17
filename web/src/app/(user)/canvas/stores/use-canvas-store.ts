@@ -5,6 +5,7 @@ import { nanoid } from "nanoid";
 import { localForageStorage } from "@/lib/localforage-storage";
 import type { CanvasBackgroundMode } from "@/lib/canvas-theme";
 import type { CanvasAssistantSession, CanvasConnection, CanvasNodeData, ViewportTransform } from "../types";
+import { saveCanvas, deleteBatchCanvas, listCanvases } from "@/services/api/canvas";
 
 export type CanvasProject = {
     id: string;
@@ -30,6 +31,7 @@ type CanvasStore = {
     deleteProjects: (ids: string[]) => void;
     replaceProjects: (projects: CanvasProject[]) => void;
     updateProject: (id: string, patch: Partial<Pick<CanvasProject, "nodes" | "connections" | "chatSessions" | "activeChatId" | "backgroundMode" | "showImageInfo" | "viewport">>) => void;
+    syncFromCloud: () => Promise<void>;
 };
 
 const initialViewport: ViewportTransform = { x: 0, y: 0, k: 1 };
@@ -37,6 +39,21 @@ const CANVAS_STORE_KEY = "infinite-canvas:canvas_store";
 type PersistedCanvasState = Pick<CanvasStore, "projects">;
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 let queuedPersistState: PersistedCanvasState | null = null;
+
+// Cloud save debounce: 2 seconds after last update per project
+const cloudSaveTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+function scheduleCloudSave(project: CanvasProject) {
+    const existing = cloudSaveTimers.get(project.id);
+    if (existing) clearTimeout(existing);
+    cloudSaveTimers.set(
+        project.id,
+        setTimeout(() => {
+            cloudSaveTimers.delete(project.id);
+            saveCanvas(project).catch((err) => console.error("[CanvasStore] Cloud save failed:", err));
+        }, 2000),
+    );
+}
 
 const canvasStorage: PersistStorage<CanvasStore> = {
     getItem: async (name) => {
@@ -81,6 +98,7 @@ export const useCanvasStore = create<CanvasStore>()(
                     viewport: initialViewport,
                 };
                 set((state) => ({ projects: [project, ...state.projects] }));
+                saveCanvas(project).catch((err) => console.error("[CanvasStore] Create cloud save failed:", err));
                 return id;
             },
             importProject: (source) => {
@@ -99,25 +117,53 @@ export const useCanvasStore = create<CanvasStore>()(
                     viewport: source.viewport || initialViewport,
                 };
                 set((state) => ({ projects: [project, ...state.projects] }));
+                saveCanvas(project).catch((err) => console.error("[CanvasStore] Import cloud save failed:", err));
                 return project.id;
             },
             openProject: (id) => {
                 return get().projects.find((item) => item.id === id) || null;
             },
-            renameProject: (id, title) =>
+            renameProject: (id, title) => {
                 set((state) => ({
-                    projects: state.projects.map((project) => (project.id === id ? { ...project, title: title.trim() || project.title, updatedAt: new Date().toISOString() } : project)),
-                })),
-            deleteProjects: (ids) =>
+                    projects: state.projects.map((project) =>
+                        project.id === id
+                            ? { ...project, title: title.trim() || project.title, updatedAt: new Date().toISOString() }
+                            : project,
+                    ),
+                }));
+                const project = get().projects.find((p) => p.id === id);
+                if (project) scheduleCloudSave(project);
+            },
+            deleteProjects: (ids) => {
                 set((state) => {
                     const projects = state.projects.filter((project) => !ids.includes(project.id));
                     return { projects };
-                }),
+                });
+                deleteBatchCanvas(ids).catch((err) => console.error("[CanvasStore] Cloud delete failed:", err));
+            },
             replaceProjects: (projects) => set({ projects }),
-            updateProject: (id, patch) =>
+            updateProject: (id, patch) => {
                 set((state) => ({
-                    projects: state.projects.map((project) => (project.id === id ? { ...project, ...patch, updatedAt: new Date().toISOString() } : project)),
-                })),
+                    projects: state.projects.map((project) =>
+                        project.id === id ? { ...project, ...patch, updatedAt: new Date().toISOString() } : project,
+                    ),
+                }));
+                const project = get().projects.find((p) => p.id === id);
+                if (project) scheduleCloudSave(project);
+            },
+            syncFromCloud: async () => {
+                try {
+                    const cloudProjects = await listCanvases();
+                    const localProjects = get().projects;
+                    const merged = new Map(localProjects.map((p) => [p.id, p]));
+                    for (const cp of cloudProjects) {
+                        merged.set(cp.id, cp);
+                    }
+                    set({ projects: Array.from(merged.values()) });
+                } catch (err) {
+                    console.error("[CanvasStore] Cloud sync failed:", err);
+                }
+            },
         }),
         {
             name: CANVAS_STORE_KEY,
@@ -128,6 +174,7 @@ export const useCanvasStore = create<CanvasStore>()(
                 }) as StorageValue<CanvasStore>["state"],
             onRehydrateStorage: () => () => {
                 useCanvasStore.setState({ hydrated: true });
+                void useCanvasStore.getState().syncFromCloud();
             },
         },
     ),

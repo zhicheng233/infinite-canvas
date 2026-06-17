@@ -1,7 +1,22 @@
 ---
-title: 待测试
-description: 当前版本已实现但仍需人工验证的变更项
+title: 待测试确认
+description: 已实现但需要用户测试确认的变更
 ---
 
-# 待测试
+# 待测试确认
 
+## Phase 1: 后端骨架 + 用户认证 + 多租户模型
+
+- [ ] Go 后端项目初始化成功（`go mod tidy` 无错误）
+- [ ] 数据库连接正常，AutoMigrate 生成五张表
+- [ ] POST /api/auth/register 注册新用户（自动创建租户）
+- [ ] POST /api/auth/login 登录返回 JWT Token
+- [ ] GET /api/auth/me 获取当前用户信息
+- [ ] GET /api/credits/balance 查询积分余额
+- [ ] GET /api/credits/transactions 查询积分流水
+- [ ] GET /api/credits/estimate 预估算力消耗
+- [ ] 管理员可配置积分定价
+- [ ] 管理员可查看租户下用户列表
+- [ ] JWT 过期后返回 401
+- [ ] 非管理员访问管理接口返回 403
+- [ ] Docker Compose 一键启动全部服务
