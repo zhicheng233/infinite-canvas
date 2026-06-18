@@ -218,7 +218,7 @@ function InfiniteCanvasPage() {
     const { message, modal } = App.useApp();
     const params = useParams<{ id: string }>();
     const router = useRouter();
-    const projectId = params.id;
+    const projectId = typeof params?.id === "string" ? params.id : "";
     const containerRef = useRef<HTMLDivElement>(null);
     const imageInputRef = useRef<HTMLInputElement>(null);
     const uploadTargetRef = useRef<{ nodeId?: string; position?: Position } | null>(null);
@@ -387,6 +387,10 @@ function InfiniteCanvasPage() {
 
     useEffect(() => {
         if (!hydrated) return;
+        if (!projectId || projectId === "undefined" || projectId === "null") {
+            router.replace("/canvas");
+            return;
+        }
         setProjectLoaded(false);
         const project = openProject(projectId);
         if (!project) {
@@ -1014,8 +1018,12 @@ function InfiniteCanvasPage() {
 
     const createAndOpenProject = useCallback(() => {
         const id = createProject(`无限画布 ${useCanvasStore.getState().projects.length + 1}`);
+        if (!id) {
+            message.error("新建画布失败，请重试");
+            return;
+        }
         router.push(`/canvas/${id}`);
-    }, [createProject, router]);
+    }, [createProject, message, router]);
 
     const deleteCurrentProject = useCallback(() => {
         deleteProjects([projectId]);

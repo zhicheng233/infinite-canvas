@@ -19,5 +19,17 @@ func (r *ApiConfigRepo) FindByTenant(tenantID uint) (*model.TenantApiConfig, err
 }
 
 func (r *ApiConfigRepo) Save(cfg *model.TenantApiConfig) error {
-	return r.db.Save(cfg).Error
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		var existing model.TenantApiConfig
+		err := tx.Where("tenant_id = ?", cfg.TenantID).First(&existing).Error
+		if err == nil {
+			existing.BaseUrl = cfg.BaseUrl
+			existing.ApiKey = cfg.ApiKey
+			return tx.Save(&existing).Error
+		}
+		if err != nil && err != gorm.ErrRecordNotFound {
+			return err
+		}
+		return tx.Create(cfg).Error
+	})
 }

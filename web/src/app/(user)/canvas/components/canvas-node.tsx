@@ -106,9 +106,9 @@ export const CanvasNode = React.memo(function CanvasNode({
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const [hovered, setHovered] = useState(false);
     const [isEditingContent, setIsEditingContent] = useState(false);
-    const hasImageContent = data.type === CanvasNodeType.Image && Boolean(data.metadata?.content);
-    const hasVideoContent = data.type === CanvasNodeType.Video && Boolean(data.metadata?.content);
-    const hasAudioContent = data.type === CanvasNodeType.Audio && Boolean(data.metadata?.content);
+    const hasImageContent = data.type === CanvasNodeType.Image && Boolean(normalizeMediaSrc(data.metadata?.content));
+    const hasVideoContent = data.type === CanvasNodeType.Video && Boolean(normalizeMediaSrc(data.metadata?.content));
+    const hasAudioContent = data.type === CanvasNodeType.Audio && Boolean(normalizeMediaSrc(data.metadata?.content));
     const isBatchRoot = data.type === CanvasNodeType.Image && Boolean(data.metadata?.isBatchRoot) && batchCount > 1;
     const isBatchChild = data.type === CanvasNodeType.Image && Boolean(data.metadata?.batchRootId);
     const isActive = isConnectionTarget || isSelected || isFocusRelated;
@@ -452,17 +452,20 @@ function ResourceLabelBadge({ reference }: { reference: CanvasResourceReference 
 
 function ImageNodeContent(props: NodeContentRendererProps) {
     if (!props.node.metadata?.content && props.isBatchRoot) {
-        const content =
-            props.node.metadata?.status === "loading" ? (
-                <LoadingContent theme={props.theme} />
-            ) : props.node.metadata?.status === "error" ? (
-                <ErrorContent node={props.node} theme={props.theme} onRetry={props.onRetry} />
-            ) : (
-                <EmptyImageContent {...props} isBatchRoot={false} />
-            );
         return (
             <BatchFrame batchCount={props.batchCount} batchExpanded={props.batchExpanded} batchOpening={props.batchOpening} batchRecovering={props.batchRecovering} onToggleBatch={props.onToggleBatch}>
-                {content}
+                {props.node.metadata?.status === "loading" ? (
+                    <LoadingContent theme={props.theme} />
+                ) : props.node.metadata?.status === "error" ? (
+                    <ErrorContent node={props.node} theme={props.theme} onRetry={props.onRetry} />
+                ) : (
+                    <div className="flex h-full w-full flex-col items-center justify-center gap-3" style={{ color: props.theme.node.placeholder }}>
+                        <div className="flex size-14 items-center justify-center rounded-2xl" style={{ background: props.theme.toolbar.activeBg }}>
+                            <ImageIcon className="size-6 opacity-30" />
+                        </div>
+                        <span className="text-[10px] tracking-[0.18em] opacity-50">空图片节点</span>
+                    </div>
+                )}
             </BatchFrame>
         );
     }
@@ -501,18 +504,20 @@ function EmptyImageContent({ theme, isBatchRoot, batchCount, batchExpanded, batc
 }
 
 function VideoNodeContent({ node, theme }: NodeContentRendererProps) {
-    if (!node.metadata?.content)
+    const content = normalizeMediaSrc(node.metadata?.content);
+    if (!content)
         return (
             <div className="flex h-full w-full flex-col items-center justify-center gap-3" style={{ color: theme.node.placeholder }}>
                 <Video className="size-7 opacity-35" />
                 <span className="text-sm">空视频节点</span>
             </div>
         );
-    return <video src={node.metadata.content} controls className="h-full w-full rounded-[18px] bg-black object-contain" data-canvas-no-zoom />;
+    return <video src={content} controls className="h-full w-full rounded-[18px] bg-black object-contain" data-canvas-no-zoom />;
 }
 
 function AudioNodeContent({ node, theme }: NodeContentRendererProps) {
-    if (!node.metadata?.content)
+    const content = normalizeMediaSrc(node.metadata?.content);
+    if (!content)
         return (
             <div className="flex h-full w-full flex-col items-center justify-center gap-2" style={{ color: theme.node.placeholder }}>
                 <Music2 className="size-7 opacity-35" />
@@ -525,7 +530,7 @@ function AudioNodeContent({ node, theme }: NodeContentRendererProps) {
                 <Music2 className="size-4 shrink-0" />
                 <span className="truncate">{node.title || "音频"}</span>
             </div>
-            <audio src={node.metadata.content} controls className="w-full" data-canvas-no-zoom />
+            <audio src={content} controls className="w-full" data-canvas-no-zoom />
         </div>
     );
 }
@@ -551,12 +556,34 @@ function ImageContent({
 }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const isBatchChild = Boolean(node.metadata?.batchRootId);
+    const content = normalizeMediaSrc(node.metadata?.content);
+
+    if (!content) {
+        return (
+            <BatchFrame batchCount={isBatchRoot ? batchCount : 0} batchExpanded={batchExpanded} batchOpening={batchOpening} batchRecovering={batchRecovering} onToggleBatch={onToggleBatch}>
+                <EmptyImageContent
+                    node={node}
+                    theme={theme}
+                    isEditingContent={false}
+                    textareaRef={{ current: null }}
+                    isBatchRoot={false}
+                    batchCount={0}
+                    batchExpanded={false}
+                    batchOpening={false}
+                    batchRecovering={false}
+                    mentionReferences={[]}
+                    onContentChange={() => {}}
+                    onStopEditing={() => {}}
+                />
+            </BatchFrame>
+        );
+    }
 
     return (
         <BatchFrame batchCount={isBatchRoot ? batchCount : 0} batchExpanded={batchExpanded} batchOpening={batchOpening} batchRecovering={batchRecovering} onToggleBatch={onToggleBatch}>
             <div className="h-full w-full overflow-hidden rounded-3xl">
                 <img
-                    src={node.metadata!.content!}
+                    src={content}
                     alt={node.title}
                     draggable={false}
                     onDragStart={(event) => event.preventDefault()}
@@ -651,6 +678,13 @@ function BatchFrame({ batchCount, batchExpanded, batchOpening, batchRecovering, 
             {children}
         </div>
     );
+}
+
+function normalizeMediaSrc(value?: string | null) {
+    if (!value) return "";
+    const trimmed = value.trim();
+    if (!trimmed || trimmed === "undefined" || trimmed === "null") return "";
+    return trimmed;
 }
 function ResizeHandle({ corner, onMouseDown }: { corner: ResizeCorner; onMouseDown: (event: React.MouseEvent, corner: ResizeCorner) => void }) {
     const positionClass = {

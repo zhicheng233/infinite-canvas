@@ -39,7 +39,7 @@ export function UserStatusActions({ showConfig = true, variant = "default", onOp
     return (
         <div className="inline-flex shrink-0 items-center gap-1">
             <UserCreditDisplay />
-            {showConfig ? (
+            {showConfig && isAdmin ? (
                 <button type="button" className={naturalIconClass} style={iconStyle} onClick={() => openConfigDialog(false)} aria-label="配置" title="配置">
                     <Settings2 className="size-4" />
                 </button>
@@ -53,7 +53,7 @@ export function UserStatusActions({ showConfig = true, variant = "default", onOp
             {getStoredToken() ? (
                 <>
                     {user ? (
-                        <span className="ml-1 text-xs text-stone-500 dark:text-stone-400">{user.displayName}</span>
+                        <button type="button" className="ml-1 cursor-pointer text-xs text-stone-500 transition hover:text-stone-900 dark:text-stone-400 dark:hover:text-white" onClick={() => router.push("/settings")} aria-label="个人中心" title="个人中心">{user.displayName}</button>
                     ) : null}
                     {isAdmin ? (
                         <button

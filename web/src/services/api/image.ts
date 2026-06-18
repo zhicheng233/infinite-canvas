@@ -211,7 +211,7 @@ function withSystemPrompt(config: AiConfig, prompt: string) {
 }
 
 function aiApiUrl(config: AiConfig, path: string) {
-    if (isLoggedIn()) return ;
+    if (isLoggedIn()) return (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080/api") + "/proxy?path=" + encodeURIComponent(path);
     return buildApiUrl(config.baseUrl, path);
 }
 

@@ -94,7 +94,7 @@ func (s *GenerateService) proxy(tenantID, userID uint, genType, path, contentTyp
 		}
 	}
 
-	url := strings.TrimRight(cfg.BaseUrl, "/") + path
+	url := buildUpstreamURL(cfg.BaseUrl, path)
 	req, err := http.NewRequest("POST", url, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
@@ -198,7 +198,7 @@ func (s *GenerateService) ProxyRaw(tenantID, userID uint, method, path, contentT
 		return nil, errors.New("租户未配置 API，请联系管理员")
 	}
 
-	url := strings.TrimRight(cfg.BaseUrl, "/") + path
+	url := buildUpstreamURL(cfg.BaseUrl, path)
 
 	apiKey, err := s.getDecryptedApiKey(tenantID)
 	if err != nil {
@@ -234,4 +234,16 @@ func (s *GenerateService) ProxyRaw(tenantID, userID uint, method, path, contentT
 		Body:       respBytes,
 		Headers:    resp.Header,
 	}, nil
+}
+
+func buildUpstreamURL(baseURL, path string) string {
+	normalizedBase := strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	normalizedPath := "/" + strings.TrimLeft(strings.TrimSpace(path), "/")
+	if normalizedBase == "" {
+		return normalizedPath
+	}
+	if strings.HasSuffix(normalizedBase, "/v1") || strings.Contains(normalizedPath, "/v1/") || normalizedPath == "/v1" {
+		return normalizedBase + normalizedPath
+	}
+	return normalizedBase + "/v1" + normalizedPath
 }

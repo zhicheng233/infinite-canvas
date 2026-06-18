@@ -70,8 +70,9 @@ func (h *CanvasHandler) Save(c *gin.Context) {
 func (h *CanvasHandler) Load(c *gin.Context) {
 	projectID := c.Param("id")
 	tenantID := c.GetUint("tenant_id")
+	userID := c.GetUint("user_id")
 
-	project, err := h.repo.FindByProjectID(tenantID, projectID)
+	project, err := h.repo.FindByProjectID(tenantID, userID, projectID)
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
 			c.JSON(http.StatusOK, gin.H{"code": 0, "data": nil, "msg": "not found"})
@@ -86,8 +87,9 @@ func (h *CanvasHandler) Load(c *gin.Context) {
 
 func (h *CanvasHandler) List(c *gin.Context) {
 	tenantID := c.GetUint("tenant_id")
+	userID := c.GetUint("user_id")
 
-	projects, err := h.repo.ListByTenant(tenantID)
+	projects, err := h.repo.ListByTenant(tenantID, userID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": err.Error()})
 		return
@@ -103,8 +105,9 @@ func (h *CanvasHandler) List(c *gin.Context) {
 func (h *CanvasHandler) Delete(c *gin.Context) {
 	projectID := c.Param("id")
 	tenantID := c.GetUint("tenant_id")
+	userID := c.GetUint("user_id")
 
-	if err := h.repo.Delete(tenantID, projectID); err != nil {
+	if err := h.repo.Delete(tenantID, userID, projectID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": err.Error()})
 		return
 	}
@@ -124,7 +127,8 @@ func (h *CanvasHandler) DeleteBatch(c *gin.Context) {
 	}
 
 	tenantID := c.GetUint("tenant_id")
-	if err := h.repo.DeleteBatch(tenantID, req.IDs); err != nil {
+	userID := c.GetUint("user_id")
+	if err := h.repo.DeleteBatch(tenantID, userID, req.IDs); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": err.Error()})
 		return
 	}

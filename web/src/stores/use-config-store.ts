@@ -58,13 +58,13 @@ const CHANNEL_MODEL_SEPARATOR = "::";
 
 export const defaultConfig: AiConfig = {
     channelMode: "local",
-    baseUrl: "https://api.openai.com",
+    baseUrl: "",
     apiKey: "",
     channels: [
         {
             id: "default",
             name: "默认渠道",
-            baseUrl: "https://api.openai.com",
+            baseUrl: "",
             apiKey: "",
             models: ["gpt-image-2", "grok-imagine-video", "gpt-5.5", "gpt-4o-mini-tts"],
         },
@@ -157,6 +157,8 @@ function modelListKey(capability: ModelCapability) {
 }
 
 function isAiConfigReady(config: AiConfig, model: string) {
+    // Logged-in users go through server proxy (admin configures API)
+    if (typeof window !== "undefined" && window.localStorage.getItem("infinite-canvas:auth_token")) return true;
     const channel = resolveModelChannel(config, model);
     return Boolean(model.trim() && channel.baseUrl.trim() && channel.apiKey.trim());
 }

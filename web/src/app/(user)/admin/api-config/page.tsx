@@ -62,7 +62,7 @@ export default function AdminApiConfigPage() {
             name="base_url"
             label="上游 API 地址"
             rules={[{ required: true, message: "请输入 API 基础地址" }]}
-            extra="例如: https://api.openai.com"
+            extra="请输入 OpenAI 兼容 API 根地址，例如: https://api.openai.com 或 http://8.219.243.189:3000；系统会自动拼接 /v1"
           >
             <Input placeholder="https://api.openai.com" />
           </Form.Item>
