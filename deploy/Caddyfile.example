@@ -4,13 +4,13 @@ hmgai.cc {
         max_size 100MB
     }
 
-    @nextApi path /api/prompts /api/prompts/*
-    handle @nextApi {
+    @frontendApi path /api/*
+    handle @frontendApi {
         reverse_proxy 127.0.0.1:3001
     }
 
-    @api path /api/*
-    handle @api {
+    @backendApi path /backend-api/*
+    handle @backendApi {
         reverse_proxy 127.0.0.1:18080
     }
 

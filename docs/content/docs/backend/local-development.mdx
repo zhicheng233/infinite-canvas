@@ -16,6 +16,8 @@ docker compose up -d --build
 
 如果你修改了 `.env` 里的 `NEXT_PUBLIC_API_URL`，记得重新执行一次 `docker compose up -d --build app`，否则浏览器仍可能拿到旧的前端接口地址。
 
+如果你在线上用同域名反向代理，例如 `https://your-domain/backend-api`，本地开发阶段仍建议继续使用 `http://localhost:18080/api` 或显式设置 `NEXT_PUBLIC_API_URL=http://localhost:18080/api`，避免和线上域名混用。
+
 默认访问：
 
 ```text

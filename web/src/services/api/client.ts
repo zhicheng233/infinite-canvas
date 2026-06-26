@@ -4,7 +4,7 @@ export function resolveApiBaseUrl(): string {
   const configured = process.env.NEXT_PUBLIC_API_URL?.trim();
   if (configured) return configured.replace(/\/+$/, "");
   if (typeof window !== "undefined") {
-    return `${window.location.protocol}//${window.location.hostname}:18080/api`;
+    return `${window.location.origin}/backend-api`;
   }
   return "http://localhost:18080/api";
 }

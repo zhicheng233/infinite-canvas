@@ -44,7 +44,7 @@ docker compose up -d --build
 - 生产环境请务必自行设置 `.env` 中的数据库密码、JWT 密钥和 API Key 加密密钥。
 - 不建议将 MySQL 暴露到公网。
 - 当数据库为空且 `.env` 已配置 `INIT_ADMIN_*` 时，后端首次启动会自动创建初始 `super_admin`。
-- 推荐正式环境使用同域名反向代理，例如前端 `https://hmgai.cc/`，后端 `https://hmgai.cc/api`。
+- 推荐正式环境使用同域名反向代理，例如前端 `https://your-domain/`，后端 `https://your-domain/backend-api`。
 - 如果你使用 Caddy，可直接参考 `deploy/Caddyfile.example`。
 - 前端会在构建阶段读取 `NEXT_PUBLIC_API_URL`，如果你修改了这个值，需要重新构建 `app` 容器。
 

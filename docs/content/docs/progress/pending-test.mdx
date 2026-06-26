@@ -19,3 +19,4 @@ description: 已实现但需要用户测试确认的变更
 - [ ] 用户可在 `/credits` 查看积分明细，在 `/recharge` 查看充值记录。
 - [ ] 新服务器按 Docker 文档迁移后，账号、积分、画布、生成记录与后台模型配置可正常恢复。
 - [ ] 新服务器使用 `docker compose up -d --build` 部署后，登录接口应命中 `.env` 中配置的 `NEXT_PUBLIC_API_URL`，不再落到 `http://localhost:8080/api`。
+- [ ] 正式域名按同域名区分前缀部署后，前端内置接口走 `https://域名/api/*`，Go 后端接口走 `https://域名/backend-api/*`，登录、画布和生成接口可正常访问。

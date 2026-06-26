@@ -11,7 +11,7 @@ import (
 func Setup(r *gin.Engine, authService *service.AuthService, authHandler *handler.AuthHandler, adminHandler *handler.AdminHandler, userHandler *handler.UserHandler, creditHandler *handler.CreditHandler, generateHandler *handler.GenerateHandler, apiConfigHandler *handler.ApiConfigHandler, proxyHandler *handler.ProxyHandler, canvasHandler *handler.CanvasHandler, generationRecordHandler *handler.GenerationRecordHandler, rechargeHandler *handler.RechargeHandler, captchaHandler *handler.CaptchaHandler) {
 	r.Use(middleware.Cors())
 
-	api := r.Group("/api")
+	api := r.Group("/backend-api")
 
 	api.GET("/auth/captcha", captchaHandler.Generate)
 	api.POST("/auth/register", authHandler.Register)

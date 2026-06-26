@@ -81,7 +81,7 @@ REGISTRATION_CREDITS=${registration_credits}
 INIT_ADMIN_USERNAME=${init_admin_username}
 INIT_ADMIN_PASSWORD=${init_admin_password}
 INIT_ADMIN_DISPLAY_NAME=${init_admin_display_name}
-NEXT_PUBLIC_API_URL=http://${public_host}:18080/api
+NEXT_PUBLIC_API_URL=/backend-api
 NEXT_PUBLIC_DOC_URL=${doc_url}
 EOF
 
