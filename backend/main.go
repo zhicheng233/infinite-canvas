@@ -48,6 +48,9 @@ func main() {
 	captchaService := service.NewCaptchaService()
 
 	authService := service.NewAuthService(cfg, userRepo, tenantRepo, creditRepo, captchaService)
+	if err := authService.EnsureInitialAdmin(); err != nil {
+		log.Fatalf("failed to bootstrap initial admin: %v", err)
+	}
 	userService := service.NewUserService(userRepo)
 	creditService := service.NewCreditService(creditRepo)
 	generateService := service.NewGenerateService(apiConfigRepo, creditService, creditRepo, cfg.ApiKeyEncryptKey)

@@ -25,7 +25,9 @@ docker compose up -d
 ## 2. 初始化管理员
 
 系统默认注册的新用户角色是 `user`。  
-如果需要后台管理权限，先注册一个普通账号，再在数据库里把该账号改成 `super_admin`：
+如果是全新数据库，建议直接在 `.env` 里配置 `INIT_ADMIN_USERNAME`、`INIT_ADMIN_PASSWORD` 和 `INIT_ADMIN_DISPLAY_NAME`，让后端首次启动时自动创建 `super_admin`。
+
+如果你已经跳过了这一步，仍然可以手动提权：
 
 ```bash
 docker exec -it ic-mysql mysql -uroot -p

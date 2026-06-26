@@ -20,8 +20,8 @@
 ```bash
 git clone <your-repo>
 cd infinite-canvas
-cp .env.example .env
-# 按实际环境填写 .env
+chmod +x scripts/init-env.sh
+./scripts/init-env.sh
 
 docker compose build
 docker compose up -d
@@ -44,4 +44,4 @@ docker compose up -d
 - 当前仓库已偏向单租户商用部署，不再以浏览器本地直连 AI 为主。
 - 生产环境请务必自行设置 `.env` 中的数据库密码、JWT 密钥和 API Key 加密密钥。
 - 不建议将 MySQL 暴露到公网。
-- 首个管理员账号默认通过数据库把对应用户的 `role` 改为 `super_admin`。
+- 当数据库为空且 `.env` 已配置 `INIT_ADMIN_*` 时，后端首次启动会自动创建初始 `super_admin`。

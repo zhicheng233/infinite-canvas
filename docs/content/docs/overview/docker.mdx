@@ -19,10 +19,11 @@ description: 使用 Docker Compose 部署当前商用版无限画布
 ```bash
 git clone <your-repo>
 cd infinite-canvas
-cp .env.example .env
+chmod +x scripts/init-env.sh
+./scripts/init-env.sh
 ```
 
-按需补齐 `.env`：
+也可以手动按需补齐 `.env`：
 
 ```env
 MYSQL_ROOT_PASSWORD=replace-this-password
@@ -43,23 +44,19 @@ docker compose up -d
 
 ## 首次初始化
 
-### 1. 注册一个管理员候选账号
+### 1. 自动创建初始管理员
 
-先正常打开前端注册一个普通账号。
+当数据库里还没有任何用户，且 `.env` 已配置以下变量时，后端首次启动会自动创建一个 `super_admin`：
 
-### 2. 提升为管理员
-
-项目当前不会自动创建管理员，需要手动把这个账号提升为 `super_admin`：
-
-```bash
-docker exec -it ic-mysql mysql -uroot -p"${MYSQL_ROOT_PASSWORD}" -D infinite_canvas
+```env
+INIT_ADMIN_USERNAME=admin
+INIT_ADMIN_PASSWORD=replace-this-admin-password
+INIT_ADMIN_DISPLAY_NAME=系统管理员
 ```
 
-```sql
-UPDATE users SET role = 'super_admin' WHERE username = '你的用户名';
-```
+这个初始化只会在“空数据库首次启动”时执行一次；后续重启不会重复改动已有用户。
 
-### 3. 登录后台完成系统配置
+### 2. 登录后台完成系统配置
 
 登录后进入 `/admin/api-config`，至少完成以下配置：
 
@@ -69,6 +66,11 @@ UPDATE users SET role = 'super_admin' WHERE username = '你的用户名';
 - 模型状态
 - 积分计费
 - 视频模型路由
+
+### 3. 如果你跳过了自动创建
+
+如果首次启动时没有配置 `INIT_ADMIN_*`，系统仍可启动，但不会自动生成管理员。  
+这种情况下，仍然可以先注册普通账号，再手动把该用户提升为 `super_admin`。
 
 ## 访问地址
 

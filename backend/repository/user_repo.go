@@ -61,3 +61,9 @@ func (r *UserRepo) ListAll(page, pageSize int) ([]model.User, int64, error) {
 func (r *UserRepo) Update(user *model.User) error {
 	return r.db.Save(user).Error
 }
+
+func (r *UserRepo) CountAll() (int64, error) {
+	var total int64
+	err := r.db.Model(&model.User{}).Count(&total).Error
+	return total, err
+}
