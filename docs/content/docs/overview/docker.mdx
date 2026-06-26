@@ -31,7 +31,7 @@ MYSQL_DATABASE=infinite_canvas
 JWT_KEY=replace-this-jwt-secret
 API_KEY_ENCRYPTION_KEY=replace-this-aes-secret
 REGISTRATION_CREDITS=0
-NEXT_PUBLIC_API_URL=http://your-domain-or-ip:18080/api
+NEXT_PUBLIC_API_URL=https://your-domain/api
 NEXT_PUBLIC_DOC_URL=https://docs.canvas.best
 ```
 
@@ -102,6 +102,11 @@ INIT_ADMIN_DISPLAY_NAME=系统管理员
 - 前端：`http://服务器IP:3001`
 - 后端 API：`http://服务器IP:18080/api`
 
+如果你已经有正式域名，推荐改为：
+
+- 前端：`https://your-domain/`
+- 后端 API：`https://your-domain/api`
+
 ## 更新发布
 
 推荐更新命令：
@@ -127,6 +132,94 @@ docker compose up -d --build app
 
 ```bash
 docker compose up -d --build app
+```
+
+## 域名反向代理推荐
+
+推荐正式环境把前后端统一收口到同一个 HTTPS 域名：
+
+- 前端：`https://hmgai.cc/`
+- 后端：`https://hmgai.cc/api`
+
+对应做法：
+
+1. `.env` 中设置：
+
+```env
+NEXT_PUBLIC_API_URL=https://hmgai.cc/api
+```
+
+2. 重建前端：
+
+```bash
+docker compose up -d --build app
+```
+
+3. 反向代理：
+
+- `/` 转发到 `127.0.0.1:3001`
+- `/api/` 转发到 `127.0.0.1:18080`
+
+仓库已提供示例：
+
+- Nginx：`deploy/nginx/hmgai.cc.conf`
+- Caddy：`deploy/Caddyfile.example`
+
+4. 当前 `docker-compose.yml` 已把后端端口收口到 `127.0.0.1:18080:18080`，默认只允许本机反向代理访问。
+5. 如果你明确走同域名 `/api` 反向代理，也可以把 `.env` 中的 `NEXT_PUBLIC_API_URL` 直接写成 `/api`。
+
+### Caddy 部署示例
+
+如果你服务器已经在使用 Caddy，推荐直接这样配置：
+
+1. 修改项目 `.env`：
+
+```env
+NEXT_PUBLIC_API_URL=/api
+```
+
+2. 重建前后端：
+
+```bash
+docker compose up -d --build app backend
+```
+
+3. 把 `deploy/Caddyfile.example` 内容写入你的 Caddy 配置，例如：
+
+```caddy
+hmgai.cc {
+    encode gzip zstd
+    request_body {
+        max_size 100MB
+    }
+
+    @api path /api/*
+    handle @api {
+        reverse_proxy 127.0.0.1:18080
+    }
+
+    handle {
+        reverse_proxy 127.0.0.1:3001
+    }
+}
+```
+
+4. 重载 Caddy：
+
+```bash
+caddy fmt --overwrite /etc/caddy/Caddyfile
+caddy reload --config /etc/caddy/Caddyfile
+```
+
+5. 验证：
+
+- 打开 `https://hmgai.cc/`
+- 在浏览器开发者工具中确认登录请求走的是 `https://hmgai.cc/api/auth/login`
+
+如果你的 Caddy 不是 systemd 管理，也可以用：
+
+```bash
+caddy validate --config /etc/caddy/Caddyfile
 ```
 
 ## 迁移到另一台服务器
@@ -186,6 +279,6 @@ docker compose up -d --build backend app
 
 - 不要把 MySQL 暴露到公网。
 - `JWT_KEY` 与 `API_KEY_ENCRYPTION_KEY` 请使用高强度随机字符串。
-- 建议给 `3001` 与 `18080` 前面加 Nginx / Caddy，统一做 HTTPS 与反向代理。
+- 建议给 `3001` 与 `18080` 前面加 Nginx / Caddy，统一做 HTTPS 与反向代理；正式环境优先使用同域名 `/api` 方案。
 - 备份至少包含 `mysql_data` 卷和你自己的 `.env`。
 - `NEXT_PUBLIC_API_URL` 属于前端构建参数，修改后必须重建 `app` 容器才能生效。

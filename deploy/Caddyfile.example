@@ -1,0 +1,15 @@
+hmgai.cc {
+    encode gzip zstd
+    request_body {
+        max_size 100MB
+    }
+
+    @api path /api/*
+    handle @api {
+        reverse_proxy 127.0.0.1:18080
+    }
+
+    handle {
+        reverse_proxy 127.0.0.1:3001
+    }
+}
