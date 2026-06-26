@@ -30,6 +30,7 @@ func (r *ApiConfigRepo) Save(cfg *model.TenantApiConfig) error {
 			existing.VideoModels = cfg.VideoModels
 			existing.TextModels = cfg.TextModels
 			existing.AudioModels = cfg.AudioModels
+			existing.ModelRoutes = cfg.ModelRoutes
 			return tx.Save(&existing).Error
 		}
 		if err != nil && err != gorm.ErrRecordNotFound {

@@ -37,6 +37,7 @@ export type AiConfig = {
     videoModels: string[];
     textModels: string[];
     audioModels: string[];
+    modelRoutes: Record<string, string>;
     quality: string;
     size: string;
     count: string;
@@ -88,6 +89,7 @@ export const defaultConfig: AiConfig = {
     videoModels: ["default::grok-imagine-video"],
     textModels: ["default::gpt-5.5"],
     audioModels: ["default::gpt-4o-mini-tts"],
+    modelRoutes: {},
     quality: "auto",
     size: "1:1",
     count: "1",
@@ -117,6 +119,7 @@ type ConfigStore = {
         videoModels?: string[];
         textModels?: string[];
         audioModels?: string[];
+        modelRoutes?: Record<string, string>;
     }) => void;
     openConfigDialog: (shouldPromptContinue?: boolean) => void;
     setConfigDialogOpen: (isOpen: boolean) => void;
@@ -199,6 +202,7 @@ export const useConfigStore = create<ConfigStore>()(
                     const derivedVideoModels = catalog.videoModels?.length ? normalizeServerModelCatalog(catalog.videoModels) : filterModelsByCapability(allModels, "video");
                     const derivedTextModels = catalog.textModels?.length ? normalizeServerModelCatalog(catalog.textModels) : filterModelsByCapability(allModels, "text");
                     const derivedAudioModels = catalog.audioModels?.length ? normalizeServerModelCatalog(catalog.audioModels) : filterModelsByCapability(allModels, "audio");
+                    const modelRoutes = normalizeModelRoutes(catalog.modelRoutes, allModels);
                     const nextChannels = state.config.channels.length
                         ? state.config.channels.map((channel, index) => (index === 0 ? { ...channel, models: allModels } : channel))
                         : [createModelChannel({ id: "default", name: "默认渠道", baseUrl: state.config.baseUrl, apiKey: state.config.apiKey, models: allModels })];
@@ -211,6 +215,7 @@ export const useConfigStore = create<ConfigStore>()(
                             videoModels: derivedVideoModels,
                             textModels: derivedTextModels,
                             audioModels: derivedAudioModels,
+                            modelRoutes,
                             model: pickServerDefaultModel(state.config.model, allModels, derivedImageModels),
                             imageModel: pickServerDefaultModel(state.config.imageModel, derivedImageModels, allModels),
                             videoModel: pickServerDefaultModel(state.config.videoModel, derivedVideoModels, allModels),
@@ -259,6 +264,7 @@ export const useConfigStore = create<ConfigStore>()(
                         videoModels: Array.isArray(persistedConfig.videoModels) ? normalizeModelList(config.videoModels, channels) : filterModelsByCapability(models, "video"),
                         textModels: Array.isArray(persistedConfig.textModels) ? normalizeModelList(config.textModels, channels) : filterModelsByCapability(models, "text"),
                         audioModels: Array.isArray(persistedConfig.audioModels) ? normalizeModelList(config.audioModels, channels) : filterModelsByCapability(models, "audio"),
+                        modelRoutes: normalizeModelRoutes(config.modelRoutes, models),
                     },
                 };
             },
@@ -304,6 +310,16 @@ export function decodeChannelModel(value: string) {
 
 export function modelOptionName(value: string) {
     return decodeChannelModel(value)?.model || value;
+}
+
+export function fixedVideoDurationForModel(value: string) {
+    const model = modelOptionName(value).trim().toLowerCase();
+    if (model === "veo-omni-flash") return 10;
+    return null;
+}
+
+export function videoRouteForModel(config: Pick<AiConfig, "modelRoutes">, value: string) {
+    return config.modelRoutes?.[modelOptionName(value)] || "auto";
 }
 
 export function modelOptionLabel(config: AiConfig, value: string) {
@@ -387,6 +403,19 @@ function uniqueModelOptions(models: string[]) {
 
 function normalizeServerModelCatalog(models?: string[]) {
     return uniqueModelOptions((models || []).map((model) => modelOptionName(model)));
+}
+
+function normalizeModelRoutes(routes: Record<string, string> | undefined, models: string[]) {
+    const knownModels = new Set((models || []).map(modelOptionName));
+    const normalized: Record<string, string> = {};
+    for (const [model, route] of Object.entries(routes || {})) {
+        const modelName = modelOptionName(model).trim();
+        const routeName = String(route || "").trim();
+        if (!modelName || !routeName || routeName === "auto") continue;
+        if (knownModels.size && !knownModels.has(modelName)) continue;
+        normalized[modelName] = routeName;
+    }
+    return normalized;
 }
 
 function pickServerDefaultModel(currentValue: string, primaryOptions: string[], fallbackOptions: string[]) {

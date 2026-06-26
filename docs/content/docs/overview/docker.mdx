@@ -41,6 +41,35 @@ docker compose build
 docker compose up -d
 ```
 
+## 首次初始化
+
+### 1. 注册一个管理员候选账号
+
+先正常打开前端注册一个普通账号。
+
+### 2. 提升为管理员
+
+项目当前不会自动创建管理员，需要手动把这个账号提升为 `super_admin`：
+
+```bash
+docker exec -it ic-mysql mysql -uroot -p"${MYSQL_ROOT_PASSWORD}" -D infinite_canvas
+```
+
+```sql
+UPDATE users SET role = 'super_admin' WHERE username = '你的用户名';
+```
+
+### 3. 登录后台完成系统配置
+
+登录后进入 `/admin/api-config`，至少完成以下配置：
+
+- 上游 `API Base URL`
+- 上游 `API Key`
+- 模型目录
+- 模型状态
+- 积分计费
+- 视频模型路由
+
 ## 访问地址
 
 - 前端：`http://服务器IP:3001`
@@ -62,12 +91,59 @@ docker compose build backend
 docker compose up -d --force-recreate backend
 ```
 
+## 迁移到另一台服务器
+
+如果你要把当前线上环境迁移到另一台新服务器，建议按下面顺序：
+
+### 1. 复制代码与 `.env`
+
+把当前项目代码和线上 `.env` 一并带过去。
+
+### 2. 启动空环境
+
+```bash
+docker compose build
+docker compose up -d
+```
+
+### 3. 导出旧库数据
+
+在旧服务器执行：
+
+```bash
+docker exec ic-mysql mysqldump -uroot -p"${MYSQL_ROOT_PASSWORD}" infinite_canvas > infinite_canvas.sql
+```
+
+### 4. 导入新库数据
+
+把 `infinite_canvas.sql` 传到新服务器后执行：
+
+```bash
+cat infinite_canvas.sql | docker exec -i ic-mysql mysql -uroot -p"${MYSQL_ROOT_PASSWORD}" infinite_canvas
+```
+
+### 5. 重启后端与前端
+
+```bash
+docker compose up -d --force-recreate backend app
+```
+
+### 6. 登录后台复核
+
+重点检查：
+
+- `/admin/api-config` 上游地址和 API Key 是否正确
+- 视频模型是否已经配置到正确接口路由
+- 模型计费是否完整
+- 普通用户是否看不到管理后台
+
 ## 当前版本说明
 
 - 用户注册/登录、个人中心、积分体系、画布保存、图片/视频/音频生成记录已走后端存储。
 - 用户侧 AI 调用统一走后端代理；普通用户不再自行配置 API Key。
 - 管理员在 `/admin/api-config` 统一配置上游 API 和模型计费。
 - 只有已配置计费的模型才会出现在前台可选模型中。
+- 视频模型支持按模型显式指定接口路由，不同上游可分别走 `/v1/videos`、`/v1/videos/generations`、`/v1/video/generations` 或 Seedance 路由。
 
 ## 生产建议
 

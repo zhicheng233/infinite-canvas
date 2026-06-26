@@ -1,4 +1,5 @@
 import apiClient from "./client";
+import type { ApiConfigInfo } from "./api-config";
 
 export type PricingItem = {
   id?: number;
@@ -19,13 +20,7 @@ export async function listAdminPricing() {
   ]);
   return {
     pricing: pricingRes.data.data as PricingItem[],
-    apiConfig: configRes.data.data as {
-      models?: string[];
-      image_models?: string[];
-      video_models?: string[];
-      text_models?: string[];
-      audio_models?: string[];
-    },
+    apiConfig: configRes.data.data as ApiConfigInfo,
   };
 }
 

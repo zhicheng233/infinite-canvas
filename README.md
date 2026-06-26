@@ -35,6 +35,7 @@ docker compose up -d
 详细说明见：
 
 - `docs/content/docs/overview/docker.mdx`
+- `docs/content/docs/backend/local-development.mdx`
 - `docs/content/docs/backend/backend-database.mdx`
 - `docs/content/docs/progress/pending-test.mdx`
 
@@ -43,3 +44,4 @@ docker compose up -d
 - 当前仓库已偏向单租户商用部署，不再以浏览器本地直连 AI 为主。
 - 生产环境请务必自行设置 `.env` 中的数据库密码、JWT 密钥和 API Key 加密密钥。
 - 不建议将 MySQL 暴露到公网。
+- 首个管理员账号默认通过数据库把对应用户的 `role` 改为 `super_admin`。

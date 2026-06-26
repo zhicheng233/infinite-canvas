@@ -17,6 +17,7 @@
 
 - [本地开发](/docs/backend/local-development)
 - [画布数据结构](/docs/backend/canvas-data-structure)
+- [数据库结构](/docs/backend/backend-database)
 
 ## 商务合作
 
@@ -38,5 +39,6 @@
 
 ## 说明
 
-- 当前画布项目和“我的素材”主要保存在浏览器本地，跨设备可自行配置 WebDAV 同步。
-- AI API Key 保存在浏览器本地，并由前端直接请求 OpenAI 兼容接口。
+- 当前商用版以账号体系、后端代理、积分计费和管理后台为主。
+- 画布、生成记录、积分流水等核心业务数据已走后端存储并按账号隔离。
+- 用户侧不再自行保存和直连 AI API Key；上游 API 由管理员统一在后台配置。

@@ -2,8 +2,10 @@
 
 import { useEffect, useMemo, useState, type ComponentProps } from "react";
 import { Zap } from "lucide-react";
+import { Button } from "antd";
 
-import { estimateCost } from "@/services/api/credits";
+import { estimateCost, getBalance } from "@/services/api/credits";
+import { getStoredToken } from "@/services/api/client";
 import { modelOptionName } from "@/stores/use-config-store";
 
 export function CreditSymbol({ className, ...props }: ComponentProps<"span">) {
@@ -49,6 +51,24 @@ export function useCreditBalanceRefreshSignal() {
     return signal;
 }
 
+export function useUserCreditBalance() {
+    const refreshSignal = useCreditBalanceRefreshSignal();
+    const token = getStoredToken();
+    const [balance, setBalance] = useState<number | null>(null);
+
+    useEffect(() => {
+        if (!token) {
+            setBalance(null);
+            return;
+        }
+        getBalance()
+            .then((data) => setBalance(data.balance))
+            .catch(() => setBalance(null));
+    }, [refreshSignal, token]);
+
+    return balance;
+}
+
 export function useEstimatedCreditCost(model: string, count?: string | number) {
     const normalizedModel = useMemo(() => modelOptionName(model || ""), [model]);
     const normalizedCount = Math.max(1, Math.floor(Math.abs(Number(count)) || 1));
@@ -80,4 +100,21 @@ export function useEstimatedCreditCost(model: string, count?: string | number) {
     }, [normalizedCount, normalizedModel]);
 
     return credits;
+}
+
+export function isInsufficientCreditError(message: string) {
+    return message.includes("积分不足");
+}
+
+export function CreditHelpActions() {
+    return (
+        <div className="flex flex-wrap justify-center gap-2">
+            <Button size="small" href="/credits">
+                积分明细
+            </Button>
+            <Button size="small" type="primary" ghost href="/recharge">
+                去充值
+            </Button>
+        </div>
+    );
 }

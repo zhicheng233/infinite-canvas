@@ -1,21 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Zap } from "lucide-react";
-import { getBalance } from "@/services/api/credits";
 import { getStoredToken } from "@/services/api/client";
-import { useCreditBalanceRefreshSignal } from "@/constant/credits";
+import { useUserCreditBalance } from "@/constant/credits";
 
 export function UserCreditDisplay() {
-  const [balance, setBalance] = useState<number | null>(null);
   const token = getStoredToken();
-  const refreshSignal = useCreditBalanceRefreshSignal();
-
-  useEffect(() => {
-    if (!token) return;
-    getBalance().then((data) => setBalance(data.balance)).catch(() => {});
-  }, [refreshSignal, token]);
+  const balance = useUserCreditBalance();
 
   if (!token || balance === null) return null;
 

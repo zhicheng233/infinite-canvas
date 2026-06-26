@@ -10,6 +10,7 @@ type TenantApiConfig struct {
 	VideoModels string `gorm:"type:longtext" json:"video_models"`
 	TextModels  string `gorm:"type:longtext" json:"text_models"`
 	AudioModels string `gorm:"type:longtext" json:"audio_models"`
+	ModelRoutes string `gorm:"type:longtext" json:"model_routes"`
 }
 
 func (TenantApiConfig) TableName() string { return "tenant_api_configs" }

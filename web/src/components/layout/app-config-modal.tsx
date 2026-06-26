@@ -47,6 +47,7 @@ export function AppConfigModal() {
                     videoModels: apiConfig.video_models,
                     textModels: apiConfig.text_models,
                     audioModels: apiConfig.audio_models,
+                    modelRoutes: apiConfig.model_routes,
                 });
             } catch (err: any) {
                 if (mounted) message.error(err?.message || "加载模型列表失败");

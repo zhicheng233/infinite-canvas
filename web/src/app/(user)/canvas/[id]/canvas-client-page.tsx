@@ -41,7 +41,7 @@ import { CanvasNodePromptPanel, type CanvasNodeGenerationMode } from "../compone
 import { CanvasToolbar } from "../components/canvas-toolbar";
 import { AssetPickerModal, type InsertAssetPayload } from "../components/asset-picker-modal";
 import { CanvasZoomControls } from "../components/canvas-zoom-controls";
-import { useCanvasStore } from "../stores/use-canvas-store";
+import { useCanvasStore, type CanvasProjectSaveState } from "../stores/use-canvas-store";
 import { loadCanvas } from "@/services/api/canvas";
 import { applyCanvasAgentOps, type CanvasAgentOp, type CanvasAgentSnapshot } from "../utils/canvas-agent-ops";
 import { buildCanvasResourceReferences, buildNodeMentionReferences } from "../utils/canvas-resource-references";
@@ -262,6 +262,7 @@ function InfiniteCanvasPage() {
     const renameProject = useCanvasStore((state) => state.renameProject);
     const deleteProjects = useCanvasStore((state) => state.deleteProjects);
     const currentProject = useCanvasStore((state) => state.projects.find((project) => project.id === projectId));
+    const projectSaveState = useCanvasStore((state) => (projectId ? state.saveStates[projectId] : undefined));
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const [nodes, setNodes] = useState<CanvasNodeData[]>([]);
     const [connections, setConnections] = useState<CanvasConnection[]>([]);
@@ -2528,6 +2529,10 @@ function InfiniteCanvasPage() {
                     onRedo={redoCanvas}
                     agentOpen={assistantOpen}
                     onToggleAgent={() => (assistantOpen ? closeAgent() : openAgent())}
+                    saveState={projectSaveState}
+                    onRetrySave={() => {
+                        if (projectId) void flushProjectSave(projectId);
+                    }}
                 />
 
                 <InfiniteCanvas
@@ -2851,6 +2856,8 @@ function CanvasTopBar({
     onRedo,
     agentOpen,
     onToggleAgent,
+    saveState,
+    onRetrySave,
 }: {
     title: string;
     titleDraft: string;
@@ -2870,6 +2877,8 @@ function CanvasTopBar({
     onRedo: () => void;
     agentOpen: boolean;
     onToggleAgent: () => void;
+    saveState?: CanvasProjectSaveState;
+    onRetrySave: () => void;
 }) {
     const colorTheme = useThemeStore((state) => state.theme);
     const theme = canvasThemes[colorTheme];
@@ -2935,6 +2944,17 @@ function CanvasTopBar({
                                 {title}
                             </button>
                         )}
+                        {saveState?.status ? (
+                            saveState.status === "failed" ? (
+                                <button type="button" className="text-xs transition hover:opacity-100" style={{ color: theme.node.text, opacity: 0.75 }} onClick={onRetrySave} title={saveState.error || "点击重试保存"}>
+                                    保存失败，点击重试
+                                </button>
+                            ) : (
+                                <span className="text-xs" style={{ color: theme.node.text, opacity: 0.55 }}>
+                                    {saveState.status === "saving" ? "保存中" : saveState.status === "saved" ? "已保存" : ""}
+                                </span>
+                            )
+                        ) : null}
                     </div>
                 </div>
 

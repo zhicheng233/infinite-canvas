@@ -43,6 +43,7 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
                     videoModels: catalog.video_models,
                     textModels: catalog.text_models,
                     audioModels: catalog.audio_models,
+                    modelRoutes: catalog.model_routes,
                 });
             } catch {
             }

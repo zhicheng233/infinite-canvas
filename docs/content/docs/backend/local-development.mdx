@@ -1,13 +1,62 @@
 ---
 title: 本地开发
-description: 前端优先的本地开发方式
+description: 当前商用版的本地开发与调试方式
 ---
 
 # 本地开发
 
-当前主应用以 `web/` 前端为主，AI 请求由浏览器前台直连用户自己的 OpenAI 兼容接口。
+当前版本采用 `web/ + backend/ + MySQL + Redis` 的组合，本地调试优先使用完整后端链路。
 
-## 1. 启动前端
+## 1. 启动完整服务
+
+```bash
+cp .env.example .env
+docker compose build
+docker compose up -d
+```
+
+默认访问：
+
+```text
+前端：http://localhost:3001
+后端：http://localhost:18080/api
+```
+
+## 2. 初始化管理员
+
+系统默认注册的新用户角色是 `user`。  
+如果需要后台管理权限，先注册一个普通账号，再在数据库里把该账号改成 `super_admin`：
+
+```bash
+docker exec -it ic-mysql mysql -uroot -p
+```
+
+```sql
+USE infinite_canvas;
+UPDATE users SET role = 'super_admin' WHERE username = '你的管理员用户名';
+```
+
+## 3. 后台配置上游模型
+
+登录管理员账号后，进入 `/admin/api-config`：
+
+- 配置统一上游 `API Base URL`
+- 配置 `API Key`
+- 维护模型目录、状态、计费单位、每次积分消耗
+- 为视频模型单独指定接口路由
+
+当前视频模型支持的后台路由类型：
+
+- `openai` → `/v1/videos`
+- `xai` → `/v1/videos/generations`
+- `newapi` → `/v1/video/generations`
+- `seedance` → `/contents/generations/tasks`
+
+建议优先为视频模型显式配置路由，不要完全依赖“自动判断”。
+
+## 4. 单独调试前端
+
+如果只需要改前端页面：
 
 ```bash
 cd web
@@ -15,26 +64,17 @@ bun install
 bun run dev
 ```
 
-前端默认访问：
-
-```text
-http://localhost:3000
-```
-
-## 2. 配置模型
-
-打开右上角配置弹窗，填写自己的 `Base URL`、`API Key` 和模型名。第三方提示词由 Next.js route 拉取并缓存在运行实例内存中；WebDAV 可选择前端直连或 Next.js 转发。
-
-## 3. 启动文档站
-
-如果需要单独调整文档站，在 `docs` 目录执行：
+## 5. 单独调试文档站
 
 ```bash
+cd docs
+bun install
 bun run dev
 ```
 
 ## 常见场景
 
-- 改画布、页面和交互：主要看 `web/`
-- 改提示词缓存或 WebDAV 代理：主要看 `web/src/app/api/` 和 `web/src/app/webdav-proxy/`
+- 改登录、后台、画布、工作台页面：主要看 `web/`
+- 改鉴权、积分、模型代理、生成记录：主要看 `backend/`
+- 改后台统一模型配置：主要看 `web/src/app/(user)/admin/api-config/` 与 `backend/handler/api_config_handler.go`
 - 改文档站内容：主要看 `docs/content/docs/`

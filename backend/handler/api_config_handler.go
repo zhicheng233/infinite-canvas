@@ -23,13 +23,14 @@ func NewApiConfigHandler(apiConfigRepo *repository.ApiConfigRepo, creditRepo *re
 }
 
 type SaveApiConfigInput struct {
-	BaseUrl     string   `json:"base_url"`
-	ApiKey      string   `json:"api_key"`
-	Models      []string `json:"models"`
-	ImageModels []string `json:"image_models"`
-	VideoModels []string `json:"video_models"`
-	TextModels  []string `json:"text_models"`
-	AudioModels []string `json:"audio_models"`
+	BaseUrl     string            `json:"base_url"`
+	ApiKey      string            `json:"api_key"`
+	Models      []string          `json:"models"`
+	ImageModels []string          `json:"image_models"`
+	VideoModels []string          `json:"video_models"`
+	TextModels  []string          `json:"text_models"`
+	AudioModels []string          `json:"audio_models"`
+	ModelRoutes map[string]string `json:"model_routes"`
 }
 
 func (h *ApiConfigHandler) Get(c *gin.Context) {
@@ -44,6 +45,7 @@ func (h *ApiConfigHandler) Get(c *gin.Context) {
 	videoModels, _ := decodeStringList(cfg.VideoModels)
 	textModels, _ := decodeStringList(cfg.TextModels)
 	audioModels, _ := decodeStringList(cfg.AudioModels)
+	modelRoutes, _ := decodeStringMap(cfg.ModelRoutes)
 	model.OK(c, gin.H{
 		"base_url":     cfg.BaseUrl,
 		"has_key":      len(cfg.ApiKey) > 0,
@@ -52,6 +54,7 @@ func (h *ApiConfigHandler) Get(c *gin.Context) {
 		"video_models": videoModels,
 		"text_models":  textModels,
 		"audio_models": audioModels,
+		"model_routes": modelRoutes,
 	})
 }
 
@@ -68,6 +71,7 @@ func (h *ApiConfigHandler) Catalog(c *gin.Context) {
 	videoModels, _ := decodeStringList(cfg.VideoModels)
 	textModels, _ := decodeStringList(cfg.TextModels)
 	audioModels, _ := decodeStringList(cfg.AudioModels)
+	modelRoutes, _ := decodeStringMap(cfg.ModelRoutes)
 	pricingMap, err := h.creditRepo.FindPricingMap(claims.TenantID)
 	if err != nil {
 		model.Fail(c, 500, "读取定价配置失败")
@@ -83,6 +87,7 @@ func (h *ApiConfigHandler) Catalog(c *gin.Context) {
 		"audio_models":    filterModelsByPricing(audioModels, pricingMap),
 		"priced_models":   enabledModels,
 		"pricing_map":     pricingMap,
+		"model_routes":    modelRoutes,
 		"total_models":    len(models),
 		"enabled_count":   len(enabledModels),
 		"disabled_models": collectDisabledModels(models, pricingMap),
@@ -121,6 +126,11 @@ func (h *ApiConfigHandler) Save(c *gin.Context) {
 		model.Fail(c, 400, "音频模型列表格式错误")
 		return
 	}
+	modelRoutes, err := encodeStringMap(input.ModelRoutes)
+	if err != nil {
+		model.Fail(c, 400, "模型路由配置格式错误")
+		return
+	}
 
 	existingCfg, _ := h.apiConfigRepo.FindByTenant(claims.TenantID)
 	encryptedKey := ""
@@ -148,6 +158,7 @@ func (h *ApiConfigHandler) Save(c *gin.Context) {
 		VideoModels: videoModels,
 		TextModels:  textModels,
 		AudioModels: audioModels,
+		ModelRoutes: modelRoutes,
 	}
 	if err := h.apiConfigRepo.Save(cfg); err != nil {
 		model.Fail(c, 500, err.Error())
@@ -217,6 +228,40 @@ func decodeStringList(raw string) ([]string, error) {
 	var items []string
 	if err := json.Unmarshal([]byte(raw), &items); err != nil {
 		return []string{}, err
+	}
+	return items, nil
+}
+
+func encodeStringMap(items map[string]string) (string, error) {
+	if len(items) == 0 {
+		return "{}", nil
+	}
+	cleaned := make(map[string]string, len(items))
+	for key, value := range items {
+		model := strings.TrimSpace(key)
+		route := strings.TrimSpace(value)
+		if model == "" || route == "" || route == "auto" {
+			continue
+		}
+		cleaned[model] = route
+	}
+	returnValue, err := json.Marshal(cleaned)
+	if err != nil {
+		return "", err
+	}
+	return string(returnValue), nil
+}
+
+func decodeStringMap(raw string) (map[string]string, error) {
+	if raw == "" {
+		return map[string]string{}, nil
+	}
+	var items map[string]string
+	if err := json.Unmarshal([]byte(raw), &items); err != nil {
+		return map[string]string{}, err
+	}
+	if items == nil {
+		items = map[string]string{}
 	}
 	return items, nil
 }

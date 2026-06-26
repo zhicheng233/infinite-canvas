@@ -302,7 +302,7 @@ func generationTypeFromPath(path string) string {
 	switch {
 	case strings.HasSuffix(cleanPath, "/images/generations"), strings.HasSuffix(cleanPath, "/images/edits"):
 		return "image"
-	case strings.HasSuffix(cleanPath, "/video/generations"):
+	case strings.HasSuffix(cleanPath, "/video/generations"), strings.HasSuffix(cleanPath, "/videos/generations"):
 		return "video"
 	case strings.HasSuffix(cleanPath, "/audio/speech"):
 		return "audio"

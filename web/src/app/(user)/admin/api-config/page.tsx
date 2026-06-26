@@ -14,9 +14,11 @@ type ModelCapability = "image" | "video" | "text" | "audio";
 type ModelRow = {
     key: string;
     model: string;
+    enabled: boolean;
     capabilities: ModelCapability[];
     credits_per_unit?: number;
     unit_type: string;
+    video_route: string;
     pricing_id?: number;
 };
 
@@ -31,6 +33,14 @@ const unitTypeOptions = [
     { label: "按图片 (per_image)", value: "per_image" },
     { label: "按视频 (per_video)", value: "per_video" },
     { label: "按 Token (per_token)", value: "per_token" },
+];
+
+const videoRouteOptions = [
+    { label: "自动判断", value: "auto" },
+    { label: "/v1/videos", value: "openai" },
+    { label: "/v1/videos/generations", value: "xai" },
+    { label: "/v1/video/generations", value: "newapi" },
+    { label: "Seedance /contents/generations/tasks", value: "seedance" },
 ];
 
 export default function AdminApiConfigPage() {
@@ -59,6 +69,7 @@ export default function AdminApiConfigPage() {
                 videoModels: config?.video_models || [],
                 textModels: config?.text_models || [],
                 audioModels: config?.audio_models || [],
+                modelRoutes: config?.model_routes || {},
             });
             setRows(buildRows(config, pricing));
         } catch {
@@ -88,16 +99,17 @@ export default function AdminApiConfigPage() {
                 base_url: values.base_url,
                 api_key: values.api_key,
                 models: normalizedRows.map((item) => item.model),
-                image_models: normalizedRows.filter((item) => item.capabilities.includes("image")).map((item) => item.model),
-                video_models: normalizedRows.filter((item) => item.capabilities.includes("video")).map((item) => item.model),
-                text_models: normalizedRows.filter((item) => item.capabilities.includes("text")).map((item) => item.model),
-                audio_models: normalizedRows.filter((item) => item.capabilities.includes("audio")).map((item) => item.model),
+                image_models: normalizedRows.filter((item) => item.enabled && item.capabilities.includes("image")).map((item) => item.model),
+                video_models: normalizedRows.filter((item) => item.enabled && item.capabilities.includes("video")).map((item) => item.model),
+                text_models: normalizedRows.filter((item) => item.enabled && item.capabilities.includes("text")).map((item) => item.model),
+                audio_models: normalizedRows.filter((item) => item.enabled && item.capabilities.includes("audio")).map((item) => item.model),
+                model_routes: Object.fromEntries(normalizedRows.filter((item) => item.enabled && item.capabilities.includes("video") && item.video_route && item.video_route !== "auto").map((item) => [item.model, item.video_route])),
             };
 
             await saveApiConfig(nextApiConfig);
 
             for (const row of normalizedRows) {
-                if (!row.credits_per_unit || row.credits_per_unit <= 0) continue;
+                if (!row.enabled || !row.credits_per_unit || row.credits_per_unit <= 0) continue;
                 await savePricing({
                     id: row.pricing_id,
                     model: row.model,
@@ -108,17 +120,18 @@ export default function AdminApiConfigPage() {
 
             for (const item of pricingItems) {
                 const matched = normalizedRows.find((row) => row.pricing_id === item.id || row.model === item.model);
-                if (!matched || !matched.credits_per_unit || matched.credits_per_unit <= 0) {
+                if (!matched || !matched.enabled || !matched.credits_per_unit || matched.credits_per_unit <= 0) {
                     if (item.id) await deletePricing(item.id);
                 }
             }
 
             applyServerModelCatalog({
-                models: normalizedRows.filter((item) => Number(item.credits_per_unit) > 0).map((item) => item.model),
-                imageModels: normalizedRows.filter((item) => item.capabilities.includes("image") && Number(item.credits_per_unit) > 0).map((item) => item.model),
-                videoModels: normalizedRows.filter((item) => item.capabilities.includes("video") && Number(item.credits_per_unit) > 0).map((item) => item.model),
-                textModels: normalizedRows.filter((item) => item.capabilities.includes("text") && Number(item.credits_per_unit) > 0).map((item) => item.model),
-                audioModels: normalizedRows.filter((item) => item.capabilities.includes("audio") && Number(item.credits_per_unit) > 0).map((item) => item.model),
+                models: normalizedRows.filter((item) => item.enabled && Number(item.credits_per_unit) > 0).map((item) => item.model),
+                imageModels: normalizedRows.filter((item) => item.enabled && item.capabilities.includes("image") && Number(item.credits_per_unit) > 0).map((item) => item.model),
+                videoModels: normalizedRows.filter((item) => item.enabled && item.capabilities.includes("video") && Number(item.credits_per_unit) > 0).map((item) => item.model),
+                textModels: normalizedRows.filter((item) => item.enabled && item.capabilities.includes("text") && Number(item.credits_per_unit) > 0).map((item) => item.model),
+                audioModels: normalizedRows.filter((item) => item.enabled && item.capabilities.includes("audio") && Number(item.credits_per_unit) > 0).map((item) => item.model),
+                modelRoutes: Object.fromEntries(normalizedRows.filter((item) => item.enabled && item.capabilities.includes("video") && item.video_route && item.video_route !== "auto" && Number(item.credits_per_unit) > 0).map((item) => [item.model, item.video_route])),
             });
             message.success("API、模型与计费配置已保存");
             await fetchApiConfig();
@@ -129,8 +142,8 @@ export default function AdminApiConfigPage() {
         }
     };
 
-    const enabledCount = useMemo(() => rows.filter((item) => Number(item.credits_per_unit) > 0).length, [rows]);
-    const disabledRows = useMemo(() => rows.filter((item) => !(Number(item.credits_per_unit) > 0)).map((item) => item.model).filter(Boolean), [rows]);
+    const enabledCount = useMemo(() => rows.filter((item) => item.enabled && Number(item.credits_per_unit) > 0).length, [rows]);
+    const disabledRows = useMemo(() => rows.filter((item) => !item.enabled).map((item) => item.model).filter(Boolean), [rows]);
 
     const updateRow = (key: string, patch: Partial<ModelRow>) => {
         setRows((current) => current.map((item) => (item.key === key ? { ...item, ...patch } : item)));
@@ -146,9 +159,11 @@ export default function AdminApiConfigPage() {
             {
                 key: `new-${Date.now()}-${current.length}`,
                 model: "",
+                enabled: true,
                 capabilities: ["image"],
                 credits_per_unit: undefined,
                 unit_type: "per_image",
+                video_route: "auto",
             },
         ]);
     };
@@ -191,7 +206,23 @@ export default function AdminApiConfigPage() {
                     value={record.unit_type}
                     options={unitTypeOptions}
                     className="w-full"
+                    disabled={!record.enabled}
                     onChange={(value) => updateRow(record.key, { unit_type: value })}
+                />
+            ),
+        },
+        {
+            title: "视频接口",
+            dataIndex: "video_route",
+            key: "video_route",
+            width: 240,
+            render: (_, record) => (
+                <Select
+                    value={record.video_route || "auto"}
+                    options={videoRouteOptions}
+                    className="w-full"
+                    disabled={!record.enabled || !record.capabilities.includes("video")}
+                    onChange={(value) => updateRow(record.key, { video_route: value })}
                 />
             ),
         },
@@ -205,7 +236,8 @@ export default function AdminApiConfigPage() {
                     min={0}
                     className="w-full"
                     value={record.credits_per_unit}
-                    placeholder="0 表示未启用"
+                    disabled={!record.enabled}
+                    placeholder="0 表示未定价"
                     onChange={(value) => updateRow(record.key, { credits_per_unit: Number(value || 0) })}
                 />
             ),
@@ -213,9 +245,44 @@ export default function AdminApiConfigPage() {
         {
             title: "状态",
             key: "status",
-            width: 120,
-            render: (_, record) =>
-                Number(record.credits_per_unit) > 0 ? <Tag color="green">已启用</Tag> : <Tag>未定价</Tag>,
+            width: 180,
+            render: (_, record) => (
+                <div className="space-y-1">
+                    <div className="inline-flex overflow-hidden rounded-lg border border-stone-200 bg-white dark:border-stone-700 dark:bg-stone-900">
+                        <button
+                            type="button"
+                            className={[
+                                "px-3 py-1.5 text-sm transition",
+                                record.enabled
+                                    ? "bg-emerald-500 text-white"
+                                    : "bg-transparent text-stone-500 hover:bg-stone-100 dark:text-stone-300 dark:hover:bg-stone-800",
+                            ].join(" ")}
+                            onClick={() => updateRow(record.key, { enabled: true })}
+                        >
+                            启用
+                        </button>
+                        <button
+                            type="button"
+                            className={[
+                                "border-l border-stone-200 px-3 py-1.5 text-sm transition dark:border-stone-700",
+                                !record.enabled
+                                    ? "bg-rose-500 text-white"
+                                    : "bg-transparent text-stone-500 hover:bg-stone-100 dark:text-stone-300 dark:hover:bg-stone-800",
+                            ].join(" ")}
+                            onClick={() => updateRow(record.key, { enabled: false })}
+                        >
+                            禁用
+                        </button>
+                    </div>
+                    {!record.enabled ? (
+                        <Tag>已禁用</Tag>
+                    ) : Number(record.credits_per_unit) > 0 ? (
+                        <Tag color="green">已开放</Tag>
+                    ) : (
+                        <Tag color="gold">待定价</Tag>
+                    )}
+                </div>
+            ),
         },
         {
             title: "操作",
@@ -276,7 +343,7 @@ export default function AdminApiConfigPage() {
                             <div className="mt-1 text-2xl font-semibold">{enabledCount}</div>
                         </Card>
                         <Card size="small">
-                            <div className="text-sm text-stone-500">未定价模型</div>
+                            <div className="text-sm text-stone-500">已禁用模型</div>
                             <div className="mt-1 text-2xl font-semibold">{disabledRows.length}</div>
                         </Card>
                     </div>
@@ -285,7 +352,7 @@ export default function AdminApiConfigPage() {
                             className="mb-4"
                             type="warning"
                             showIcon
-                            message="以下模型尚未配置积分价格，当前不会开放给用户"
+                            message="以下模型当前已禁用，不会开放给用户"
                             description={disabledRows.join("、")}
                         />
                     ) : null}
@@ -295,7 +362,7 @@ export default function AdminApiConfigPage() {
                             新增模型
                         </Button>
                     </div>
-                    <Table rowKey="key" columns={columns} dataSource={rows} pagination={false} scroll={{ x: 1000 }} />
+                    <Table rowKey="key" columns={columns} dataSource={rows} pagination={false} scroll={{ x: 1320 }} />
                     <Button type="primary" htmlType="submit" loading={saving}>
                         保存全部配置
                     </Button>
@@ -319,9 +386,11 @@ function buildRows(config: ApiConfigInfo, pricing: PricingItem[]): ModelRow[] {
         return {
             key: `${model}-${index}`,
             model,
+            enabled: Number(pricingItem?.credits_per_unit) > 0,
             capabilities: collectCapabilities(model, config),
             credits_per_unit: pricingItem?.credits_per_unit,
             unit_type: pricingItem?.unit_type || inferUnitType(model, config),
+            video_route: config.model_routes?.[model] || "auto",
             pricing_id: pricingItem?.id,
         };
     });
@@ -347,7 +416,9 @@ function normalizeRows(rows: ModelRow[]) {
         .map((item) => ({
             ...item,
             model: item.model.trim(),
+            enabled: item.enabled !== false,
             capabilities: Array.from(new Set(item.capabilities)),
+            video_route: item.capabilities.includes("video") ? item.video_route || "auto" : "auto",
         }))
         .filter((item) => item.model);
 }

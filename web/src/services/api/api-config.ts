@@ -9,6 +9,7 @@ export type ApiConfigInfo = {
   video_models?: string[];
   text_models?: string[];
   audio_models?: string[];
+  model_routes?: Record<string, string>;
 };
 
 export type ApiModelCatalog = {
@@ -22,6 +23,7 @@ export type ApiModelCatalog = {
   enabled_count?: number;
   total_models?: number;
   pricing_map?: Record<string, PricingItem>;
+  model_routes?: Record<string, string>;
 };
 
 export async function getApiConfig() {
@@ -42,6 +44,7 @@ export async function saveApiConfig(input: {
   video_models?: string[];
   text_models?: string[];
   audio_models?: string[];
+  model_routes?: Record<string, string>;
 }) {
   const res = await apiClient.post("/api-config", input);
   return res.data.data as { saved: boolean };

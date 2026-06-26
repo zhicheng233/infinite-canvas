@@ -9,7 +9,7 @@ import { ImageSettingsPanel } from "@/components/image-settings-panel";
 import { ModelPicker } from "@/components/model-picker";
 import { PromptSelectDialog } from "@/components/prompts/prompt-select-dialog";
 import { AssetPickerModal, type InsertAssetPayload } from "@/app/(user)/canvas/components/asset-picker-modal";
-import { useEstimatedCreditCost } from "@/constant/credits";
+import { CreditHelpActions, CreditSymbol, isInsufficientCreditError, useEstimatedCreditCost, useUserCreditBalance } from "@/constant/credits";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { imageReferenceLabel } from "@/lib/image-reference-prompt";
 import { deleteGenerationRecords, listGenerationRecords, saveGenerationRecord } from "@/services/api/generation-records";
@@ -94,6 +94,8 @@ export default function ImagePage() {
     const canGenerate = Boolean(prompt.trim());
     const generationCount = Math.max(1, Math.min(10, Number(config.count) || 1));
     const estimatedCredits = useEstimatedCreditCost(model, generationCount);
+    const balance = useUserCreditBalance();
+    const postBalance = balance === null ? null : balance - estimatedCredits;
 
     useEffect(() => {
         if (!running || !startedAt) return;
@@ -412,6 +414,13 @@ export default function ImagePage() {
                             <Button type="primary" size="large" block icon={<Sparkles className="size-4" />} loading={running} disabled={!canGenerate || running} onClick={() => void generate()}>
                                 {running ? "开始生成" : `开始生成（${estimatedCredits} 积分）`}
                             </Button>
+                            <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-stone-500 dark:text-stone-400">
+                                <span className="inline-flex items-center gap-1">
+                                    <CreditSymbol className="text-amber-500" />
+                                    {balance === null ? "正在读取当前积分" : `当前余额 ${balance}，预计生成后剩余 ${Math.max(postBalance || 0, 0)}`}
+                                </span>
+                                <span>{estimatedCredits > 0 ? `本次预计扣除 ${estimatedCredits} 积分` : "当前模型未配置扣费"}</span>
+                            </div>
                         </div>
                     </div>
 
@@ -560,6 +569,8 @@ function PendingImageCard() {
 }
 
 function FailedImageCard({ error, onRetry }: { error: string; onRetry: () => void }) {
+    const showCreditHelp = isInsufficientCreditError(error);
+
     return (
         <div className="overflow-hidden rounded-lg border border-red-200 bg-red-50 dark:border-red-950 dark:bg-red-950/20">
             <div className="flex aspect-square flex-col items-center justify-center gap-3 p-5 text-center">
@@ -567,6 +578,7 @@ function FailedImageCard({ error, onRetry }: { error: string; onRetry: () => voi
                 <Typography.Paragraph ellipsis={{ rows: 4 }} className="!mb-0 !text-xs !text-red-500 dark:!text-red-300">
                     {error}
                 </Typography.Paragraph>
+                {showCreditHelp ? <CreditHelpActions /> : null}
             </div>
             <div className="flex justify-end border-t border-red-200 p-3 dark:border-red-950">
                 <Button size="small" danger onClick={onRetry}>

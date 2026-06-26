@@ -9,6 +9,7 @@ import { saveAs } from "file-saver";
 import { AssetPickerModal, type InsertAssetPayload } from "@/app/(user)/canvas/components/asset-picker-modal";
 import { ModelPicker } from "@/components/model-picker";
 import { PromptSelectDialog } from "@/components/prompts/prompt-select-dialog";
+import { CreditHelpActions, CreditSymbol, isInsufficientCreditError, useEstimatedCreditCost, useUserCreditBalance } from "@/constant/credits";
 import { VideoSettingsPanel, normalizeVideoResolutionValue, normalizeVideoSizeValue, videoSizeLabel } from "@/components/video-settings-panel";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { formatBytes, formatDuration } from "@/lib/image-utils";
@@ -95,6 +96,9 @@ export default function VideoPage() {
 
     const model = effectiveConfig.videoModel || effectiveConfig.model;
     const canGenerate = Boolean(prompt.trim());
+    const estimatedCredits = useEstimatedCreditCost(model, 1);
+    const balance = useUserCreditBalance();
+    const postBalance = balance === null ? null : balance - estimatedCredits;
 
     useEffect(() => {
         if (!running || !startedAt) return;
@@ -471,8 +475,15 @@ export default function VideoPage() {
 
                         <div className="mt-auto pt-6">
                             <Button type="primary" size="large" block icon={<Sparkles className="size-4" />} loading={running} disabled={!canGenerate || running} onClick={() => void generate()}>
-                                开始生成
+                                {running ? "开始生成" : `开始生成（${estimatedCredits} 积分）`}
                             </Button>
+                            <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-stone-500 dark:text-stone-400">
+                                <span className="inline-flex items-center gap-1">
+                                    <CreditSymbol className="text-amber-500" />
+                                    {balance === null ? "正在读取当前积分" : `当前余额 ${balance}，预计生成后剩余 ${Math.max(postBalance || 0, 0)}`}
+                                </span>
+                                <span>{estimatedCredits > 0 ? `本次预计扣除 ${estimatedCredits} 积分` : "当前模型未配置扣费"}</span>
+                            </div>
                         </div>
                     </div>
 
@@ -575,6 +586,8 @@ function PendingVideoCard() {
 }
 
 function FailedVideoCard({ error, onRetry }: { error: string; onRetry: () => void }) {
+    const showCreditHelp = isInsufficientCreditError(error);
+
     return (
         <div className="overflow-hidden rounded-lg border border-red-200 bg-red-50 dark:border-red-950 dark:bg-red-950/20">
             <div className="flex aspect-video flex-col items-center justify-center gap-3 p-5 text-center">
@@ -582,6 +595,7 @@ function FailedVideoCard({ error, onRetry }: { error: string; onRetry: () => voi
                 <Typography.Paragraph ellipsis={{ rows: 4 }} className="!mb-0 !text-xs !text-red-500 dark:!text-red-300">
                     {error}
                 </Typography.Paragraph>
+                {showCreditHelp ? <CreditHelpActions /> : null}
             </div>
             <div className="flex justify-end border-t border-red-200 p-3 dark:border-red-950">
                 <Button size="small" danger onClick={onRetry}>
