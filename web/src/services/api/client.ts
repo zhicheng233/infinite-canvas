@@ -1,6 +1,15 @@
 import axios from "axios";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080/api";
+export function resolveApiBaseUrl(): string {
+  const configured = process.env.NEXT_PUBLIC_API_URL?.trim();
+  if (configured) return configured.replace(/\/+$/, "");
+  if (typeof window !== "undefined") {
+    return `${window.location.protocol}//${window.location.hostname}:18080/api`;
+  }
+  return "http://localhost:18080/api";
+}
+
+export const API_BASE = resolveApiBaseUrl();
 
 const apiClient = axios.create({ baseURL: API_BASE });
 

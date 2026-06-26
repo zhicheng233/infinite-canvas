@@ -1,5 +1,6 @@
 import axios from "axios";
 import { isLoggedIn, proxyAiPost, proxyAiGet, proxyAiGetPath } from "./ai-proxy";
+import { API_BASE } from "./client";
 
 import { notifyCreditBalanceChanged } from "@/constant/credits";
 import { dataUrlToFile } from "@/lib/image-utils";
@@ -42,7 +43,7 @@ export type VideoGenerationTask = { id: string; provider: "openai" | "seedance" 
 export type VideoGenerationTaskState = { status: "pending" } | { status: "completed"; result: VideoGenerationResult } | { status: "failed"; error: string };
 
 function aiApiUrl(config: AiConfig, path: string) {
-    if (isLoggedIn()) return (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080/api") + "/proxy?path=" + encodeURIComponent(path);
+    if (isLoggedIn()) return API_BASE + "/proxy?path=" + encodeURIComponent(path);
     return buildApiUrl(config.baseUrl, path);
 }
 

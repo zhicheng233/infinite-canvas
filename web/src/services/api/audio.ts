@@ -1,5 +1,6 @@
 import axios from "axios";
 import { isLoggedIn, proxyAiPost, proxyAiGet, proxyAiGetPath } from "./ai-proxy";
+import { API_BASE } from "./client";
 
 import { notifyCreditBalanceChanged } from "@/constant/credits";
 import { audioMimeType, normalizeAudioFormatValue, normalizeAudioSpeedValue, normalizeAudioVoiceValue } from "@/lib/audio-generation";
@@ -9,7 +10,7 @@ import { buildApiUrl, resolveModelRequestConfig, type AiConfig } from "@/stores/
 type RequestOptions = { signal?: AbortSignal };
 
 function aiApiUrl(config: AiConfig, path: string) {
-    if (isLoggedIn()) return (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080/api") + "/proxy?path=" + encodeURIComponent(path);
+    if (isLoggedIn()) return API_BASE + "/proxy?path=" + encodeURIComponent(path);
     return buildApiUrl(config.baseUrl, path);
 }
 

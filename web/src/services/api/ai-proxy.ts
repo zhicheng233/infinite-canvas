@@ -1,7 +1,5 @@
 import axios from "axios";
-import { getStoredToken } from "./client";
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080/api";
+import { API_BASE, getStoredToken } from "./client";
 
 export function isLoggedIn(): boolean {
   return !!getStoredToken();

@@ -18,3 +18,4 @@ description: 已实现但需要用户测试确认的变更
 - [ ] 视频工作台已改为走后台统一 API 配置，不再提示用户自行配置 API Key。
 - [ ] 用户可在 `/credits` 查看积分明细，在 `/recharge` 查看充值记录。
 - [ ] 新服务器按 Docker 文档迁移后，账号、积分、画布、生成记录与后台模型配置可正常恢复。
+- [ ] 新服务器使用 `docker compose up -d --build` 部署后，登录接口应命中 `.env` 中配置的 `NEXT_PUBLIC_API_URL`，不再落到 `http://localhost:8080/api`。

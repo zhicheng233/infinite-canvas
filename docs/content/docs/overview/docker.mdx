@@ -38,16 +38,34 @@ NEXT_PUBLIC_DOC_URL=https://docs.canvas.best
 启动：
 
 ```bash
-docker build -t infinite-canvas-app:latest .
-docker compose build backend
-docker compose up -d
+docker compose up -d --build
 ```
 
 说明：
 
-- 根目录 `Dockerfile` 用于构建前端镜像 `infinite-canvas-app:latest`
-- `docker compose build` 当前只会构建 `backend`
-- 因此新服务器首次部署时，请先手动执行一次前端镜像构建
+- `app` 服务会通过根目录 `Dockerfile` 自动构建前端镜像 `infinite-canvas-app:latest`
+- `backend` 服务会通过 `backend/Dockerfile` 自动构建后端镜像
+- 首次部署与后续更新都建议直接使用 `docker compose up -d --build`
+
+## 常见部署报错
+
+### `docker compose up -d` 提示 `Artifact Registry API has not been used`
+
+这类报错大多数不是 Google Artifact Registry 真的需要启用，而是 Docker 没有走本地构建，转而把 `infinite-canvas-app:latest` 当成远程镜像去拉取。
+
+按下面顺序执行即可：
+
+```bash
+docker compose up -d --build
+```
+
+如果想先确认镜像是否存在，可以执行：
+
+```bash
+docker images | grep infinite-canvas-app
+```
+
+没有输出就说明前端镜像还没构建。
 
 ## 首次初始化
 
@@ -86,18 +104,29 @@ INIT_ADMIN_DISPLAY_NAME=系统管理员
 
 ## 更新发布
 
-前端有独立镜像标签时：
+推荐更新命令：
 
 ```bash
-docker build -t infinite-canvas-app:latest .
-docker compose up -d --force-recreate app
+git pull
+docker compose up -d --build
 ```
 
-后端更新时：
+如果只更新后端：
 
 ```bash
-docker compose build backend
-docker compose up -d --force-recreate backend
+docker compose up -d --build backend
+```
+
+如果只更新前端：
+
+```bash
+docker compose up -d --build app
+```
+
+如果修改了 `.env` 里的 `NEXT_PUBLIC_API_URL`：
+
+```bash
+docker compose up -d --build app
 ```
 
 ## 迁移到另一台服务器
@@ -111,9 +140,7 @@ docker compose up -d --force-recreate backend
 ### 2. 启动空环境
 
 ```bash
-docker build -t infinite-canvas-app:latest .
-docker compose build backend
-docker compose up -d
+docker compose up -d --build
 ```
 
 ### 3. 导出旧库数据
@@ -135,8 +162,7 @@ cat infinite_canvas.sql | docker exec -i ic-mysql mysql -uroot -p"${MYSQL_ROOT_P
 ### 5. 重启后端与前端
 
 ```bash
-docker build -t infinite-canvas-app:latest .
-docker compose up -d --force-recreate backend app
+docker compose up -d --build backend app
 ```
 
 ### 6. 登录后台复核
@@ -162,3 +188,4 @@ docker compose up -d --force-recreate backend app
 - `JWT_KEY` 与 `API_KEY_ENCRYPTION_KEY` 请使用高强度随机字符串。
 - 建议给 `3001` 与 `18080` 前面加 Nginx / Caddy，统一做 HTTPS 与反向代理。
 - 备份至少包含 `mysql_data` 卷和你自己的 `.env`。
+- `NEXT_PUBLIC_API_URL` 属于前端构建参数，修改后必须重建 `app` 容器才能生效。

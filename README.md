@@ -23,9 +23,7 @@ cd infinite-canvas
 chmod +x scripts/init-env.sh
 ./scripts/init-env.sh
 
-docker build -t infinite-canvas-app:latest .
-docker compose build backend
-docker compose up -d
+docker compose up -d --build
 ```
 
 默认端口：
@@ -46,4 +44,17 @@ docker compose up -d
 - 生产环境请务必自行设置 `.env` 中的数据库密码、JWT 密钥和 API Key 加密密钥。
 - 不建议将 MySQL 暴露到公网。
 - 当数据库为空且 `.env` 已配置 `INIT_ADMIN_*` 时，后端首次启动会自动创建初始 `super_admin`。
-- 当前 `docker-compose.yml` 会直接使用本地 `infinite-canvas-app:latest` 前端镜像，因此首次部署前需要先执行一次 `docker build -t infinite-canvas-app:latest .`。
+- 前端会在构建阶段读取 `NEXT_PUBLIC_API_URL`，如果你修改了这个值，需要重新构建 `app` 容器。
+
+## 更新命令
+
+```bash
+git pull
+docker compose up -d --build
+```
+
+常见更新场景：
+
+- 只更新后端：`docker compose up -d --build backend`
+- 只更新前端：`docker compose up -d --build app`
+- 修改了 `NEXT_PUBLIC_API_URL`：必须执行 `docker compose up -d --build app`

@@ -22,7 +22,7 @@ bun run start
 Run the published image with Docker Compose:
 
 ```bash
-docker compose up -d
+docker compose up -d --build
 ```
 
 Or build locally with Docker Compose:

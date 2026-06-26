@@ -91,5 +91,4 @@ echo "管理员账号：${init_admin_username}"
 echo "管理员密码：${init_admin_password}"
 echo
 echo "下一步执行："
-echo "  docker compose build"
-echo "  docker compose up -d"
+echo "  docker compose up -d --build"

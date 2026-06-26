@@ -1,5 +1,6 @@
 import axios from "axios";
 import { isLoggedIn, proxyAiPost, proxyAiGet, proxyAiGetPath } from "./ai-proxy";
+import { API_BASE } from "./client";
 
 import { buildApiUrl, resolveModelRequestConfig, type AiConfig, type ModelChannel } from "@/stores/use-config-store";
 import { nanoid } from "nanoid";
@@ -212,7 +213,7 @@ function withSystemPrompt(config: AiConfig, prompt: string) {
 }
 
 function aiApiUrl(config: AiConfig, path: string) {
-    if (isLoggedIn()) return (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080/api") + "/proxy?path=" + encodeURIComponent(path);
+    if (isLoggedIn()) return API_BASE + "/proxy?path=" + encodeURIComponent(path);
     return buildApiUrl(config.baseUrl, path);
 }
 

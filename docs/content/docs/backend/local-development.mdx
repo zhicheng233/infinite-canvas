@@ -11,9 +11,10 @@ description: 当前商用版的本地开发与调试方式
 
 ```bash
 cp .env.example .env
-docker compose build
-docker compose up -d
+docker compose up -d --build
 ```
+
+如果你修改了 `.env` 里的 `NEXT_PUBLIC_API_URL`，记得重新执行一次 `docker compose up -d --build app`，否则浏览器仍可能拿到旧的前端接口地址。
 
 默认访问：
 

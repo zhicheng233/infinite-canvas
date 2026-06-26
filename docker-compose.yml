@@ -1,5 +1,10 @@
 services:
   app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:18080/api}
     image: infinite-canvas-app:latest
     container_name: infinite-canvas
     environment:
