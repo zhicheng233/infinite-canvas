@@ -18,7 +18,7 @@
 ## 快速部署
 
 ```bash
-git clone <your-repo>
+git clone https://github.com/GeQainZz/infinite-canvas.git
 cd infinite-canvas
 chmod +x scripts/init-env.sh
 ./scripts/init-env.sh
