@@ -193,6 +193,11 @@ hmgai.cc {
         max_size 100MB
     }
 
+    @nextApi path /api/prompts /api/prompts/*
+    handle @nextApi {
+        reverse_proxy 127.0.0.1:3001
+    }
+
     @api path /api/*
     handle @api {
         reverse_proxy 127.0.0.1:18080
@@ -215,6 +220,12 @@ caddy reload --config /etc/caddy/Caddyfile
 
 - 打开 `https://hmgai.cc/`
 - 在浏览器开发者工具中确认登录请求走的是 `https://hmgai.cc/api/auth/login`
+- 访问 `https://hmgai.cc/api/prompts?page=1&pageSize=20` 应返回提示词列表，而不是 404
+
+说明：
+
+- `/api/prompts` 是 Next.js 前端内置接口，负责聚合第三方提示词仓库数据
+- 其它鉴权、画布、积分、代理等 `/api/*` 路径才走 Go 后端 `127.0.0.1:18080`
 
 如果你的 Caddy 不是 systemd 管理，也可以用：
 
