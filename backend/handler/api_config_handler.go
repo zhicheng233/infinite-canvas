@@ -2,11 +2,12 @@ package handler
 
 import (
 	"encoding/json"
+	"sort"
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"infinite-canvas-server/crypto"
 	"infinite-canvas-server/config"
+	"infinite-canvas-server/crypto"
 	"infinite-canvas-server/model"
 	"infinite-canvas-server/repository"
 	"infinite-canvas-server/service"
@@ -15,22 +16,25 @@ import (
 type ApiConfigHandler struct {
 	apiConfigRepo *repository.ApiConfigRepo
 	creditRepo    *repository.CreditRepo
+	generateSvc   *service.GenerateService
 	cfg           *config.Config
 }
 
-func NewApiConfigHandler(apiConfigRepo *repository.ApiConfigRepo, creditRepo *repository.CreditRepo, cfg *config.Config) *ApiConfigHandler {
-	return &ApiConfigHandler{apiConfigRepo: apiConfigRepo, creditRepo: creditRepo, cfg: cfg}
+func NewApiConfigHandler(apiConfigRepo *repository.ApiConfigRepo, creditRepo *repository.CreditRepo, generateSvc *service.GenerateService, cfg *config.Config) *ApiConfigHandler {
+	return &ApiConfigHandler{apiConfigRepo: apiConfigRepo, creditRepo: creditRepo, generateSvc: generateSvc, cfg: cfg}
 }
 
 type SaveApiConfigInput struct {
-	BaseUrl     string            `json:"base_url"`
-	ApiKey      string            `json:"api_key"`
-	Models      []string          `json:"models"`
-	ImageModels []string          `json:"image_models"`
-	VideoModels []string          `json:"video_models"`
-	TextModels  []string          `json:"text_models"`
-	AudioModels []string          `json:"audio_models"`
-	ModelRoutes map[string]string `json:"model_routes"`
+	BaseUrl                string            `json:"base_url"`
+	ApiKey                 string            `json:"api_key"`
+	Models                 []string          `json:"models"`
+	ImageModels            []string          `json:"image_models"`
+	VideoModels            []string          `json:"video_models"`
+	TextModels             []string          `json:"text_models"`
+	AudioModels            []string          `json:"audio_models"`
+	ModelRoutes            map[string]string `json:"model_routes"`
+	ModelVideoDurations    map[string][]int  `json:"model_video_durations"`
+	ModelVideoCustomizable map[string]bool   `json:"model_video_customizable"`
 }
 
 func (h *ApiConfigHandler) Get(c *gin.Context) {
@@ -46,15 +50,19 @@ func (h *ApiConfigHandler) Get(c *gin.Context) {
 	textModels, _ := decodeStringList(cfg.TextModels)
 	audioModels, _ := decodeStringList(cfg.AudioModels)
 	modelRoutes, _ := decodeStringMap(cfg.ModelRoutes)
+	modelVideoDurations, _ := decodeIntListMap(cfg.ModelVideoDurations)
+	modelVideoCustomizable, _ := decodeBoolMap(cfg.ModelVideoCustomizable)
 	model.OK(c, gin.H{
-		"base_url":     cfg.BaseUrl,
-		"has_key":      len(cfg.ApiKey) > 0,
-		"models":       models,
-		"image_models": imageModels,
-		"video_models": videoModels,
-		"text_models":  textModels,
-		"audio_models": audioModels,
-		"model_routes": modelRoutes,
+		"base_url":                 cfg.BaseUrl,
+		"has_key":                  len(cfg.ApiKey) > 0,
+		"models":                   models,
+		"image_models":             imageModels,
+		"video_models":             videoModels,
+		"text_models":              textModels,
+		"audio_models":             audioModels,
+		"model_routes":             modelRoutes,
+		"model_video_durations":    modelVideoDurations,
+		"model_video_customizable": modelVideoCustomizable,
 	})
 }
 
@@ -72,6 +80,8 @@ func (h *ApiConfigHandler) Catalog(c *gin.Context) {
 	textModels, _ := decodeStringList(cfg.TextModels)
 	audioModels, _ := decodeStringList(cfg.AudioModels)
 	modelRoutes, _ := decodeStringMap(cfg.ModelRoutes)
+	modelVideoDurations, _ := decodeIntListMap(cfg.ModelVideoDurations)
+	modelVideoCustomizable, _ := decodeBoolMap(cfg.ModelVideoCustomizable)
 	pricingMap, err := h.creditRepo.FindPricingMap(claims.TenantID)
 	if err != nil {
 		model.Fail(c, 500, "读取定价配置失败")
@@ -80,17 +90,19 @@ func (h *ApiConfigHandler) Catalog(c *gin.Context) {
 
 	enabledModels := filterModelsByPricing(models, pricingMap)
 	model.OK(c, gin.H{
-		"models":          enabledModels,
-		"image_models":    filterModelsByPricing(imageModels, pricingMap),
-		"video_models":    filterModelsByPricing(videoModels, pricingMap),
-		"text_models":     filterModelsByPricing(textModels, pricingMap),
-		"audio_models":    filterModelsByPricing(audioModels, pricingMap),
-		"priced_models":   enabledModels,
-		"pricing_map":     pricingMap,
-		"model_routes":    modelRoutes,
-		"total_models":    len(models),
-		"enabled_count":   len(enabledModels),
-		"disabled_models": collectDisabledModels(models, pricingMap),
+		"models":                   enabledModels,
+		"image_models":             filterModelsByPricing(imageModels, pricingMap),
+		"video_models":             filterModelsByPricing(videoModels, pricingMap),
+		"text_models":              filterModelsByPricing(textModels, pricingMap),
+		"audio_models":             filterModelsByPricing(audioModels, pricingMap),
+		"priced_models":            enabledModels,
+		"pricing_map":              pricingMap,
+		"model_routes":             modelRoutes,
+		"model_video_durations":    filterModelDurationsByPricing(modelVideoDurations, pricingMap),
+		"model_video_customizable": filterBoolMapByPricing(modelVideoCustomizable, pricingMap),
+		"total_models":             len(models),
+		"enabled_count":            len(enabledModels),
+		"disabled_models":          collectDisabledModels(models, pricingMap),
 	})
 }
 
@@ -131,6 +143,16 @@ func (h *ApiConfigHandler) Save(c *gin.Context) {
 		model.Fail(c, 400, "模型路由配置格式错误")
 		return
 	}
+	modelVideoDurations, err := encodeIntListMap(input.ModelVideoDurations)
+	if err != nil {
+		model.Fail(c, 400, "视频时长配置格式错误")
+		return
+	}
+	modelVideoCustomizable, err := encodeBoolMap(input.ModelVideoCustomizable)
+	if err != nil {
+		model.Fail(c, 400, "视频自定义配置格式错误")
+		return
+	}
 
 	existingCfg, _ := h.apiConfigRepo.FindByTenant(claims.TenantID)
 	encryptedKey := ""
@@ -150,21 +172,38 @@ func (h *ApiConfigHandler) Save(c *gin.Context) {
 	}
 
 	cfg := &model.TenantApiConfig{
-		TenantID:    claims.TenantID,
-		BaseUrl:     input.BaseUrl,
-		ApiKey:      encryptedKey,
-		Models:      models,
-		ImageModels: imageModels,
-		VideoModels: videoModels,
-		TextModels:  textModels,
-		AudioModels: audioModels,
-		ModelRoutes: modelRoutes,
+		TenantID:               claims.TenantID,
+		BaseUrl:                input.BaseUrl,
+		ApiKey:                 encryptedKey,
+		Models:                 models,
+		ImageModels:            imageModels,
+		VideoModels:            videoModels,
+		TextModels:             textModels,
+		AudioModels:            audioModels,
+		ModelRoutes:            modelRoutes,
+		ModelVideoDurations:    modelVideoDurations,
+		ModelVideoCustomizable: modelVideoCustomizable,
 	}
 	if err := h.apiConfigRepo.Save(cfg); err != nil {
 		model.Fail(c, 500, err.Error())
 		return
 	}
 	model.OK(c, gin.H{"saved": true})
+}
+
+func (h *ApiConfigHandler) TestModel(c *gin.Context) {
+	claims := c.MustGet("claims").(*service.Claims)
+	var input service.ModelTestInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		model.Fail(c, 400, "无效的请求参数")
+		return
+	}
+	result, err := h.generateSvc.TestModel(claims.TenantID, claims.UserID, input)
+	if err != nil {
+		model.Fail(c, 400, err.Error())
+		return
+	}
+	model.OK(c, result)
 }
 
 func filterModelsByPricing(models []string, pricingMap map[string]model.CreditPricing) []string {
@@ -178,7 +217,8 @@ func filterModelsByPricing(models []string, pricingMap map[string]model.CreditPr
 		if name == "" {
 			continue
 		}
-		if _, exists := pricingMap[name]; !exists {
+		pricing, exists := pricingMap[name]
+		if !exists || !pricing.HasValidPricingRule() {
 			continue
 		}
 		if _, duplicated := seen[name]; duplicated {
@@ -198,7 +238,7 @@ func collectDisabledModels(models []string, pricingMap map[string]model.CreditPr
 		if name == "" {
 			continue
 		}
-		if _, ok := pricingMap[name]; ok {
+		if pricing, ok := pricingMap[name]; ok && pricing.HasValidPricingRule() {
 			continue
 		}
 		if _, duplicated := seen[name]; duplicated {
@@ -208,6 +248,39 @@ func collectDisabledModels(models []string, pricingMap map[string]model.CreditPr
 		items = append(items, name)
 	}
 	return items
+}
+
+func filterModelDurationsByPricing(items map[string][]int, pricingMap map[string]model.CreditPricing) map[string][]int {
+	if len(items) == 0 {
+		return map[string][]int{}
+	}
+	filtered := make(map[string][]int, len(items))
+	for modelName, durations := range items {
+		pricing, ok := pricingMap[modelName]
+		if !ok || !pricing.HasValidPricingRule() {
+			continue
+		}
+		filtered[modelName] = append([]int(nil), durations...)
+	}
+	return filtered
+}
+
+func filterBoolMapByPricing(items map[string]bool, pricingMap map[string]model.CreditPricing) map[string]bool {
+	if len(items) == 0 {
+		return map[string]bool{}
+	}
+	filtered := make(map[string]bool, len(items))
+	for modelName, enabled := range items {
+		if !enabled {
+			continue
+		}
+		pricing, ok := pricingMap[modelName]
+		if !ok || !pricing.HasValidPricingRule() {
+			continue
+		}
+		filtered[modelName] = true
+	}
+	return filtered
 }
 
 func encodeStringList(items []string) (string, error) {
@@ -264,4 +337,118 @@ func decodeStringMap(raw string) (map[string]string, error) {
 		items = map[string]string{}
 	}
 	return items, nil
+}
+
+func encodeIntListMap(items map[string][]int) (string, error) {
+	if len(items) == 0 {
+		return "{}", nil
+	}
+	cleaned := make(map[string][]int, len(items))
+	for key, values := range items {
+		modelName := strings.TrimSpace(key)
+		if modelName == "" {
+			continue
+		}
+		seen := make(map[int]struct{}, len(values))
+		list := make([]int, 0, len(values))
+		for _, value := range values {
+			if value <= 0 {
+				continue
+			}
+			if _, ok := seen[value]; ok {
+				continue
+			}
+			seen[value] = struct{}{}
+			list = append(list, value)
+		}
+		sort.Ints(list)
+		if len(list) == 0 {
+			continue
+		}
+		cleaned[modelName] = list
+	}
+	returnValue, err := json.Marshal(cleaned)
+	if err != nil {
+		return "", err
+	}
+	return string(returnValue), nil
+}
+
+func decodeIntListMap(raw string) (map[string][]int, error) {
+	if raw == "" {
+		return map[string][]int{}, nil
+	}
+	var items map[string][]int
+	if err := json.Unmarshal([]byte(raw), &items); err != nil {
+		return map[string][]int{}, err
+	}
+	if items == nil {
+		items = map[string][]int{}
+	}
+	cleaned := make(map[string][]int, len(items))
+	for key, values := range items {
+		modelName := strings.TrimSpace(key)
+		if modelName == "" {
+			continue
+		}
+		seen := make(map[int]struct{}, len(values))
+		list := make([]int, 0, len(values))
+		for _, value := range values {
+			if value <= 0 {
+				continue
+			}
+			if _, ok := seen[value]; ok {
+				continue
+			}
+			seen[value] = struct{}{}
+			list = append(list, value)
+		}
+		sort.Ints(list)
+		if len(list) == 0 {
+			continue
+		}
+		cleaned[modelName] = list
+	}
+	return cleaned, nil
+}
+
+func encodeBoolMap(items map[string]bool) (string, error) {
+	if len(items) == 0 {
+		return "{}", nil
+	}
+	cleaned := make(map[string]bool, len(items))
+	for key, value := range items {
+		modelName := strings.TrimSpace(key)
+		if modelName == "" || !value {
+			continue
+		}
+		cleaned[modelName] = true
+	}
+	returnValue, err := json.Marshal(cleaned)
+	if err != nil {
+		return "", err
+	}
+	return string(returnValue), nil
+}
+
+func decodeBoolMap(raw string) (map[string]bool, error) {
+	if raw == "" {
+		return map[string]bool{}, nil
+	}
+	var items map[string]bool
+	if err := json.Unmarshal([]byte(raw), &items); err != nil {
+		return map[string]bool{}, err
+	}
+	if items == nil {
+		items = map[string]bool{}
+	}
+	cleaned := make(map[string]bool, len(items))
+	for key, value := range items {
+		modelName := strings.TrimSpace(key)
+		if modelName == "" || !value {
+			continue
+		}
+		cleaned[modelName] = true
+	}
+	return cleaned, nil
 }

@@ -2,11 +2,19 @@ package service
 
 import (
 	"bytes"
+	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"image"
+	_ "image/gif"
+	"image/jpeg"
+	_ "image/png"
 	"io"
+	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -15,21 +23,25 @@ import (
 	"infinite-canvas-server/repository"
 )
 
+const maxVideoReferenceImageBase64Chars = 460 * 1024
+
 type GenerateService struct {
 	apiConfigRepo *repository.ApiConfigRepo
 	creditService *CreditService
 	creditRepo    *repository.CreditRepo
 	logService    *ModelCallLogService
+	repairService *OnDemandRepairService
 	httpClient    *http.Client
 	encryptKey    string
 }
 
-func NewGenerateService(apiConfigRepo *repository.ApiConfigRepo, creditService *CreditService, creditRepo *repository.CreditRepo, logService *ModelCallLogService, encryptKey string) *GenerateService {
+func NewGenerateService(apiConfigRepo *repository.ApiConfigRepo, creditService *CreditService, creditRepo *repository.CreditRepo, logService *ModelCallLogService, encryptKey string, repairService *OnDemandRepairService) *GenerateService {
 	return &GenerateService{
 		apiConfigRepo: apiConfigRepo,
 		creditService: creditService,
 		creditRepo:    creditRepo,
 		logService:    logService,
+		repairService: repairService,
 		httpClient:    &http.Client{Timeout: 10 * time.Minute},
 		encryptKey:    encryptKey,
 	}
@@ -41,6 +53,13 @@ type ProxyResult struct {
 	Headers    http.Header
 	Cost       int
 	Balance    int
+}
+
+type upstreamCallResult struct {
+	StatusCode     int
+	Body           []byte
+	Headers        http.Header
+	ResponseTimeMs int
 }
 
 func (s *GenerateService) ProxyImage(tenantID, userID uint, contentType string, body []byte) (*ProxyResult, error) {
@@ -70,6 +89,41 @@ func (s *GenerateService) getDecryptedApiKey(tenantID uint) (string, error) {
 	return cfg.ApiKey, nil
 }
 
+func (s *GenerateService) doUpstreamRequest(method, baseURL, apiKey, path, contentType string, body []byte) (*upstreamCallResult, error) {
+	url := buildUpstreamURL(baseURL, path)
+	var reqBody io.Reader
+	if body != nil {
+		reqBody = bytes.NewReader(body)
+	}
+	req, err := http.NewRequest(method, url, reqBody)
+	if err != nil {
+		return nil, err
+	}
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
+	}
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+
+	startTime := time.Now()
+	resp, err := s.httpClient.Do(req)
+	responseTimeMs := int(time.Since(startTime).Milliseconds())
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	respBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	return &upstreamCallResult{
+		StatusCode:     resp.StatusCode,
+		Body:           respBytes,
+		Headers:        resp.Header,
+		ResponseTimeMs: responseTimeMs,
+	}, nil
+}
+
 func (s *GenerateService) proxy(tenantID, userID uint, genType, path, contentType string, body []byte) (*ProxyResult, error) {
 	cfg, err := s.apiConfigRepo.FindByTenant(tenantID)
 	if err != nil {
@@ -81,7 +135,13 @@ func (s *GenerateService) proxy(tenantID, userID uint, genType, path, contentTyp
 		apiKey = cfg.ApiKey
 	}
 
+	if normalizedBody, changed := normalizeVideoReferenceImages(http.MethodPost, path, contentType, body); changed {
+		log.Printf("compressed video reference image payload path=%s", cleanPath(path))
+		body = normalizedBody
+	}
+
 	modelName := extractModelName(contentType, body)
+	genType = resolveGenerationByApiConfig(cfg, modelName, genType)
 	if modelName == "" {
 		err := errors.New("请指定模型")
 		s.recordModelFailure(tenantID, userID, genType, modelName, http.MethodPost, path, 0, nil, err.Error())
@@ -105,42 +165,46 @@ func (s *GenerateService) proxy(tenantID, userID uint, genType, path, contentTyp
 		return nil, err
 	}
 
-	url := buildUpstreamURL(cfg.BaseUrl, path)
-	req, err := http.NewRequest("POST", url, bytes.NewReader(body))
-	if err != nil {
-		return nil, err
-	}
-	if contentType != "" {
-		req.Header.Set("Content-Type", contentType)
-	}
-	req.Header.Set("Authorization", "Bearer "+apiKey)
-
-	resp, err := s.httpClient.Do(req)
+	upstream, err := s.doUpstreamRequest(http.MethodPost, cfg.BaseUrl, apiKey, path, contentType, body)
 	if err != nil {
 		s.recordModelFailure(tenantID, userID, genType, modelName, http.MethodPost, path, 0, nil, err.Error())
-		return nil, fmt.Errorf("上游 API 请求失败: %v", err)
+		if retry, ok := s.repairAndRetryUpstream(tenantID, userID, genType, modelName, http.MethodPost, path, contentType, body, 0, nil, err.Error()); ok {
+			upstream = retry
+		} else {
+			return nil, fmt.Errorf("涓婃父 API 璇锋眰澶辫触: %v", err)
+		}
 	}
-	defer resp.Body.Close()
-
-	respBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
+	if upstream == nil {
+		return nil, errors.New("upstream request failed")
 	}
-
-	if resp.StatusCode < 400 {
+	respBytes := upstream.Body
+	if upstream.StatusCode < 400 {
 		if converted, ok := transformImageResponseToChatFormat(path, respBytes); ok {
 			respBytes = converted
 		}
 	}
 
-	if resp.StatusCode >= 400 {
-		s.recordModelFailure(tenantID, userID, genType, modelName, http.MethodPost, path, resp.StatusCode, respBytes, "")
+	if upstream.StatusCode >= 400 {
+		s.recordModelFailure(tenantID, userID, genType, modelName, http.MethodPost, path, upstream.StatusCode, respBytes, "")
+		if retry, ok := s.repairAndRetryUpstream(tenantID, userID, genType, modelName, http.MethodPost, path, contentType, body, upstream.StatusCode, respBytes, ""); ok {
+			upstream = retry
+			respBytes = upstream.Body
+			if upstream.StatusCode < 400 {
+				if converted, ok := transformImageResponseToChatFormat(path, respBytes); ok {
+					respBytes = converted
+				}
+			}
+		}
+	}
+	if upstream.StatusCode >= 400 {
 		return &ProxyResult{
-			StatusCode: resp.StatusCode,
+			StatusCode: upstream.StatusCode,
 			Body:       respBytes,
-			Headers:    resp.Header,
+			Headers:    upstream.Headers,
 		}, nil
 	}
+
+	s.recordModelSuccess(tenantID, userID, genType, modelName, http.MethodPost, path, upstream.StatusCode, upstream.ResponseTimeMs)
 
 	if cost > 0 {
 		metadata, note := buildCreditSpendDetail(genType, modelName, path, pricingResult)
@@ -156,9 +220,9 @@ func (s *GenerateService) proxy(tenantID, userID uint, genType, path, contentTyp
 	}
 
 	return &ProxyResult{
-		StatusCode: resp.StatusCode,
+		StatusCode: upstream.StatusCode,
 		Body:       respBytes,
-		Headers:    resp.Header,
+		Headers:    upstream.Headers,
 		Cost:       cost,
 		Balance:    balance,
 	}, nil
@@ -229,6 +293,11 @@ func (s *GenerateService) ProxyRaw(tenantID, userID uint, method, path, contentT
 		apiKey = cfg.ApiKey
 	}
 
+	if normalizedBody, changed := normalizeVideoReferenceImages(method, path, contentType, body); changed {
+		log.Printf("compressed video reference image payload path=%s", cleanPath(path))
+		body = normalizedBody
+	}
+
 	var reqBody io.Reader
 	if body != nil {
 		reqBody = bytes.NewReader(body)
@@ -243,7 +312,7 @@ func (s *GenerateService) ProxyRaw(tenantID, userID uint, method, path, contentT
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 
 	modelName := extractModelName(contentType, body)
-	cost, chargeType, pricingResult := s.getProxyCost(tenantID, method, path, contentType, body, modelName)
+	cost, chargeType, pricingResult := s.getProxyCost(cfg, tenantID, method, path, contentType, body, modelName)
 	if chargeType != "" {
 		if modelName == "" {
 			err := errors.New("请指定模型")
@@ -269,7 +338,10 @@ func (s *GenerateService) ProxyRaw(tenantID, userID uint, method, path, contentT
 		}
 	}
 
+	startTime := time.Now()
 	resp, err := s.httpClient.Do(req)
+	responseTimeMs := int(time.Since(startTime).Milliseconds())
+
 	if err != nil {
 		s.recordModelFailure(tenantID, userID, chargeType, modelName, method, path, 0, nil, err.Error())
 		return nil, fmt.Errorf("上游 API 请求失败: %v", err)
@@ -296,8 +368,12 @@ func (s *GenerateService) ProxyRaw(tenantID, userID uint, method, path, contentT
 			if modelName == "" {
 				modelName = responseModel
 			}
-			s.recordModelFailure(tenantID, userID, generationTypeFromPath(path), modelName, method, path, resp.StatusCode, respBytes, message)
+			s.recordModelFailure(tenantID, userID, resolveGenerationByApiConfig(cfg, modelName, generationTypeFromPath(path)), modelName, method, path, resp.StatusCode, respBytes, message)
+		} else if chargeType != "" && modelName != "" {
+			s.recordModelSuccess(tenantID, userID, chargeType, modelName, method, path, resp.StatusCode, responseTimeMs)
 		}
+	} else if resp.StatusCode < 400 && chargeType != "" && modelName != "" {
+		s.recordModelSuccess(tenantID, userID, chargeType, modelName, method, path, resp.StatusCode, responseTimeMs)
 	}
 
 	if resp.StatusCode < 400 && cost > 0 {
@@ -322,11 +398,126 @@ func (s *GenerateService) ProxyRaw(tenantID, userID uint, method, path, contentT
 	}, nil
 }
 
-func (s *GenerateService) getProxyCost(tenantID uint, method, path, contentType string, body []byte, modelName string) (int, string, CreditCostResult) {
+func (s *GenerateService) ProxyRawWithRepair(tenantID, userID uint, method, path, contentType string, body []byte) (*ProxyResult, error) {
+	cfg, err := s.apiConfigRepo.FindByTenant(tenantID)
+	if err != nil {
+		return nil, errors.New("tenant API is not configured")
+	}
+
+	apiKey, err := s.getDecryptedApiKey(tenantID)
+	if err != nil {
+		apiKey = cfg.ApiKey
+	}
+
+	if normalizedBody, changed := normalizeVideoReferenceImages(method, path, contentType, body); changed {
+		log.Printf("compressed video reference image payload path=%s", cleanPath(path))
+		body = normalizedBody
+	}
+
+	modelName := extractModelName(contentType, body)
+	cost, chargeType, pricingResult := s.getProxyCost(cfg, tenantID, method, path, contentType, body, modelName)
+	if chargeType != "" {
+		if modelName == "" {
+			err := errors.New("model is required")
+			s.recordModelFailure(tenantID, userID, chargeType, modelName, method, path, 0, nil, err.Error())
+			return nil, err
+		}
+		if _, _, err := s.getRequiredPricing(tenantID, chargeType, modelName, contentType, body); err != nil {
+			s.recordModelFailure(tenantID, userID, chargeType, modelName, method, path, 0, nil, err.Error())
+			return nil, err
+		}
+	}
+
+	if cost > 0 {
+		account, err := s.creditService.GetOrCreateAccount(tenantID, userID)
+		if err != nil {
+			s.recordModelFailure(tenantID, userID, chargeType, modelName, method, path, 0, nil, err.Error())
+			return nil, err
+		}
+		if account.Balance < cost {
+			err := fmt.Errorf("insufficient credits, need %d, current balance %d", cost, account.Balance)
+			s.recordModelFailure(tenantID, userID, chargeType, modelName, method, path, 0, nil, err.Error())
+			return nil, err
+		}
+	}
+
+	generation := generationForProxyRequest(cfg, modelName, chargeType, path)
+	upstream, err := s.doUpstreamRequest(method, cfg.BaseUrl, apiKey, path, contentType, body)
+	if err != nil {
+		s.recordModelFailure(tenantID, userID, generation, modelName, method, path, 0, nil, err.Error())
+		if retry, ok := s.repairAndRetryUpstream(tenantID, userID, generation, modelName, method, path, contentType, body, 0, nil, err.Error()); ok {
+			upstream = retry
+		} else {
+			return nil, fmt.Errorf("upstream API request failed: %v", err)
+		}
+	}
+	if upstream == nil {
+		return nil, errors.New("upstream request failed")
+	}
+
+	respBytes := upstream.Body
+	if upstream.StatusCode < 400 {
+		if converted, ok := transformImageResponseToChatFormat(path, respBytes); ok {
+			respBytes = converted
+		}
+	}
+
+	if upstream.StatusCode >= 400 && generation != "" {
+		s.recordModelFailure(tenantID, userID, generation, modelName, method, path, upstream.StatusCode, respBytes, "")
+		if retry, ok := s.repairAndRetryUpstream(tenantID, userID, generation, modelName, method, path, contentType, body, upstream.StatusCode, respBytes, ""); ok {
+			upstream = retry
+			respBytes = upstream.Body
+			if upstream.StatusCode < 400 {
+				if converted, ok := transformImageResponseToChatFormat(path, respBytes); ok {
+					respBytes = converted
+				}
+			}
+		}
+	}
+
+	if upstream.StatusCode < 400 && strings.ToUpper(strings.TrimSpace(method)) == http.MethodGet {
+		if failed, responseModel, message := readFailedModelTaskResponse(respBytes); failed {
+			if modelName == "" {
+				modelName = responseModel
+			}
+			generation = generationForProxyRequest(cfg, modelName, generation, path)
+			s.recordModelFailure(tenantID, userID, generation, modelName, method, path, upstream.StatusCode, respBytes, message)
+			requestContext := buildRepairRequestContext(generation, method, path, "application/json", respBytes)
+			s.triggerOnDemandRepairAsync(generation, modelName, message, requestContext)
+		} else if generation != "" && modelName != "" {
+			s.recordModelSuccess(tenantID, userID, generation, modelName, method, path, upstream.StatusCode, upstream.ResponseTimeMs)
+		}
+	} else if upstream.StatusCode < 400 && generation != "" && modelName != "" {
+		s.recordModelSuccess(tenantID, userID, generation, modelName, method, path, upstream.StatusCode, upstream.ResponseTimeMs)
+	}
+
+	if upstream.StatusCode < 400 && cost > 0 {
+		metadata, note := buildCreditSpendDetail(chargeType, modelName, path, pricingResult)
+		if err := s.creditService.SpendWithMetadata(0, userID, cost, chargeType, modelName, note, metadata); err != nil {
+			return nil, err
+		}
+	}
+
+	account, _ := s.creditService.GetOrCreateAccount(tenantID, userID)
+	balance := 0
+	if account != nil {
+		balance = account.Balance
+	}
+
+	return &ProxyResult{
+		StatusCode: upstream.StatusCode,
+		Body:       respBytes,
+		Headers:    upstream.Headers,
+		Cost:       cost,
+		Balance:    balance,
+	}, nil
+}
+
+func (s *GenerateService) getProxyCost(cfg *model.TenantApiConfig, tenantID uint, method, path, contentType string, body []byte, modelName string) (int, string, CreditCostResult) {
 	if strings.ToUpper(strings.TrimSpace(method)) != http.MethodPost {
 		return 0, "", CreditCostResult{}
 	}
-	chargeType := generationTypeFromPath(path)
+	chargeType := resolveGenerationByApiConfig(cfg, modelName, generationTypeFromPath(path))
 	if chargeType == "" || modelName == "" {
 		return 0, "", CreditCostResult{}
 	}
@@ -339,6 +530,414 @@ func (s *GenerateService) getProxyCost(tenantID uint, method, path, contentType 
 		return 0, chargeType, CreditCostResult{}
 	}
 	return result.TotalCost, chargeType, result
+}
+
+func (s *GenerateService) repairAndRetryUpstream(tenantID, userID uint, generation, modelName, method, path, contentType string, body []byte, statusCode int, responseBody []byte, fallback string) (*upstreamCallResult, bool) {
+	if strings.ToUpper(strings.TrimSpace(method)) != http.MethodPost {
+		return nil, false
+	}
+	requestContext := buildRepairRequestContext(generation, method, path, contentType, body)
+	if !s.shouldAttemptOnDemandRepair(generation, modelName, statusCode, responseBody, fallback, requestContext) {
+		return nil, false
+	}
+	reason := buildRepairReason(method, path, statusCode, responseBody, fallback)
+	ctx, cancel := context.WithTimeout(context.Background(), 7*time.Minute)
+	defer cancel()
+	result, err := s.repairService.Repair(ctx, generation, modelName, reason, requestContext)
+	if err != nil {
+		log.Printf("on-demand repair failed generation=%s model=%s: %v", generation, modelName, err)
+		return nil, false
+	}
+	if result == nil || !result.Repaired {
+		return nil, false
+	}
+	cfg, err := s.apiConfigRepo.FindByTenant(tenantID)
+	if err != nil {
+		log.Printf("reload tenant API config after repair failed: %v", err)
+		return nil, false
+	}
+	apiKey, err := s.getDecryptedApiKey(tenantID)
+	if err != nil {
+		apiKey = cfg.ApiKey
+	}
+	retry, err := s.doUpstreamRequest(method, cfg.BaseUrl, apiKey, path, contentType, body)
+	if err != nil {
+		s.recordModelFailure(tenantID, userID, generation, modelName, method, path, 0, nil, err.Error())
+		log.Printf("retry after on-demand repair failed generation=%s model=%s: %v", generation, modelName, err)
+		return nil, false
+	}
+	return retry, true
+}
+
+func (s *GenerateService) triggerOnDemandRepairAsync(generation, modelName, reason string, requestContext *RepairRequestContext) {
+	if !s.shouldAttemptOnDemandRepair(generation, modelName, 0, nil, reason, requestContext) {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 7*time.Minute)
+		defer cancel()
+		if _, err := s.repairService.Repair(ctx, generation, modelName, reason, requestContext); err != nil {
+			log.Printf("async on-demand repair failed generation=%s model=%s: %v", generation, modelName, err)
+		}
+	}()
+}
+
+func (s *GenerateService) shouldAttemptOnDemandRepair(generation, modelName string, statusCode int, responseBody []byte, fallback string, requestContext *RepairRequestContext) bool {
+	if s.repairService == nil || !s.repairService.Enabled() {
+		return false
+	}
+	generation = strings.TrimSpace(generation)
+	if generation != "image" && generation != "video" {
+		return false
+	}
+	if strings.TrimSpace(modelName) == "" {
+		return false
+	}
+	if statusCode == 0 && strings.TrimSpace(fallback) != "" {
+		return true
+	}
+	message := strings.ToLower(buildModelCallErrorSummary(statusCode, responseBody, fallback))
+	if requestContext != nil && requestContext.Operation != "" && isCapabilityMismatchMessage(message) {
+		return true
+	}
+	nonChannelPatterns := []string{
+		"prompt length",
+		"prompt too long",
+		"too long",
+		"maximum",
+		"最多",
+		"超过上限",
+		"参数",
+		"invalid",
+		"must be",
+		"requires",
+		"required",
+		"reference image",
+		"reference_images",
+		"至少需要",
+		"必须提供",
+		"seconds is invalid",
+		"video_length",
+		"unsupported",
+	}
+	for _, pattern := range nonChannelPatterns {
+		if strings.Contains(message, pattern) {
+			return false
+		}
+	}
+	if statusCode == http.StatusRequestTimeout || statusCode == http.StatusTooManyRequests || statusCode >= 500 {
+		return true
+	}
+	transientPatterns := []string{
+		"overload",
+		"overloaded",
+		"too many requests",
+		"rate limit",
+		"ratelimit",
+		"capacity",
+		"busy",
+		"timeout",
+		"timed out",
+		"temporarily",
+		"try again",
+		"quota",
+		"insufficient_quota",
+		"负载",
+		"限流",
+		"超时",
+		"稍后",
+		"繁忙",
+	}
+	for _, pattern := range transientPatterns {
+		if strings.Contains(message, pattern) {
+			return true
+		}
+	}
+	return false
+}
+
+func isCapabilityMismatchMessage(message string) bool {
+	patterns := []string{
+		"not support",
+		"not supported",
+		"unsupported",
+		"only support",
+		"only supports",
+		"duration",
+		"seconds",
+		"aspect",
+		"ratio",
+		"resolution",
+		"size",
+		"image-to-video",
+		"image to video",
+		"video-to-video",
+		"video to video",
+		"first frame",
+		"last frame",
+		"reference",
+		"首帧",
+		"尾帧",
+		"参考图",
+		"参考视频",
+		"竖屏",
+		"横屏",
+		"尺寸",
+		"比例",
+		"时长",
+		"仅支持",
+		"不支持",
+	}
+	for _, pattern := range patterns {
+		if strings.Contains(message, pattern) {
+			return true
+		}
+	}
+	return false
+}
+
+func buildRepairRequestContext(generation, method, path, contentType string, body []byte) *RepairRequestContext {
+	generation = strings.TrimSpace(generation)
+	if generation != "image" && generation != "video" {
+		return nil
+	}
+	ctx := &RepairRequestContext{
+		Method:      strings.ToUpper(strings.TrimSpace(method)),
+		Path:        cleanPath(path),
+		ContentType: strings.TrimSpace(strings.Split(contentType, ";")[0]),
+	}
+
+	payload := map[string]interface{}{}
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(contentType)), "application/json") && len(body) > 0 {
+		_ = json.Unmarshal(body, &payload)
+	}
+
+	ctx.Size = firstPayloadString(payload, "size", "resolution", "resolution_name", "vquality")
+	if ctx.Size == "" {
+		ctx.Size = sizeFromWidthHeight(payload)
+	}
+	ctx.AspectRatio = firstPayloadString(payload, "aspect_ratio", "ratio")
+	if ctx.AspectRatio == "" {
+		ctx.AspectRatio = aspectRatioFromSize(ctx.Size)
+	}
+	ctx.Seconds = firstPayloadInt(payload, "seconds", "duration", "video_length")
+	ctx.ReferenceCount = countRequestReferences(payload)
+	if ctx.ReferenceCount == 0 && strings.HasPrefix(strings.ToLower(strings.TrimSpace(contentType)), "multipart/form-data") {
+		ctx.ReferenceCount = countMultipartReferences(body)
+	}
+	ctx.HasReferences = ctx.ReferenceCount > 0
+
+	cleanPath := ctx.Path
+	switch generation {
+	case "image":
+		ctx.Operation = "image_generate"
+		if strings.HasSuffix(cleanPath, "/images/edits") || ctx.HasReferences {
+			ctx.Operation = "image_edit"
+		}
+	case "video":
+		ctx.Operation = "text_to_video"
+		if hasVideoReference(payload) {
+			ctx.Operation = "video_to_video"
+			ctx.HasReferences = true
+			if ctx.ReferenceCount == 0 {
+				ctx.ReferenceCount = 1
+			}
+		} else if ctx.HasReferences {
+			ctx.Operation = "image_to_video"
+		}
+	}
+	return ctx
+}
+
+func firstPayloadString(payload map[string]interface{}, keys ...string) string {
+	for _, key := range keys {
+		value, ok := payload[key]
+		if !ok {
+			continue
+		}
+		switch typed := value.(type) {
+		case string:
+			if strings.TrimSpace(typed) != "" {
+				return strings.TrimSpace(typed)
+			}
+		case float64:
+			if typed > 0 {
+				return strconv.Itoa(int(typed))
+			}
+		}
+	}
+	return ""
+}
+
+func firstPayloadInt(payload map[string]interface{}, keys ...string) int {
+	for _, key := range keys {
+		value, ok := payload[key]
+		if !ok {
+			continue
+		}
+		switch typed := value.(type) {
+		case float64:
+			if typed > 0 {
+				return int(typed)
+			}
+		case string:
+			if parsed, err := strconv.Atoi(strings.TrimSpace(typed)); err == nil && parsed > 0 {
+				return parsed
+			}
+		}
+	}
+	return 0
+}
+
+func sizeFromWidthHeight(payload map[string]interface{}) string {
+	width := firstPayloadInt(payload, "width")
+	height := firstPayloadInt(payload, "height")
+	if width > 0 && height > 0 {
+		return fmt.Sprintf("%dx%d", width, height)
+	}
+	return ""
+}
+
+func aspectRatioFromSize(size string) string {
+	size = strings.ToLower(strings.TrimSpace(size))
+	parts := strings.Split(size, "x")
+	if len(parts) != 2 {
+		return ""
+	}
+	width, errW := strconv.Atoi(strings.TrimSpace(parts[0]))
+	height, errH := strconv.Atoi(strings.TrimSpace(parts[1]))
+	if errW != nil || errH != nil || width <= 0 || height <= 0 {
+		return ""
+	}
+	switch {
+	case width == height:
+		return "1:1"
+	case width*9 == height*16:
+		return "16:9"
+	case width*16 == height*9:
+		return "9:16"
+	case width*3 == height*4:
+		return "4:3"
+	case width*4 == height*3:
+		return "3:4"
+	default:
+		return fmt.Sprintf("%d:%d", width/gcd(width, height), height/gcd(width, height))
+	}
+}
+
+func gcd(a, b int) int {
+	for b != 0 {
+		a, b = b, a%b
+	}
+	if a < 0 {
+		return -a
+	}
+	return a
+}
+
+func countRequestReferences(payload map[string]interface{}) int {
+	if len(payload) == 0 {
+		return 0
+	}
+	count := 0
+	var visit func(key string, value interface{})
+	visit = func(key string, value interface{}) {
+		lowerKey := strings.ToLower(key)
+		if isReferenceKey(lowerKey) {
+			count += referenceValueCount(value)
+		}
+		switch typed := value.(type) {
+		case map[string]interface{}:
+			for childKey, childValue := range typed {
+				visit(childKey, childValue)
+			}
+		case []interface{}:
+			for _, childValue := range typed {
+				visit("", childValue)
+			}
+		}
+	}
+	for key, value := range payload {
+		visit(key, value)
+	}
+	return count
+}
+
+func isReferenceKey(key string) bool {
+	switch key {
+	case "image", "images", "image_url", "image_urls", "first_image", "first_image_url", "last_image", "last_image_url", "input_reference", "reference_image", "reference_images", "reference_image_urls", "reference_video", "reference_video_url", "reference_video_urls", "video", "video_url", "references", "inline_data", "filedata", "file_data":
+		return true
+	default:
+		return false
+	}
+}
+
+func referenceValueCount(value interface{}) int {
+	switch typed := value.(type) {
+	case string:
+		trimmed := strings.TrimSpace(typed)
+		if trimmed == "" {
+			return 0
+		}
+		if strings.Contains(trimmed, "|") {
+			return len(strings.Split(trimmed, "|"))
+		}
+		return 1
+	case []interface{}:
+		if len(typed) == 0 {
+			return 0
+		}
+		return len(typed)
+	case map[string]interface{}:
+		if len(typed) == 0 {
+			return 0
+		}
+		return 1
+	default:
+		return 0
+	}
+}
+
+func countMultipartReferences(body []byte) int {
+	count := 0
+	lower := bytes.ToLower(body)
+	for _, marker := range [][]byte{
+		[]byte(`name="image"`),
+		[]byte(`name="image[]"`),
+		[]byte(`name="images"`),
+		[]byte(`name="file"`),
+		[]byte(`name="first_image"`),
+		[]byte(`name="last_image"`),
+		[]byte(`name="video"`),
+	} {
+		count += bytes.Count(lower, marker)
+	}
+	return count
+}
+
+func hasVideoReference(payload map[string]interface{}) bool {
+	for _, key := range []string{"video", "video_url", "reference_video", "reference_video_url", "reference_video_urls", "input_video"} {
+		if referenceValueCount(payload[key]) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func generationForProxyRequest(cfg *model.TenantApiConfig, modelName, fallback, path string) string {
+	pathGeneration := generationTypeFromPath(path)
+	if pathGeneration != "" {
+		return pathGeneration
+	}
+	return resolveGenerationByApiConfig(cfg, modelName, fallback)
+}
+
+func buildRepairReason(method, path string, statusCode int, responseBody []byte, fallback string) string {
+	message := buildModelCallErrorSummary(statusCode, responseBody, fallback)
+	if message == "" {
+		message = "upstream request failed"
+	}
+	return fmt.Sprintf("%s %s status=%d: %s", strings.ToUpper(strings.TrimSpace(method)), cleanPath(path), statusCode, message)
 }
 
 func (s *GenerateService) recordModelFailure(tenantID, userID uint, genType, modelName, method, path string, statusCode int, body []byte, fallback string) {
@@ -358,6 +957,21 @@ func (s *GenerateService) recordModelFailure(tenantID, userID uint, genType, mod
 	})
 }
 
+func (s *GenerateService) recordModelSuccess(tenantID, userID uint, genType, modelName, method, path string, statusCode, responseTimeMs int) {
+	if genType == "" {
+		genType = generationTypeFromPath(path)
+	}
+	s.logService.RecordSuccess(ModelCallLogInput{
+		TenantID:   tenantID,
+		UserID:     userID,
+		Generation: genType,
+		Model:      modelName,
+		Method:     method,
+		Path:       path,
+		StatusCode: statusCode,
+	}, responseTimeMs)
+}
+
 func generationTypeFromPath(path string) string {
 	cleanPath := strings.Split(strings.TrimSpace(path), "?")[0]
 	switch {
@@ -372,6 +986,203 @@ func generationTypeFromPath(path string) string {
 	default:
 		return ""
 	}
+}
+
+func normalizeVideoReferenceImages(method, path, contentType string, body []byte) ([]byte, bool) {
+	if strings.ToUpper(strings.TrimSpace(method)) != http.MethodPost {
+		return body, false
+	}
+	if generationTypeFromPath(path) != "video" {
+		return body, false
+	}
+	if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(contentType)), "application/json") || len(body) == 0 {
+		return body, false
+	}
+
+	var payload interface{}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return body, false
+	}
+	durationChanged := normalizeVeoOmniFlashDuration(payload)
+	updated, imageChanged := normalizeDataURLImages(payload)
+	changed := durationChanged || imageChanged
+	if !changed {
+		return body, false
+	}
+	normalizedBody, err := json.Marshal(updated)
+	if err != nil {
+		return body, false
+	}
+	return normalizedBody, true
+}
+
+func normalizeVeoOmniFlashDuration(value interface{}) bool {
+	payload, ok := value.(map[string]interface{})
+	if !ok {
+		return false
+	}
+	modelName, _ := payload["model"].(string)
+	if strings.TrimSpace(modelName) != "veo-omni-flash" {
+		return false
+	}
+
+	changed := false
+	if payload["duration"] != float64(10) {
+		payload["duration"] = 10
+		changed = true
+	}
+	if _, exists := payload["seconds"]; exists && payload["seconds"] != "10" {
+		payload["seconds"] = "10"
+		changed = true
+	}
+	return changed
+}
+
+func normalizeDataURLImages(value interface{}) (interface{}, bool) {
+	switch typed := value.(type) {
+	case map[string]interface{}:
+		changed := false
+		for key, child := range typed {
+			updated, childChanged := normalizeDataURLImages(child)
+			if childChanged {
+				typed[key] = updated
+				changed = true
+			}
+		}
+		return typed, changed
+	case []interface{}:
+		changed := false
+		for idx, child := range typed {
+			updated, childChanged := normalizeDataURLImages(child)
+			if childChanged {
+				typed[idx] = updated
+				changed = true
+			}
+		}
+		return typed, changed
+	case string:
+		return compressDataURLImage(typed)
+	default:
+		return value, false
+	}
+}
+
+func compressDataURLImage(value string) (string, bool) {
+	prefix, encoded, ok := splitBase64ImageDataURL(value)
+	if !ok || len(encoded) <= maxVideoReferenceImageBase64Chars {
+		return value, false
+	}
+	raw, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		return value, false
+	}
+	compressed, ok := compressImageBytesForBase64Limit(raw, maxVideoReferenceImageBase64Chars)
+	if !ok {
+		return value, false
+	}
+	compressedEncoded := base64.StdEncoding.EncodeToString(compressed)
+	if len(compressedEncoded) >= len(encoded) {
+		return value, false
+	}
+	return prefix + compressedEncoded, true
+}
+
+func splitBase64ImageDataURL(value string) (string, string, bool) {
+	trimmed := strings.TrimSpace(value)
+	lower := strings.ToLower(trimmed)
+	if !strings.HasPrefix(lower, "data:image/") {
+		return "", "", false
+	}
+	commaIdx := strings.Index(trimmed, ",")
+	if commaIdx < 0 {
+		return "", "", false
+	}
+	prefix := trimmed[:commaIdx+1]
+	if !strings.Contains(strings.ToLower(prefix), ";base64") {
+		return "", "", false
+	}
+	encoded := stripBase64Whitespace(trimmed[commaIdx+1:])
+	if encoded == "" {
+		return "", "", false
+	}
+	return "data:image/jpeg;base64,", encoded, true
+}
+
+func stripBase64Whitespace(value string) string {
+	var builder strings.Builder
+	builder.Grow(len(value))
+	for _, r := range value {
+		switch r {
+		case ' ', '\n', '\r', '\t':
+			continue
+		default:
+			builder.WriteRune(r)
+		}
+	}
+	return builder.String()
+}
+
+func compressImageBytesForBase64Limit(raw []byte, maxEncodedChars int) ([]byte, bool) {
+	img, _, err := image.Decode(bytes.NewReader(raw))
+	if err != nil {
+		return nil, false
+	}
+	bounds := img.Bounds()
+	width, height := bounds.Dx(), bounds.Dy()
+	if width <= 0 || height <= 0 {
+		return nil, false
+	}
+
+	qualities := []int{82, 72, 62, 52, 42, 34, 28}
+	scales := []float64{1, 0.85, 0.7, 0.55, 0.45, 0.35, 0.25}
+	var smallest []byte
+	for _, scale := range scales {
+		candidateImage := img
+		if scale < 1 {
+			scaledWidth := int(float64(width) * scale)
+			scaledHeight := int(float64(height) * scale)
+			if scaledWidth < 1 {
+				scaledWidth = 1
+			}
+			if scaledHeight < 1 {
+				scaledHeight = 1
+			}
+			candidateImage = resizeNearest(img, scaledWidth, scaledHeight)
+		}
+
+		for _, quality := range qualities {
+			var buffer bytes.Buffer
+			if err := jpeg.Encode(&buffer, candidateImage, &jpeg.Options{Quality: quality}); err != nil {
+				continue
+			}
+			candidate := buffer.Bytes()
+			if len(smallest) == 0 || len(candidate) < len(smallest) {
+				smallest = append([]byte(nil), candidate...)
+			}
+			if base64.StdEncoding.EncodedLen(len(candidate)) <= maxEncodedChars {
+				return candidate, true
+			}
+		}
+	}
+	if len(smallest) > 0 && len(smallest) < len(raw) {
+		return smallest, true
+	}
+	return nil, false
+}
+
+func resizeNearest(src image.Image, width, height int) image.Image {
+	srcBounds := src.Bounds()
+	srcWidth := srcBounds.Dx()
+	srcHeight := srcBounds.Dy()
+	dst := image.NewRGBA(image.Rect(0, 0, width, height))
+	for y := 0; y < height; y++ {
+		srcY := srcBounds.Min.Y + y*srcHeight/height
+		for x := 0; x < width; x++ {
+			srcX := srcBounds.Min.X + x*srcWidth/width
+			dst.Set(x, y, src.At(srcX, srcY))
+		}
+	}
+	return dst
 }
 
 func extractImageCount(contentType string, body []byte) int {
@@ -462,8 +1273,12 @@ func creditUnitLabel(unitType model.CreditPricingUnit) string {
 }
 
 func buildUpstreamURL(baseURL, path string) string {
+	cleanPath := strings.TrimSpace(path)
+	if strings.HasPrefix(cleanPath, "http://") || strings.HasPrefix(cleanPath, "https://") {
+		return cleanPath
+	}
 	normalizedBase := strings.TrimRight(strings.TrimSpace(baseURL), "/")
-	normalizedPath := "/" + strings.TrimLeft(strings.TrimSpace(path), "/")
+	normalizedPath := "/" + strings.TrimLeft(cleanPath, "/")
 	if normalizedBase == "" {
 		return normalizedPath
 	}
@@ -521,7 +1336,7 @@ func transformImageResponseToChatFormat(path string, respBytes []byte) ([]byte, 
 				"finish_reason": "stop",
 			},
 		},
-		"object": "chat.completion",
+		"object":  "chat.completion",
 		"created": time.Now().Unix(),
 	})
 	if err != nil {

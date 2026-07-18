@@ -10,6 +10,8 @@ export type ApiConfigInfo = {
   text_models?: string[];
   audio_models?: string[];
   model_routes?: Record<string, string>;
+  model_video_durations?: Record<string, number[]>;
+  model_video_customizable?: Record<string, boolean>;
 };
 
 export type ApiModelCatalog = {
@@ -24,6 +26,28 @@ export type ApiModelCatalog = {
   total_models?: number;
   pricing_map?: Record<string, PricingItem>;
   model_routes?: Record<string, string>;
+  model_video_durations?: Record<string, number[]>;
+  model_video_customizable?: Record<string, boolean>;
+};
+
+export type ApiModelTestInput = {
+  model: string;
+  generation: string;
+  route?: string;
+  prompt?: string;
+};
+
+export type ApiModelTestResult = {
+  success: boolean;
+  model: string;
+  generation: string;
+  route: string;
+  method: string;
+  path: string;
+  status_code: number;
+  response_time_ms: number;
+  error_message?: string;
+  response_body?: string;
 };
 
 export async function getApiConfig() {
@@ -45,7 +69,14 @@ export async function saveApiConfig(input: {
   text_models?: string[];
   audio_models?: string[];
   model_routes?: Record<string, string>;
+  model_video_durations?: Record<string, number[]>;
+  model_video_customizable?: Record<string, boolean>;
 }) {
   const res = await apiClient.post("/api-config", input);
   return res.data.data as { saved: boolean };
+}
+
+export async function testApiModel(input: ApiModelTestInput) {
+  const res = await apiClient.post("/api-config/test-model", input);
+  return res.data.data as ApiModelTestResult;
 }

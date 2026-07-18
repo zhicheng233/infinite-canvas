@@ -10,7 +10,7 @@ export function middleware(request: NextRequest) {
         return NextResponse.next();
     }
 
-    if (pathname.startsWith("/_next") || pathname.startsWith("/api") || pathname.startsWith("/favicon") || pathname.startsWith("/icons") || pathname === "/logo.svg" || pathname === "/logo-dark.svg") {
+    if (pathname.startsWith("/_next") || pathname.startsWith("/api") || pathname.startsWith("/favicon") || pathname.startsWith("/icons") || pathname === "/icon.png" || pathname === "/logo.svg" || pathname === "/logo.png" || pathname === "/logo-dark.svg") {
         return NextResponse.next();
     }
 
@@ -18,5 +18,5 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-    matcher: ["/((?!_next/static|_next/image|favicon.ico|logo.svg|logo-dark.svg|icons).*)"],
+    matcher: ["/((?!_next/static|_next/image|favicon.ico|icon.png|logo.svg|logo.png|logo-dark.svg|icons).*)"],
 };

@@ -9,7 +9,7 @@ import { ImageSettingsPanel } from "@/components/image-settings-panel";
 import { ModelPicker } from "@/components/model-picker";
 import { PromptSelectDialog } from "@/components/prompts/prompt-select-dialog";
 import { AssetPickerModal, type InsertAssetPayload } from "@/app/(user)/canvas/components/asset-picker-modal";
-import { CreditHelpActions, CreditSymbol, isInsufficientCreditError, useEstimatedCreditCost, useUserCreditBalance } from "@/constant/credits";
+import { CreditCostHint, CreditHelpActions, isInsufficientCreditError, useEstimatedCreditCost, useUserCreditBalance } from "@/constant/credits";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { imageReferenceLabel } from "@/lib/image-reference-prompt";
 import { deleteGenerationRecords, listGenerationRecords, saveGenerationRecord } from "@/services/api/generation-records";
@@ -95,7 +95,6 @@ export default function ImagePage() {
     const generationCount = Math.max(1, Math.min(10, Number(config.count) || 1));
     const estimatedCredits = useEstimatedCreditCost(model, generationCount);
     const balance = useUserCreditBalance();
-    const postBalance = balance === null ? null : balance - estimatedCredits;
 
     useEffect(() => {
         if (!running || !startedAt) return;
@@ -414,13 +413,7 @@ export default function ImagePage() {
                             <Button type="primary" size="large" block icon={<Sparkles className="size-4" />} loading={running} disabled={!canGenerate || running} onClick={() => void generate()}>
                                 {running ? "开始生成" : `开始生成（${estimatedCredits} 积分）`}
                             </Button>
-                            <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-stone-500 dark:text-stone-400">
-                                <span className="inline-flex items-center gap-1">
-                                    <CreditSymbol className="text-amber-500" />
-                                    {balance === null ? "正在读取当前积分" : `当前余额 ${balance}，预计生成后剩余 ${Math.max(postBalance || 0, 0)}`}
-                                </span>
-                                <span>{estimatedCredits > 0 ? `本次预计扣除 ${estimatedCredits} 积分` : "当前模型未配置扣费"}</span>
-                            </div>
+                            <CreditCostHint credits={estimatedCredits} balance={balance} />
                         </div>
                     </div>
 

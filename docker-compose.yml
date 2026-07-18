@@ -39,6 +39,8 @@ services:
       - mysql
       - redis
     restart: unless-stopped
+    volumes:
+      - backend_tmp_media:/app/tmp-media
     environment:
       PORT: "18080"
       DB_DSN: root:${MYSQL_ROOT_PASSWORD}@tcp(mysql:3306)/${MYSQL_DATABASE:-infinite_canvas}?charset=utf8mb4&parseTime=True&loc=Local
@@ -49,6 +51,13 @@ services:
       INIT_ADMIN_USERNAME: ${INIT_ADMIN_USERNAME:-}
       INIT_ADMIN_PASSWORD: ${INIT_ADMIN_PASSWORD:-}
       INIT_ADMIN_DISPLAY_NAME: ${INIT_ADMIN_DISPLAY_NAME:-}
+      TMP_MEDIA_DIR: /app/tmp-media
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-}
+      ON_DEMAND_REPAIR_URL: ${ON_DEMAND_REPAIR_URL:-}
+      ON_DEMAND_REPAIR_USERNAME: ${ON_DEMAND_REPAIR_USERNAME:-}
+      ON_DEMAND_REPAIR_PASSWORD: ${ON_DEMAND_REPAIR_PASSWORD:-}
+      ON_DEMAND_REPAIR_TIMEOUT_SECONDS: ${ON_DEMAND_REPAIR_TIMEOUT_SECONDS:-420}
 
 volumes:
   mysql_data:
+  backend_tmp_media:

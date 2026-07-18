@@ -1,12 +1,15 @@
 import axios from "axios";
 
+const AUTH_TOKEN_KEY = "infinite-canvas:auth_token";
+export const AUTH_TOKEN_CHANGE_EVENT = "infinite-canvas:auth-token-change";
+
 export function resolveApiBaseUrl(): string {
   const configured = process.env.NEXT_PUBLIC_API_URL?.trim();
   if (configured) return configured.replace(/\/+$/, "");
   if (typeof window !== "undefined") {
     return `${window.location.origin}/backend-api`;
   }
-  return "http://localhost:18080/api";
+  return "http://localhost:18080/backend-api";
 }
 
 export const API_BASE = resolveApiBaseUrl();
@@ -45,13 +48,15 @@ export default apiClient;
 
 export function getStoredToken(): string | null {
   if (typeof window === "undefined") return null;
-  return localStorage.getItem("infinite-canvas:auth_token");
+  return localStorage.getItem(AUTH_TOKEN_KEY);
 }
 
 export function setStoredToken(token: string): void {
-  localStorage.setItem("infinite-canvas:auth_token", token);
+  localStorage.setItem(AUTH_TOKEN_KEY, token);
+  if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent(AUTH_TOKEN_CHANGE_EVENT, { detail: token }));
 }
 
 export function clearStoredToken(): void {
-  localStorage.removeItem("infinite-canvas:auth_token");
+  localStorage.removeItem(AUTH_TOKEN_KEY);
+  if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent(AUTH_TOKEN_CHANGE_EVENT));
 }

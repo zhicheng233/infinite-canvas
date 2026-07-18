@@ -48,6 +48,8 @@ export function AppConfigModal() {
                     textModels: apiConfig.text_models,
                     audioModels: apiConfig.audio_models,
                     modelRoutes: apiConfig.model_routes,
+                    modelVideoDurations: apiConfig.model_video_durations,
+                    modelVideoCustomizable: apiConfig.model_video_customizable,
                 });
             } catch (err: any) {
                 if (mounted) message.error(err?.message || "加载模型列表失败");
@@ -75,7 +77,7 @@ export function AppConfigModal() {
 
     function normalizeImageCount(value: string) {
         const n = parseInt(value, 10);
-        if (isNaN(n) || n < 1) return "3";
+        if (isNaN(n) || n < 1) return "1";
         return String(Math.min(n, 15));
     }
 

@@ -6,7 +6,7 @@ import { Switch } from "antd";
 import { ImageSettingsTheme } from "@/components/image-settings-panel";
 import { boolConfig, isSeedanceFastModel, isSeedanceVideoConfig, normalizeSeedanceDuration, normalizeSeedanceRatio, normalizeSeedanceResolution, seedanceDurationOptions, seedancePixelLabel, seedanceRatioOptions, seedanceResolutionOptions } from "@/lib/seedance-video";
 import { type CanvasTheme } from "@/lib/canvas-theme";
-import { fixedVideoDurationForModel, modelOptionName, type AiConfig } from "@/stores/use-config-store";
+import { fixedConfiguredVideoDurationForModel, isVideoDurationCustomizable, modelOptionName, normalizeVideoDurationForModel, videoDurationOptionsForModel, type AiConfig } from "@/stores/use-config-store";
 
 const resolutionOptions = [
     { value: "720", label: "720p" },
@@ -26,20 +26,24 @@ const secondOptions = [6, 10, 12, 16, 20];
 
 type VideoSettingsPanelProps = {
     config: AiConfig;
+    model?: string;
     onConfigChange: (key: "vquality" | "size" | "videoSeconds" | "videoGenerateAudio" | "videoWatermark", value: string) => void;
     theme: CanvasTheme;
     showTitle?: boolean;
     className?: string;
 };
 
-export function VideoSettingsPanel({ config, onConfigChange, theme, showTitle = true, className = "w-[320px] space-y-4 rounded-2xl px-1 py-0.5" }: VideoSettingsPanelProps) {
-    if (isSeedanceVideoConfig(config)) {
-        return <SeedanceVideoSettingsPanel config={config} onConfigChange={onConfigChange} theme={theme} showTitle={showTitle} className={className} />;
+export function VideoSettingsPanel({ config, model: selectedModel, onConfigChange, theme, showTitle = true, className = "w-[320px] space-y-4 rounded-2xl px-1 py-0.5" }: VideoSettingsPanelProps) {
+    const model = selectedModel || config.videoModel || config.model;
+    const resolvedConfig = { ...config, videoModel: model, model };
+    if (isSeedanceVideoConfig(resolvedConfig)) {
+        return <SeedanceVideoSettingsPanel config={resolvedConfig} model={model} onConfigChange={onConfigChange} theme={theme} showTitle={showTitle} className={className} />;
     }
 
-    const model = config.videoModel || config.model;
-    const fixedDuration = fixedVideoDurationForModel(model);
-    const seconds = fixedDuration ? String(fixedDuration) : config.videoSeconds || "6";
+    const configuredDurations = videoDurationOptionsForModel(config, model);
+    const fixedDuration = fixedConfiguredVideoDurationForModel(config, model);
+    const customizable = isVideoDurationCustomizable(config, model);
+    const seconds = normalizeVideoDurationForModel(config, model, config.videoSeconds);
     const size = normalizeVideoSizeValue(config.size);
     const dimensions = readSizeDimensions(size);
     const resolution = normalizeVideoResolutionValue(config.vquality);
@@ -91,22 +95,23 @@ export function VideoSettingsPanel({ config, onConfigChange, theme, showTitle = 
                 </SettingGroup>
                 <SettingGroup title="秒数" color={theme.node.muted}>
                     <div className="grid grid-cols-3 gap-2.5">
-                        {(fixedDuration ? [fixedDuration] : secondOptions).map((value) => (
+                        {(configuredDurations.length ? configuredDurations : fixedDuration ? [fixedDuration] : secondOptions).map((value) => (
                             <OptionPill key={value} selected={seconds === String(value)} theme={theme} onClick={() => onConfigChange("videoSeconds", String(value))}>
                                 {value}s
                             </OptionPill>
                         ))}
-                        <NumberInput value={seconds} min={fixedDuration || 1} max={fixedDuration || 20} disabled={Boolean(fixedDuration)} theme={theme} onChange={(value) => onConfigChange("videoSeconds", value)} />
+                        <NumberInput value={seconds} min={(configuredDurations[0] || fixedDuration || 1)} max={(configuredDurations.at(-1) || fixedDuration || 20)} disabled={Boolean(fixedDuration) || (configuredDurations.length > 0 && !customizable)} theme={theme} onChange={(value) => onConfigChange("videoSeconds", value)} />
                     </div>
                     {fixedDuration ? <div className="text-[11px] leading-4 opacity-55">当前模型仅支持 {fixedDuration} 秒，已自动固定。</div> : null}
+                    {!fixedDuration && configuredDurations.length > 0 ? <div className="text-[11px] leading-4 opacity-55">当前模型可选时长：{configuredDurations.join(" / ")} 秒{customizable ? "，也可自定义。" : "。"} </div> : null}
                 </SettingGroup>
             </div>
         </ImageSettingsTheme>
     );
 }
 
-function SeedanceVideoSettingsPanel({ config, onConfigChange, theme, showTitle, className }: VideoSettingsPanelProps) {
-    const model = modelOptionName(config.model || config.videoModel);
+function SeedanceVideoSettingsPanel({ config, model: selectedModel, onConfigChange, theme, showTitle, className }: VideoSettingsPanelProps) {
+    const model = modelOptionName(selectedModel || config.model || config.videoModel);
     const resolution = normalizeSeedanceResolution(config.vquality, model);
     const ratio = normalizeSeedanceRatio(config.size);
     const duration = normalizeSeedanceDuration(config.videoSeconds);

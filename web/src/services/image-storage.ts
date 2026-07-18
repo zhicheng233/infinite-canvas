@@ -4,6 +4,7 @@ import localforage from "localforage";
 
 import { nanoid } from "nanoid";
 import { readImageMeta } from "@/lib/image-utils";
+import { fetchAssetBlob } from "./remote-asset";
 
 export type UploadedImage = {
     url: string;
@@ -18,7 +19,7 @@ const store = localforage.createInstance({ name: "infinite-canvas", storeName: "
 const objectUrls = new Map<string, string>();
 
 export async function uploadImage(input: string | Blob): Promise<UploadedImage> {
-    const blob = typeof input === "string" ? await (await fetch(input)).blob() : input;
+    const blob = await normalizeImageBlob(await fetchAssetBlob(input), typeof input === "string" ? input : "");
     const storageKey = `image:${nanoid()}`;
     await store.setItem(storageKey, blob);
     const url = URL.createObjectURL(blob);
@@ -43,8 +44,9 @@ export async function getImageBlob(storageKey: string) {
 }
 
 export async function setImageBlob(storageKey: string, blob: Blob) {
-    await store.setItem(storageKey, blob);
-    const url = URL.createObjectURL(blob);
+    const normalizedBlob = await normalizeImageBlob(blob, "");
+    await store.setItem(storageKey, normalizedBlob);
+    const url = URL.createObjectURL(normalizedBlob);
     objectUrls.set(storageKey, url);
     return url;
 }
@@ -52,7 +54,7 @@ export async function setImageBlob(storageKey: string, blob: Blob) {
 export async function imageToDataUrl(image: { url?: string; dataUrl?: string; storageKey?: string }) {
     const url = image.dataUrl || (await resolveImageUrl(image.storageKey, image.url || ""));
     if (!url || url.startsWith("data:")) return url;
-    return blobToDataUrl(await (await fetch(url)).blob());
+    return blobToDataUrl(await normalizeImageBlob(await fetchAssetBlob(url), url));
 }
 
 export async function deleteStoredImages(keys: Iterable<string>) {
@@ -89,4 +91,45 @@ function blobToDataUrl(blob: Blob) {
         reader.onerror = () => reject(new Error("读取图片失败"));
         reader.readAsDataURL(blob);
     });
+}
+
+async function normalizeImageBlob(blob: Blob, sourceUrl: string) {
+    const type = normalizeMimeType(blob.type);
+    if (type) {
+        return type === blob.type ? blob : blob.slice(0, blob.size, type);
+    }
+    const detectedType = await detectImageMimeType(blob, sourceUrl);
+    return detectedType ? blob.slice(0, blob.size, detectedType) : blob.slice(0, blob.size, "image/png");
+}
+
+function normalizeMimeType(value: string) {
+    const type = value.trim().toLowerCase();
+    if (!type || type === "application/octet-stream") {
+        return "";
+    }
+    return type.startsWith("image/") ? type : "";
+}
+
+async function detectImageMimeType(blob: Blob, sourceUrl: string) {
+    const header = new Uint8Array(await blob.slice(0, 16).arrayBuffer());
+    if (header.length >= 8 && header[0] === 0x89 && header[1] === 0x50 && header[2] === 0x4e && header[3] === 0x47) {
+        return "image/png";
+    }
+    if (header.length >= 3 && header[0] === 0xff && header[1] === 0xd8 && header[2] === 0xff) {
+        return "image/jpeg";
+    }
+    if (header.length >= 12 && header[0] === 0x52 && header[1] === 0x49 && header[2] === 0x46 && header[3] === 0x46 && header[8] === 0x57 && header[9] === 0x45 && header[10] === 0x42 && header[11] === 0x50) {
+        return "image/webp";
+    }
+    if (header.length >= 4 && header[0] === 0x47 && header[1] === 0x49 && header[2] === 0x46) {
+        return "image/gif";
+    }
+    const lowerUrl = sourceUrl.trim().toLowerCase();
+    if (lowerUrl.includes(".png")) return "image/png";
+    if (lowerUrl.includes(".jpg") || lowerUrl.includes(".jpeg")) return "image/jpeg";
+    if (lowerUrl.includes(".webp")) return "image/webp";
+    if (lowerUrl.includes(".gif")) return "image/gif";
+    if (lowerUrl.includes(".heic")) return "image/heic";
+    if (lowerUrl.includes(".heif")) return "image/heif";
+    return "";
 }

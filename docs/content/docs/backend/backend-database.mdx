@@ -37,10 +37,12 @@ description: 当前后端数据库表结构说明
 | account_id | uint | 账户 ID |
 | type | enum(earn/spend/refund/adjust) | 流水类型 |
 | amount | int | 变动积分 |
+| balance_before | int | 变动前余额 |
 | balance_after | int | 变动后余额 |
 | ref_type | string(50) | 业务来源，如 image/video/audio/recharge |
 | ref_id | string(100) | 关联业务 ID |
 | note | string(500) | 备注 |
+| metadata | longtext | 流水扩展详情 JSON，如模型、接口、计费单位、操作人 |
 
 ## credit_pricing 表
 
@@ -49,8 +51,10 @@ description: 当前后端数据库表结构说明
 | id | uint | 主键 |
 | tenant_id | uint | 租户 ID |
 | model | string(100) | 模型名 |
-| credits_per_unit | int | 单次积分消耗 |
-| unit_type | enum(per_image/per_video/per_token) | 计费单位 |
+| credits_per_unit | int | 按次计费的单次积分消耗；动态视频计费可为 0 |
+| unit_type | enum(per_image/per_video/per_video_second/per_token) | 计费单位 |
+| pricing_mode | enum(per_unit/video_dynamic) | 计费方式；`video_dynamic` 表示按视频秒数和分辨率动态计费 |
+| pricing_rule | longtext | 动态计费规则 JSON，例如视频基础积分和各分辨率秒单价 |
 
 ## tenant_api_configs 表
 
@@ -86,6 +90,25 @@ description: 当前后端数据库表结构说明
 | type | enum(image/video/audio) | 记录类型 |
 | title | string(200) | 标题 |
 | payload_json | longtext | 生成记录完整内容 |
+
+## model_call_logs 表
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | uint | 主键 |
+| tenant_id | uint | 当前固定为默认租户 |
+| user_id | uint | 调用用户 ID |
+| username | string(64) | 用户名快照 |
+| display_name | string(64) | 显示名称快照 |
+| generation | string(20) | 生成类型 image/video/audio/text |
+| model | string(100) | 调用模型 |
+| method | string(10) | HTTP 方法 |
+| path | string(255) | 上游接口路径 |
+| status_code | int | 上游状态码，0 表示本地校验或网络错误 |
+| error_message | string(500) | 错误摘要 |
+| error_body | longtext | 上游错误响应体 |
+
+管理后台模型健康概览基于该表统计近 24 小时、近 7 天失败量和 Top 失败模型。
 
 ## recharge_orders 表
 

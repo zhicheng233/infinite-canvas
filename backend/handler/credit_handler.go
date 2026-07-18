@@ -1,8 +1,9 @@
 package handler
 
 import (
-	"strings"
+	"encoding/json"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"infinite-canvas-server/model"
@@ -72,7 +73,22 @@ func (h *CreditHandler) SavePricing(c *gin.Context) {
 		model.Fail(c, 400, "模型名称不能为空")
 		return
 	}
-	if pricing.CreditsPerUnit <= 0 {
+	if pricing.PricingMode == "" {
+		pricing.PricingMode = model.PricingModePerUnit
+	}
+	if pricing.PricingMode == model.PricingModeVideoDynamic || pricing.UnitType == model.UnitPerVideoSecond {
+		pricing.PricingMode = model.PricingModeVideoDynamic
+		pricing.UnitType = model.UnitPerVideoSecond
+		var rule model.VideoPricingRule
+		if err := json.Unmarshal([]byte(pricing.PricingRule), &rule); err != nil {
+			model.Fail(c, 400, "视频动态计费规则格式错误")
+			return
+		}
+		if !hasPositiveVideoRate(rule.ResolutionSecondRates) {
+			model.Fail(c, 400, "请至少配置一个分辨率秒单价")
+			return
+		}
+	} else if pricing.CreditsPerUnit <= 0 {
 		model.Fail(c, 400, "每次消耗积分必须大于 0")
 		return
 	}
@@ -82,6 +98,15 @@ func (h *CreditHandler) SavePricing(c *gin.Context) {
 		return
 	}
 	model.OK(c, pricing)
+}
+
+func hasPositiveVideoRate(items map[string]int) bool {
+	for _, value := range items {
+		if value > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func (h *CreditHandler) DeletePricing(c *gin.Context) {
@@ -126,7 +151,13 @@ func (h *CreditHandler) Recharge(c *gin.Context) {
 	if note == "" {
 		note = "管理员充值"
 	}
-	if err := h.creditService.Earn(input.UserID, input.Amount, "recharge", "", note); err != nil {
+	metadata := service.BuildCreditMetadata(map[string]interface{}{
+		"scene":            "后台充值",
+		"operator_user_id": claims.UserID,
+		"target_user_id":   input.UserID,
+		"credits":          input.Amount,
+	})
+	if err := h.creditService.EarnWithMetadata(input.UserID, input.Amount, "recharge", "", note, metadata); err != nil {
 		model.Fail(c, 500, err.Error())
 		return
 	}
@@ -134,10 +165,10 @@ func (h *CreditHandler) Recharge(c *gin.Context) {
 	// Get updated balance
 	account, _ := h.creditService.GetOrCreateAccount(claims.TenantID, input.UserID)
 	model.OK(c, gin.H{
-		"user_id":  input.UserID,
-		"amount":   input.Amount,
-		"balance":  account.Balance,
-		"message":  "充值成功",
+		"user_id": input.UserID,
+		"amount":  input.Amount,
+		"balance": account.Balance,
+		"message": "充值成功",
 	})
 }
 
@@ -153,9 +184,47 @@ func (h *CreditHandler) EstimateCost(c *gin.Context) {
 		model.Fail(c, 403, "该模型未配置计费，暂不可用")
 		return
 	}
+	fields := map[string]interface{}{}
+	if seconds := strings.TrimSpace(c.Query("seconds")); seconds != "" {
+		fields["seconds"] = seconds
+	}
+	if duration := strings.TrimSpace(c.Query("duration")); duration != "" {
+		fields["duration"] = duration
+	}
+	if resolution := strings.TrimSpace(c.Query("resolution")); resolution != "" {
+		fields["resolution"] = resolution
+	}
+	if size := strings.TrimSpace(c.Query("size")); size != "" {
+		fields["size"] = size
+	}
+	if count := strings.TrimSpace(c.Query("count")); count != "" {
+		fields["n"] = count
+	}
+	body, _ := json.Marshal(fields)
+	genType := strings.TrimSpace(c.DefaultQuery("type", ""))
+	if genType == "" {
+		if pricing.PricingMode == model.PricingModeVideoDynamic || pricing.UnitType == model.UnitPerVideo || pricing.UnitType == model.UnitPerVideoSecond {
+			genType = "video"
+		} else if pricing.UnitType == model.UnitPerImage {
+			genType = "image"
+		}
+	}
+	cost, err := service.CalculateCreditCost(pricing, genType, "application/json", body)
+	if err != nil {
+		model.Fail(c, 400, err.Error())
+		return
+	}
 	model.OK(c, gin.H{
 		"model":            pricing.Model,
 		"credits_per_unit": pricing.CreditsPerUnit,
 		"unit_type":        pricing.UnitType,
+		"pricing_mode":     pricing.PricingMode,
+		"pricing_rule":     pricing.PricingRule,
+		"total_cost":       cost.TotalCost,
+		"unit_cost":        cost.UnitCost,
+		"units":            cost.Units,
+		"seconds":          cost.Seconds,
+		"resolution":       cost.Resolution,
+		"formula":          cost.Formula,
 	})
 }

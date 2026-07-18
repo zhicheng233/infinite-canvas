@@ -71,10 +71,12 @@ func (r *CreditRepo) SavePricing(pricing *model.CreditPricing) error {
 	if err := r.db.Model(&model.CreditPricing{}).
 		Where("id = ?", pricing.ID).
 		Updates(map[string]interface{}{
-			"tenant_id":         pricing.TenantID,
-			"model":             pricing.Model,
-			"credits_per_unit":  pricing.CreditsPerUnit,
-			"unit_type":         pricing.UnitType,
+			"tenant_id":        pricing.TenantID,
+			"model":            pricing.Model,
+			"credits_per_unit": pricing.CreditsPerUnit,
+			"unit_type":        pricing.UnitType,
+			"pricing_mode":     pricing.PricingMode,
+			"pricing_rule":     pricing.PricingRule,
 		}).Error; err != nil {
 		return err
 	}

@@ -9,6 +9,13 @@ import React from "react";
 export const metadata: Metadata = {
     title: "无限画布",
     description: "一个无限画布创作工具",
+    icons: {
+        icon: [
+            { url: "/icon.png", type: "image/png", sizes: "256x256" },
+            { url: "/favicon.ico", type: "image/x-icon", sizes: "256x256" },
+        ],
+        shortcut: "/favicon.ico",
+    },
 };
 
 export default function RootLayout({

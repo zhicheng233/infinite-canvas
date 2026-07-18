@@ -53,6 +53,7 @@ UPDATE users SET role = 'super_admin' WHERE username = '你的管理员用户名
 当前视频模型支持的后台路由类型：
 
 - `openai` → `/v1/videos`
+- `yijia` → `/v1/videos`，JSON 请求体包含 `input_reference`、`seconds`、`watermark`
 - `xai` → `/v1/videos/generations`
 - `newapi` → `/v1/video/generations`
 - `seedance` → `/contents/generations/tasks`

@@ -219,6 +219,7 @@ export const useCanvasStore = create<CanvasStore>()(
                 if (project) scheduleCloudSave(project);
             },
             syncFromCloud: async () => {
+                if (typeof window === "undefined") return;
                 try {
                     const cloudProjects = await listCanvases();
                     const localProjects = get().projects;
@@ -263,6 +264,7 @@ export const useCanvasStore = create<CanvasStore>()(
                     projects: state.projects,
                 }) as StorageValue<CanvasStore>["state"],
             onRehydrateStorage: () => () => {
+                if (typeof window === "undefined") return;
                 useCanvasStore.setState({ hydrated: true });
                 void useCanvasStore.getState().syncFromCloud();
             },

@@ -33,6 +33,7 @@ func main() {
 		&model.TenantApiConfig{},
 		&model.RechargeOrder{},
 		&model.CanvasProject{},
+		&model.ModelCallLog{},
 	); err != nil {
 		log.Fatalf("failed to migrate: %v", err)
 	}
@@ -44,6 +45,7 @@ func main() {
 	apiConfigRepo := repository.NewApiConfigRepo(db)
 	canvasRepo := repository.NewCanvasRepo(db)
 	generationRecordRepo := repository.NewGenerationRecordRepo(db)
+	modelCallLogRepo := repository.NewModelCallLogRepo(db)
 
 	captchaService := service.NewCaptchaService()
 
@@ -53,23 +55,29 @@ func main() {
 	}
 	userService := service.NewUserService(userRepo)
 	creditService := service.NewCreditService(creditRepo)
-	generateService := service.NewGenerateService(apiConfigRepo, creditService, creditRepo, cfg.ApiKeyEncryptKey)
+	modelCallLogService := service.NewModelCallLogService(modelCallLogRepo, userRepo)
+	onDemandRepairService := service.NewOnDemandRepairService(cfg.OnDemandRepairURL, cfg.OnDemandRepairUser, cfg.OnDemandRepairPass, cfg.OnDemandRepairTimeoutSeconds)
+	generateService := service.NewGenerateService(apiConfigRepo, creditService, creditRepo, modelCallLogService, cfg.ApiKeyEncryptKey, onDemandRepairService)
+	tempMediaService := service.NewTempMediaService(cfg)
+	channelStatusService := service.NewChannelStatusService(modelCallLogRepo, apiConfigRepo)
 	paymentGateway := service.NewMockPaymentGateway(rechargeRepo, creditService)
 
 	authHandler := handler.NewAuthHandler(authService, userService)
-	adminHandler := handler.NewAdminHandler(tenantRepo, userRepo, creditService, creditRepo, rechargeRepo)
+	adminHandler := handler.NewAdminHandler(tenantRepo, userRepo, creditService, creditRepo, rechargeRepo, modelCallLogRepo, modelCallLogService)
 	userHandler := handler.NewUserHandler(userService)
 	creditHandler := handler.NewCreditHandler(creditService, creditRepo)
 	generateHandler := handler.NewGenerateHandler(generateService)
-	apiConfigHandler := handler.NewApiConfigHandler(apiConfigRepo, creditRepo, cfg)
+	apiConfigHandler := handler.NewApiConfigHandler(apiConfigRepo, creditRepo, generateService, cfg)
 	proxyHandler := handler.NewProxyHandler(generateService)
 	canvasHandler := handler.NewCanvasHandler(canvasRepo)
 	generationRecordHandler := handler.NewGenerationRecordHandler(generationRecordRepo)
 	rechargeHandler := handler.NewRechargeHandler(rechargeRepo, paymentGateway, creditService)
 	captchaHandler := handler.NewCaptchaHandler(captchaService)
+	tempMediaHandler := handler.NewTempMediaHandler(tempMediaService)
+	channelStatusHandler := handler.NewChannelStatusHandler(channelStatusService)
 
 	r := gin.Default()
-	router.Setup(r, authService, authHandler, adminHandler, userHandler, creditHandler, generateHandler, apiConfigHandler, proxyHandler, canvasHandler, generationRecordHandler, rechargeHandler, captchaHandler)
+	router.Setup(r, authService, authHandler, adminHandler, userHandler, creditHandler, generateHandler, apiConfigHandler, proxyHandler, canvasHandler, generationRecordHandler, rechargeHandler, captchaHandler, tempMediaHandler, channelStatusHandler)
 
 	log.Printf("Server starting on port %s", cfg.Port)
 	if err := r.Run(":" + cfg.Port); err != nil {

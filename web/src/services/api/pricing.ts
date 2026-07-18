@@ -6,6 +6,8 @@ export type PricingItem = {
   model: string;
   credits_per_unit: number;
   unit_type: string;
+  pricing_mode?: string;
+  pricing_rule?: string;
 };
 
 export async function listPricing() {

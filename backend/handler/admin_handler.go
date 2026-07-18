@@ -15,10 +15,12 @@ type AdminHandler struct {
 	creditService *service.CreditService
 	creditRepo    *repository.CreditRepo
 	rechargeRepo  *repository.RechargeRepo
+	modelLogRepo  *repository.ModelCallLogRepo
+	modelLogSvc   *service.ModelCallLogService
 }
 
-func NewAdminHandler(tenantRepo *repository.TenantRepo, userRepo *repository.UserRepo, creditService *service.CreditService, creditRepo *repository.CreditRepo, rechargeRepo *repository.RechargeRepo) *AdminHandler {
-	return &AdminHandler{tenantRepo: tenantRepo, userRepo: userRepo, creditService: creditService, creditRepo: creditRepo, rechargeRepo: rechargeRepo}
+func NewAdminHandler(tenantRepo *repository.TenantRepo, userRepo *repository.UserRepo, creditService *service.CreditService, creditRepo *repository.CreditRepo, rechargeRepo *repository.RechargeRepo, modelLogRepo *repository.ModelCallLogRepo, modelLogSvc *service.ModelCallLogService) *AdminHandler {
+	return &AdminHandler{tenantRepo: tenantRepo, userRepo: userRepo, creditService: creditService, creditRepo: creditRepo, rechargeRepo: rechargeRepo, modelLogRepo: modelLogRepo, modelLogSvc: modelLogSvc}
 }
 
 func (h *AdminHandler) ListTenants(c *gin.Context) {
@@ -50,6 +52,7 @@ type AdjustCreditsInput struct {
 }
 
 func (h *AdminHandler) AdjustCredits(c *gin.Context) {
+	claims := c.MustGet("claims").(*service.Claims)
 	var input AdjustCreditsInput
 	if err := c.ShouldBindJSON(&input); err != nil {
 		model.Fail(c, 400, "无效的请求参数")
@@ -59,13 +62,23 @@ func (h *AdminHandler) AdjustCredits(c *gin.Context) {
 		model.Fail(c, 400, "金额不能为零")
 		return
 	}
+	note := input.Note
+	if note == "" {
+		note = "管理员调整积分"
+	}
+	metadata := service.BuildCreditMetadata(map[string]interface{}{
+		"scene":            "后台调整",
+		"operator_user_id": claims.UserID,
+		"target_user_id":   input.UserID,
+		"adjustment":       input.Amount,
+	})
 	if input.Amount > 0 {
-		if err := h.creditService.Earn(input.UserID, input.Amount, "adjust", "", input.Note); err != nil {
+		if err := h.creditService.EarnWithMetadata(input.UserID, input.Amount, "adjust", "", note, metadata); err != nil {
 			model.Fail(c, 500, err.Error())
 			return
 		}
 	} else {
-		if err := h.creditService.Spend(0, input.UserID, -input.Amount, "adjust", "", input.Note); err != nil {
+		if err := h.creditService.SpendWithMetadata(0, input.UserID, -input.Amount, "adjust", "", note, metadata); err != nil {
 			model.Fail(c, 500, err.Error())
 			return
 		}
@@ -104,7 +117,18 @@ func (h *AdminHandler) RechargeCredits(c *gin.Context) {
 		return
 	}
 
-	if err := h.creditService.Earn(input.UserID, input.Credits, "recharge", strconv.FormatUint(uint64(order.ID), 10), input.Note); err != nil {
+	note := input.Note
+	if note == "" {
+		note = "管理员充值"
+	}
+	metadata := service.BuildCreditMetadata(map[string]interface{}{
+		"scene":             "后台充值",
+		"operator_user_id":  claims.UserID,
+		"target_user_id":    input.UserID,
+		"recharge_order_id": order.ID,
+		"credits":           input.Credits,
+	})
+	if err := h.creditService.EarnWithMetadata(input.UserID, input.Credits, "recharge", strconv.FormatUint(uint64(order.ID), 10), note, metadata); err != nil {
 		model.Fail(c, 500, err.Error())
 		return
 	}
@@ -165,10 +189,10 @@ func (h *AdminHandler) GetStats(c *gin.Context) {
 	}
 
 	model.OK(c, gin.H{
-		"total_users":           totalUsers,
-		"total_credits_earned":  totalEarned,
-		"total_credits_spent":   totalSpent,
-		"total_recharged":       rechargeTotal,
+		"total_users":          totalUsers,
+		"total_credits_earned": totalEarned,
+		"total_credits_spent":  totalSpent,
+		"total_recharged":      rechargeTotal,
 	})
 }
 
@@ -226,4 +250,43 @@ func (h *AdminHandler) ListTransactions(c *gin.Context) {
 		return
 	}
 	model.OKPage(c, txs, total, page, pageSize)
+}
+
+func (h *AdminHandler) ListModelCallLogs(c *gin.Context) {
+	claims := c.MustGet("claims").(*service.Claims)
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 {
+		pageSize = 20
+	}
+	if pageSize > 100 {
+		pageSize = 100
+	}
+	userID, _ := strconv.ParseUint(c.Query("user_id"), 10, 64)
+	items, total, err := h.modelLogRepo.List(claims.TenantID, repository.ModelCallLogQuery{
+		Page:       page,
+		PageSize:   pageSize,
+		UserID:     uint(userID),
+		Model:      c.Query("model"),
+		Generation: c.Query("generation"),
+		Keyword:    c.Query("keyword"),
+	})
+	if err != nil {
+		model.Fail(c, 500, err.Error())
+		return
+	}
+	model.OKPage(c, items, total, page, pageSize)
+}
+
+func (h *AdminHandler) GetModelHealth(c *gin.Context) {
+	claims := c.MustGet("claims").(*service.Claims)
+	summary, err := h.modelLogSvc.HealthSummary(claims.TenantID)
+	if err != nil {
+		model.Fail(c, 500, err.Error())
+		return
+	}
+	model.OK(c, summary)
 }

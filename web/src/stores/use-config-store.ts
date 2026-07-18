@@ -38,6 +38,8 @@ export type AiConfig = {
     textModels: string[];
     audioModels: string[];
     modelRoutes: Record<string, string>;
+    modelVideoDurations: Record<string, number[]>;
+    modelVideoCustomizable: Record<string, boolean>;
     quality: string;
     size: string;
     count: string;
@@ -55,7 +57,12 @@ export type WebdavSyncConfig = {
 
 export const CONFIG_STORE_KEY = "infinite-canvas:ai_config_store";
 export type ModelCapability = "image" | "video" | "text" | "audio";
+export type ModelRouteCapability = "image" | "image_generate" | "image_edit" | "video";
+export type ImageRouteMode = "auto" | "generations" | "edits" | "chat" | "banana";
+export type VideoRouteMode = "auto" | "openai" | "veo_json" | "waninter" | "yijia" | "xai" | "newapi" | "seedance";
 const CHANNEL_MODEL_SEPARATOR = "::";
+const IMAGE_ROUTE_VALUES = new Set<string>(["generations", "edits", "chat", "banana"]);
+const VIDEO_ROUTE_VALUES = new Set<string>(["openai", "veo_json", "waninter", "yijia", "xai", "newapi", "seedance"]);
 
 export const defaultConfig: AiConfig = {
     channelMode: "local",
@@ -90,10 +97,12 @@ export const defaultConfig: AiConfig = {
     textModels: ["default::gpt-5.5"],
     audioModels: ["default::gpt-4o-mini-tts"],
     modelRoutes: {},
+    modelVideoDurations: {},
+    modelVideoCustomizable: {},
     quality: "auto",
     size: "1:1",
     count: "1",
-    canvasImageCount: "3",
+    canvasImageCount: "1",
 };
 
 export const defaultWebdavSyncConfig: WebdavSyncConfig = {
@@ -120,6 +129,8 @@ type ConfigStore = {
         textModels?: string[];
         audioModels?: string[];
         modelRoutes?: Record<string, string>;
+        modelVideoDurations?: Record<string, number[]>;
+        modelVideoCustomizable?: Record<string, boolean>;
     }) => void;
     openConfigDialog: (shouldPromptContinue?: boolean) => void;
     setConfigDialogOpen: (isOpen: boolean) => void;
@@ -160,6 +171,28 @@ export function filterModelsByCapability(models: string[], capability?: ModelCap
 export function selectableModelsByCapability(config: AiConfig, capability?: ModelCapability) {
     if (!capability) return config.models;
     return config[modelListKey(capability)];
+}
+
+function modelIncludedInCapabilityList(config: AiConfig, capability: ModelCapability, model: string) {
+    const current = model.trim();
+    if (!current) return false;
+    const currentName = modelOptionName(current);
+    return selectableModelsByCapability(config, capability).some((item) => item === current || modelOptionName(item) === currentName);
+}
+
+export function defaultModelForCapability(config: AiConfig, capability: ModelCapability) {
+    if (capability === "image") return config.imageModel || config.model;
+    if (capability === "video") return config.videoModel || config.model;
+    if (capability === "audio") return config.audioModel || config.model;
+    return config.textModel || config.model;
+}
+
+export function resolveCapabilityModel(config: AiConfig, capability: ModelCapability, currentValue?: string) {
+    const current = (currentValue || "").trim();
+    if (current && (modelIncludedInCapabilityList(config, capability, current) || modelMatchesCapability(current, capability))) return current;
+    const defaultValue = defaultModelForCapability(config, capability);
+    if (defaultValue && (modelIncludedInCapabilityList(config, capability, defaultValue) || modelMatchesCapability(defaultValue, capability))) return defaultValue;
+    return selectableModelsByCapability(config, capability)[0] || defaultValue || current || "";
 }
 
 function modelListKey(capability: ModelCapability) {
@@ -203,6 +236,8 @@ export const useConfigStore = create<ConfigStore>()(
                     const derivedTextModels = catalog.textModels?.length ? normalizeServerModelCatalog(catalog.textModels) : filterModelsByCapability(allModels, "text");
                     const derivedAudioModels = catalog.audioModels?.length ? normalizeServerModelCatalog(catalog.audioModels) : filterModelsByCapability(allModels, "audio");
                     const modelRoutes = normalizeModelRoutes(catalog.modelRoutes, allModels);
+                    const modelVideoDurations = normalizeModelVideoDurations(catalog.modelVideoDurations, allModels);
+                    const modelVideoCustomizable = normalizeModelVideoCustomizable(catalog.modelVideoCustomizable, allModels);
                     const nextChannels = state.config.channels.length
                         ? state.config.channels.map((channel, index) => (index === 0 ? { ...channel, models: allModels } : channel))
                         : [createModelChannel({ id: "default", name: "默认渠道", baseUrl: state.config.baseUrl, apiKey: state.config.apiKey, models: allModels })];
@@ -216,6 +251,8 @@ export const useConfigStore = create<ConfigStore>()(
                             textModels: derivedTextModels,
                             audioModels: derivedAudioModels,
                             modelRoutes,
+                            modelVideoDurations,
+                            modelVideoCustomizable,
                             model: pickServerDefaultModel(state.config.model, allModels, derivedImageModels),
                             imageModel: pickServerDefaultModel(state.config.imageModel, derivedImageModels, allModels),
                             videoModel: pickServerDefaultModel(state.config.videoModel, derivedVideoModels, allModels),
@@ -259,12 +296,14 @@ export const useConfigStore = create<ConfigStore>()(
                         vquality: config.vquality || "720",
                         videoGenerateAudio: config.videoGenerateAudio || "true",
                         videoWatermark: config.videoWatermark || "false",
-                        canvasImageCount: config.canvasImageCount || "3",
+                        canvasImageCount: config.canvasImageCount || "1",
                         imageModels: Array.isArray(persistedConfig.imageModels) ? normalizeModelList(config.imageModels, channels) : filterModelsByCapability(models, "image"),
                         videoModels: Array.isArray(persistedConfig.videoModels) ? normalizeModelList(config.videoModels, channels) : filterModelsByCapability(models, "video"),
                         textModels: Array.isArray(persistedConfig.textModels) ? normalizeModelList(config.textModels, channels) : filterModelsByCapability(models, "text"),
                         audioModels: Array.isArray(persistedConfig.audioModels) ? normalizeModelList(config.audioModels, channels) : filterModelsByCapability(models, "audio"),
                         modelRoutes: normalizeModelRoutes(config.modelRoutes, models),
+                        modelVideoDurations: normalizeModelVideoDurations(config.modelVideoDurations, models),
+                        modelVideoCustomizable: normalizeModelVideoCustomizable(config.modelVideoCustomizable, models),
                     },
                 };
             },
@@ -313,13 +352,70 @@ export function modelOptionName(value: string) {
 }
 
 export function fixedVideoDurationForModel(value: string) {
-    const model = modelOptionName(value).trim().toLowerCase();
-    if (model === "veo-omni-flash") return 10;
     return null;
 }
 
+export function videoDurationOptionsForModel(config: Pick<AiConfig, "modelVideoDurations">, value: string) {
+    const model = modelOptionName(value).trim();
+    const items = config.modelVideoDurations?.[model];
+    if (!Array.isArray(items) || !items.length) return [];
+    return Array.from(new Set(items.map((item) => Math.floor(Number(item) || 0)).filter((item) => item > 0))).sort((left, right) => left - right);
+}
+
+export function fixedConfiguredVideoDurationForModel(config: Pick<AiConfig, "modelVideoDurations">, value: string) {
+    const items = videoDurationOptionsForModel(config, value);
+    if (items.length === 1) return items[0];
+    return fixedVideoDurationForModel(value);
+}
+
+export function isVideoDurationCustomizable(config: Pick<AiConfig, "modelVideoCustomizable">, value: string) {
+    const model = modelOptionName(value).trim();
+    return Boolean(config.modelVideoCustomizable?.[model]);
+}
+
+export function normalizeVideoDurationForModel(config: Pick<AiConfig, "modelVideoDurations" | "modelVideoCustomizable">, model: string, value: string) {
+    const fixed = fixedConfiguredVideoDurationForModel(config, model);
+    if (fixed) return String(fixed);
+    const seconds = Math.max(1, Math.min(20, Math.floor(Number(value) || 6)));
+    const options = videoDurationOptionsForModel(config, model);
+    if (!options.length || isVideoDurationCustomizable(config, model)) return String(seconds);
+    return String(options.includes(seconds) ? seconds : options[0]);
+}
+
+function modelRouteKey(capability: ModelRouteCapability, model: string) {
+    return `${capability}:${modelOptionName(model).trim()}`;
+}
+
+function inferRouteCapability(route: string): ModelRouteCapability | "" {
+    if (IMAGE_ROUTE_VALUES.has(route)) return "image";
+    if (VIDEO_ROUTE_VALUES.has(route)) return "video";
+    return "";
+}
+
+export function modelRouteForCapability(config: Pick<AiConfig, "modelRoutes">, capability: ModelRouteCapability, value: string) {
+    const model = modelOptionName(value).trim();
+    if (!model) return "auto";
+    return config.modelRoutes?.[modelRouteKey(capability, model)] || "auto";
+}
+
+export function imageRouteForModel(config: Pick<AiConfig, "modelRoutes">, value: string) {
+    return modelRouteForCapability(config, "image", value) as ImageRouteMode;
+}
+
+export function imageGenerateRouteForModel(config: Pick<AiConfig, "modelRoutes">, value: string) {
+    const model = modelOptionName(value).trim();
+    if (!model) return "auto" as ImageRouteMode;
+    return (config.modelRoutes?.[modelRouteKey("image_generate", model)] || "auto") as ImageRouteMode;
+}
+
+export function imageEditRouteForModel(config: Pick<AiConfig, "modelRoutes">, value: string) {
+    const model = modelOptionName(value).trim();
+    if (!model) return "auto" as ImageRouteMode;
+    return (config.modelRoutes?.[modelRouteKey("image_edit", model)] || config.modelRoutes?.[modelRouteKey("image", model)] || "auto") as ImageRouteMode;
+}
+
 export function videoRouteForModel(config: Pick<AiConfig, "modelRoutes">, value: string) {
-    return config.modelRoutes?.[modelOptionName(value)] || "auto";
+    return modelRouteForCapability(config, "video", value) as VideoRouteMode;
 }
 
 export function modelOptionLabel(config: AiConfig, value: string) {
@@ -408,12 +504,46 @@ function normalizeServerModelCatalog(models?: string[]) {
 function normalizeModelRoutes(routes: Record<string, string> | undefined, models: string[]) {
     const knownModels = new Set((models || []).map(modelOptionName));
     const normalized: Record<string, string> = {};
-    for (const [model, route] of Object.entries(routes || {})) {
-        const modelName = modelOptionName(model).trim();
+    for (const [key, route] of Object.entries(routes || {})) {
         const routeName = String(route || "").trim();
-        if (!modelName || !routeName || routeName === "auto") continue;
+        if (!routeName || routeName === "auto") continue;
+        const separatorIndex = key.indexOf(":");
+        const prefix = separatorIndex >= 0 ? key.slice(0, separatorIndex) : "";
+        const rawModel = separatorIndex >= 0 ? key.slice(separatorIndex + 1) : key;
+        const capability = prefix === "image" || prefix === "image_generate" || prefix === "image_edit" || prefix === "video"
+            ? prefix
+            : inferRouteCapability(routeName);
+        const modelName = modelOptionName(rawModel).trim();
+        if (!modelName || !capability) continue;
         if (knownModels.size && !knownModels.has(modelName)) continue;
-        normalized[modelName] = routeName;
+        normalized[modelRouteKey(capability, modelName)] = routeName;
+    }
+    return normalized;
+}
+
+function normalizeModelVideoDurations(items: Record<string, number[]> | undefined, models: string[]) {
+    const knownModels = new Set((models || []).map(modelOptionName));
+    const normalized: Record<string, number[]> = {};
+    for (const [key, values] of Object.entries(items || {})) {
+        const model = modelOptionName(key).trim();
+        if (!model) continue;
+        if (knownModels.size && !knownModels.has(model)) continue;
+        const durations = Array.from(new Set((values || []).map((item) => Math.floor(Number(item) || 0)).filter((item) => item > 0))).sort((left, right) => left - right);
+        if (!durations.length) continue;
+        normalized[model] = durations;
+    }
+    return normalized;
+}
+
+function normalizeModelVideoCustomizable(items: Record<string, boolean> | undefined, models: string[]) {
+    const knownModels = new Set((models || []).map(modelOptionName));
+    const normalized: Record<string, boolean> = {};
+    for (const [key, value] of Object.entries(items || {})) {
+        const model = modelOptionName(key).trim();
+        if (!model) continue;
+        if (knownModels.size && !knownModels.has(model)) continue;
+        if (!value) continue;
+        normalized[model] = true;
     }
     return normalized;
 }

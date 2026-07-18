@@ -6,15 +6,20 @@ import { Card, Spin, Table, Tag, Button } from "antd";
 import { ArrowDownLeft, ArrowUpRight, ReceiptText, WalletCards, Zap } from "lucide-react";
 
 import { getBalance, getTransactions } from "@/services/api/credits";
+import { CreditTransactionDetailButton } from "@/components/credits/credit-transaction-detail-button";
+import { creditTransactionModel } from "@/lib/credit-display";
 import { cn } from "@/lib/utils";
 
 type CreditTransaction = {
   id: number;
   type: string;
   amount: number;
+  balance_before?: number;
   balance_after: number;
   ref_type: string;
+  ref_id?: string;
   note: string;
+  metadata?: string;
   created_at: string;
 };
 
@@ -107,10 +112,14 @@ export default function CreditsPage() {
     },
     {
       title: "余额",
-      dataIndex: "balance_after",
-      key: "balance_after",
-      width: 100,
-      render: (value: number) => <span className="font-mono">{value}</span>,
+      key: "balance",
+      width: 150,
+      render: (_: unknown, record: CreditTransaction) => (
+        <span className="font-mono">
+          {typeof record.balance_before === "number" ? `${record.balance_before} → ` : ""}
+          {record.balance_after}
+        </span>
+      ),
     },
     {
       title: "来源",
@@ -120,11 +129,17 @@ export default function CreditsPage() {
       render: (value: string) => refTypeLabel(value),
     },
     {
-      title: "备注",
-      dataIndex: "note",
-      key: "note",
+      title: "模型",
+      key: "model",
+      width: 190,
       ellipsis: true,
-      render: (value: string) => value || "-",
+      render: (_: unknown, record: CreditTransaction) => creditTransactionModel(record),
+    },
+    {
+      title: "详情",
+      key: "detail",
+      width: 360,
+      render: (_: unknown, record: CreditTransaction) => <CreditTransactionDetailButton record={record} />,
     },
     {
       title: "时间",
@@ -194,7 +209,7 @@ export default function CreditsPage() {
           columns={columns}
           rowKey="id"
           loading={transactionsLoading}
-          scroll={{ x: 860 }}
+          scroll={{ x: 1140 }}
           pagination={{
             current: page,
             pageSize,

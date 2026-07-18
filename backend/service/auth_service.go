@@ -121,12 +121,13 @@ func (s *AuthService) Register(input RegisterInput) (*RegisterResult, error) {
 	}
 	if err := s.creditRepo.CreateAccount(account); err == nil {
 		s.creditRepo.CreateTransaction(&model.CreditTransaction{
-			AccountID:    account.ID,
-			Type:         model.TxTypeEarn,
-			Amount:       credits,
-			BalanceAfter: credits,
-			RefType:      "welcome",
-			Note:         fmt.Sprintf("注册赠送 %d 积分", credits),
+			AccountID:     account.ID,
+			Type:          model.TxTypeEarn,
+			Amount:        credits,
+			BalanceBefore: intPtr(0),
+			BalanceAfter:  credits,
+			RefType:       "welcome",
+			Note:          fmt.Sprintf("注册赠送 %d 积分", credits),
 		})
 	}
 
@@ -187,12 +188,13 @@ func (s *AuthService) EnsureInitialAdmin() error {
 	}
 	if credits > 0 {
 		if err := s.creditRepo.CreateTransaction(&model.CreditTransaction{
-			AccountID:    account.ID,
-			Type:         model.TxTypeEarn,
-			Amount:       credits,
-			BalanceAfter: credits,
-			RefType:      "bootstrap_admin",
-			Note:         fmt.Sprintf("初始化管理员赠送 %d 积分", credits),
+			AccountID:     account.ID,
+			Type:          model.TxTypeEarn,
+			Amount:        credits,
+			BalanceBefore: intPtr(0),
+			BalanceAfter:  credits,
+			RefType:       "bootstrap_admin",
+			Note:          fmt.Sprintf("初始化管理员赠送 %d 积分", credits),
 		}); err != nil {
 			return fmt.Errorf("写入初始管理员积分流水失败: %w", err)
 		}

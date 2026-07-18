@@ -2,7 +2,7 @@ import axios from "axios";
 import { isLoggedIn, proxyAiPost, proxyAiGet, proxyAiGetPath } from "./ai-proxy";
 import { API_BASE } from "./client";
 
-import { buildApiUrl, resolveModelRequestConfig, type AiConfig, type ModelChannel } from "@/stores/use-config-store";
+import { buildApiUrl, imageEditRouteForModel, imageGenerateRouteForModel, modelOptionName, resolveModelRequestConfig, type AiConfig, type ModelChannel } from "@/stores/use-config-store";
 import { nanoid } from "nanoid";
 import { buildImageReferencePromptText } from "@/lib/image-reference-prompt";
 import { dataUrlToFile } from "@/lib/image-utils";
@@ -70,6 +70,16 @@ type ResponseStreamState = { buffer: string; text: string; payload?: ResponseApi
 
 type ImageApiResponse = {
     data?: Array<Record<string, unknown>>;
+    error?: { message?: string };
+    code?: number;
+    msg?: string;
+};
+type ChatCompletionApiResponse = {
+    choices?: Array<{
+        message?: {
+            content?: string | Array<{ type?: string; text?: string }>;
+        };
+    }>;
     error?: { message?: string };
     code?: number;
     msg?: string;
@@ -166,6 +176,9 @@ function resolveRequestSize(quality: string | undefined, size: string) {
 
 function resolveImageDataUrl(item: Record<string, unknown>) {
     if (typeof item.b64_json === "string" && item.b64_json) {
+        if (/^(https?:)?\/\//i.test(item.b64_json) || item.b64_json.startsWith("data:image/")) {
+            return item.b64_json;
+        }
         return `data:image/png;base64,${item.b64_json}`;
     }
     if (typeof item.url === "string" && item.url) {
@@ -189,6 +202,168 @@ function parseImagePayload(payload: ImageApiResponse) {
     }
 
     return images;
+}
+
+function isBananaImageModel(model: string) {
+    const value = modelOptionName(model).trim().toLowerCase();
+    return value.includes("nano_banana") || value.includes("banana");
+}
+
+function bananaAspectRatio(size: string) {
+    const value = size.trim();
+    if (/^\d+:\d+$/.test(value)) return value;
+    const dimensions = parseImageDimensions(value);
+    if (!dimensions) return "1:1";
+    const divisor = gcd(dimensions.width, dimensions.height);
+    return `${dimensions.width / divisor}:${dimensions.height / divisor}`;
+}
+
+function bananaImageSize(quality: string) {
+    const value = quality.trim().toLowerCase();
+    if (value === "high" || value === "hd" || value === "4k") return "4K";
+    if (value === "medium" || value === "2k") return "2K";
+    return "1K";
+}
+
+function bananaExtraBody(config: AiConfig) {
+    return {
+        google: {
+            image_config: {
+                aspect_ratio: bananaAspectRatio(config.size),
+                image_size: bananaImageSize(config.quality),
+            },
+        },
+    };
+}
+
+function gcd(left: number, right: number): number {
+    return right === 0 ? Math.abs(left) : gcd(right, left % right);
+}
+
+function extractImagesFromMarkdown(content: string) {
+    const matches = Array.from(content.matchAll(/!\[[^\]]*]\((data:image\/[^)]+|https?:\/\/[^)\s]+)\)/g));
+    return matches.map((match) => ({ id: nanoid(), dataUrl: match[1] }));
+}
+
+function parseChatImagePayload(payload: ChatCompletionApiResponse) {
+    if (typeof payload.code === "number" && payload.code !== 0) {
+        throw new Error(payload.msg || "请求失败");
+    }
+    if (payload.error?.message) {
+        throw new Error(payload.error.message);
+    }
+    const content = payload.choices?.[0]?.message?.content;
+    const text = typeof content === "string" ? content : Array.isArray(content) ? content.map((item) => item?.text || "").join("\n") : "";
+    const images = extractImagesFromMarkdown(text);
+    if (!images.length) {
+        throw new Error("接口没有返回图片");
+    }
+    return images;
+}
+
+async function requestChatImageEdit(config: AiConfig, prompt: string, references: ReferenceImage[], options?: RequestOptions) {
+    const requestConfig = resolveModelRequestConfig(config, config.model || config.imageModel);
+    const quality = normalizeQuality(requestConfig.quality);
+    const requestSize = resolveRequestSize(quality, requestConfig.size);
+    const n = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(requestConfig.count)) || 1)));
+    const requestPrompt = buildImageReferencePromptText(prompt, references);
+    const content: Array<{ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }> = [
+        {
+            type: "text",
+            text: `${withSystemPrompt(requestConfig, requestPrompt)}\n\n请基于参考图片完成图片生成，只返回最终图片结果。`,
+        },
+    ];
+    const referenceUrls = await Promise.all(references.map(async (image) => await imageToDataUrl(image)));
+    referenceUrls.filter(Boolean).forEach((url) => {
+        content.push({ type: "image_url", image_url: { url } });
+    });
+
+    try {
+        const response = await axios.post<ChatCompletionApiResponse>(
+            aiApiUrl(requestConfig, "/chat/completions"),
+            {
+                model: requestConfig.model,
+                messages: [{ role: "user", content }],
+                n,
+                ...(quality ? { quality } : {}),
+                ...(requestSize ? { size: requestSize } : {}),
+            },
+            {
+                headers: aiHeaders(requestConfig, "application/json"),
+                signal: options?.signal,
+            },
+        );
+        const images = parseChatImagePayload(response.data);
+        notifyCreditBalanceChanged();
+        return images;
+    } catch (error) {
+        throw new Error(readAxiosError(error, "请求失败"));
+    }
+}
+
+async function requestChatImageGeneration(config: AiConfig, prompt: string, options?: RequestOptions) {
+    const requestConfig = resolveModelRequestConfig(config, config.model || config.imageModel);
+    const quality = normalizeQuality(requestConfig.quality);
+    const requestSize = resolveRequestSize(quality, requestConfig.size);
+    const n = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(requestConfig.count)) || 1)));
+    const content = `${withSystemPrompt(requestConfig, prompt)}\n\nGenerate the requested image from the prompt. Return only the final image result.`;
+
+    try {
+        const response = await axios.post<ChatCompletionApiResponse>(
+            aiApiUrl(requestConfig, "/chat/completions"),
+            {
+                model: requestConfig.model,
+                messages: [{ role: "user", content }],
+                n,
+                ...(quality ? { quality } : {}),
+                ...(requestSize ? { size: requestSize } : {}),
+            },
+            {
+                headers: aiHeaders(requestConfig, "application/json"),
+                signal: options?.signal,
+            },
+        );
+        const images = parseChatImagePayload(response.data);
+        notifyCreditBalanceChanged();
+        return images;
+    } catch (error) {
+        throw new Error(readAxiosError(error, "璇锋眰澶辫触"));
+    }
+}
+
+async function requestBananaImage(config: AiConfig, prompt: string, references: ReferenceImage[], options?: RequestOptions) {
+    const requestConfig = resolveModelRequestConfig(config, config.model || config.imageModel);
+    const requestPrompt = references.length ? buildImageReferencePromptText(prompt, references) : prompt;
+    const text = references.length
+        ? `${withSystemPrompt(requestConfig, requestPrompt)}\n\n请基于参考图片完成图片生成，只返回最终图片结果。`
+        : withSystemPrompt(requestConfig, prompt);
+    const content: string | Array<{ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }> = references.length ? [{ type: "text", text }] : text;
+    const referenceUrls = await Promise.all(references.map(async (image) => await imageToDataUrl(image)));
+    if (Array.isArray(content)) {
+        referenceUrls.filter(Boolean).forEach((url) => {
+            content.push({ type: "image_url", image_url: { url } });
+        });
+    }
+
+    try {
+        const response = await axios.post<ChatCompletionApiResponse>(
+            aiApiUrl(requestConfig, "/chat/completions"),
+            {
+                model: requestConfig.model,
+                messages: [{ role: "user", content }],
+                extra_body: bananaExtraBody(requestConfig),
+            },
+            {
+                headers: aiHeaders(requestConfig, "application/json"),
+                signal: options?.signal,
+            },
+        );
+        const images = parseChatImagePayload(response.data);
+        notifyCreditBalanceChanged();
+        return images;
+    } catch (error) {
+        throw new Error(readAxiosError(error, "请求失败"));
+    }
 }
 
 function readAxiosError(error: unknown, fallback: string) {
@@ -381,9 +556,16 @@ async function requestStreamingResponse(config: AiConfig, body: Record<string, u
 
 export async function requestGeneration(config: AiConfig, prompt: string, options?: RequestOptions) {
     const requestConfig = resolveModelRequestConfig(config, config.model || config.imageModel);
+    const routeMode = imageGenerateRouteForModel(requestConfig, requestConfig.model);
     const n = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
     const quality = normalizeQuality(config.quality);
     const requestSize = resolveRequestSize(quality, config.size);
+    if (routeMode === "banana" || (routeMode === "auto" && isBananaImageModel(requestConfig.model))) {
+        return requestBananaImage(requestConfig, prompt, [], options);
+    }
+    if (routeMode === "chat") {
+        return requestChatImageGeneration(requestConfig, prompt, options);
+    }
     try {
         const response = await axios.post<ImageApiResponse>(
             aiApiUrl(requestConfig, "/images/generations"),
@@ -411,6 +593,19 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
 
 export async function requestEdit(config: AiConfig, prompt: string, references: ReferenceImage[], mask?: ReferenceImage, options?: RequestOptions) {
     const requestConfig = resolveModelRequestConfig(config, config.model || config.imageModel);
+    const routeMode = imageEditRouteForModel(requestConfig, requestConfig.model);
+    if (routeMode === "banana" || (routeMode === "auto" && isBananaImageModel(requestConfig.model))) {
+        if (mask) throw new Error("当前模型暂不支持蒙版编辑，请切换到支持编辑接口的模型");
+        return requestBananaImage(requestConfig, prompt, references, options);
+    }
+    if (routeMode === "chat") {
+        if (mask) throw new Error("当前模型暂不支持蒙版编辑，请切换到支持编辑接口的模型");
+        return requestChatImageEdit(requestConfig, prompt, references, options);
+    }
+    if (routeMode === "generations") {
+        if (mask) throw new Error("当前模型路由未启用编辑接口，请切换到支持编辑的图片路由");
+        throw new Error("当前模型路由为纯生图接口，暂不支持参考图编辑，请改用聊天生图路由");
+    }
     const n = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
     const quality = normalizeQuality(config.quality);
     const requestSize = resolveRequestSize(quality, config.size);

@@ -69,9 +69,13 @@ export function useUserCreditBalance() {
     return balance;
 }
 
-export function useEstimatedCreditCost(model: string, count?: string | number) {
+export function useEstimatedCreditCost(model: string, count?: string | number, options?: { type?: string; seconds?: string | number; resolution?: string; size?: string }) {
     const normalizedModel = useMemo(() => modelOptionName(model || ""), [model]);
     const normalizedCount = Math.max(1, Math.floor(Math.abs(Number(count)) || 1));
+    const requestType = options?.type || "";
+    const requestSeconds = options?.seconds || "";
+    const requestResolution = options?.resolution || "";
+    const requestSize = options?.size || "";
     const [credits, setCredits] = useState(0);
 
     useEffect(() => {
@@ -82,9 +86,20 @@ export function useEstimatedCreditCost(model: string, count?: string | number) {
         }
 
         let cancelled = false;
-        estimateCost(normalizedModel)
+        estimateCost(normalizedModel, {
+            type: requestType || undefined,
+            count: normalizedCount,
+            seconds: requestSeconds || undefined,
+            resolution: requestResolution || undefined,
+            size: requestSize || undefined,
+        })
             .then((data) => {
                 if (cancelled) return;
+                const totalCost = Number(data?.total_cost) || 0;
+                if (totalCost > 0) {
+                    setCredits(totalCost);
+                    return;
+                }
                 const unitCost = Number(data?.credits_per_unit) || 0;
                 const unitType = String(data?.unit_type || "");
                 const multiplier = unitType === "per_image" ? normalizedCount : 1;
@@ -97,9 +112,39 @@ export function useEstimatedCreditCost(model: string, count?: string | number) {
         return () => {
             cancelled = true;
         };
-    }, [normalizedCount, normalizedModel]);
+    }, [normalizedCount, normalizedModel, requestResolution, requestSeconds, requestSize, requestType]);
 
     return credits;
+}
+
+export function CreditCostHint({ credits, balance, compact = false }: { credits: number; balance: number | null; compact?: boolean }) {
+    const hasCost = credits > 0;
+    const postBalance = balance === null ? null : balance - credits;
+    const insufficient = hasCost && balance !== null && balance < credits;
+    if (compact) {
+        return (
+            <span className={`inline-flex items-center gap-1 text-xs ${insufficient ? "text-red-500" : "text-stone-500 dark:text-stone-400"}`}>
+                <CreditSymbol className={insufficient ? "text-red-500" : "text-amber-500"} />
+                {hasCost ? `预计 ${credits} 积分` : "未配置计费"}
+            </span>
+        );
+    }
+    return (
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-stone-500 dark:text-stone-400">
+            <span className={`inline-flex items-center gap-1 ${insufficient ? "text-red-500" : ""}`}>
+                <CreditSymbol className={insufficient ? "text-red-500" : "text-amber-500"} />
+                {balance === null ? "正在读取当前积分" : `当前余额 ${balance}，预计生成后剩余 ${Math.max(postBalance || 0, 0)}`}
+            </span>
+            <span className={insufficient ? "text-red-500" : ""}>
+                {hasCost ? `本次预计扣除 ${credits} 积分${insufficient ? "，余额不足" : ""}` : "当前模型未配置扣费"}
+            </span>
+            {insufficient ? (
+                <Button size="small" type="link" href="/recharge" className="!h-auto !p-0">
+                    去充值
+                </Button>
+            ) : null}
+        </div>
+    );
 }
 
 export function isInsufficientCreditError(message: string) {

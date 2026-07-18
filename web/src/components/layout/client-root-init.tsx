@@ -3,7 +3,7 @@
 import type { ReactNode } from "react";
 import { useEffect, useRef } from "react";
 import { getApiModelCatalog } from "@/services/api/api-config";
-import { getStoredToken } from "@/services/api/client";
+import { AUTH_TOKEN_CHANGE_EVENT, getStoredToken } from "@/services/api/client";
 import { useConfigStore } from "@/stores/use-config-store";
 
 export function ClientRootInit({ children }: { children: ReactNode }) {
@@ -31,9 +31,9 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
     }, []);
 
     useEffect(() => {
-        if (!getStoredToken()) return;
         let cancelled = false;
         const syncCatalog = async () => {
+            if (!getStoredToken()) return;
             try {
                 const catalog = await getApiModelCatalog();
                 if (cancelled) return;
@@ -44,13 +44,29 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
                     textModels: catalog.text_models,
                     audioModels: catalog.audio_models,
                     modelRoutes: catalog.model_routes,
+                    modelVideoDurations: catalog.model_video_durations,
+                    modelVideoCustomizable: catalog.model_video_customizable,
                 });
             } catch {
             }
         };
+
         void syncCatalog();
+
+        const handleTokenChange = () => {
+            void syncCatalog();
+        };
+        const handleStorage = (event: StorageEvent) => {
+            if (event.key === "infinite-canvas:auth_token") void syncCatalog();
+        };
+
+        window.addEventListener(AUTH_TOKEN_CHANGE_EVENT, handleTokenChange);
+        window.addEventListener("storage", handleStorage);
+
         return () => {
             cancelled = true;
+            window.removeEventListener(AUTH_TOKEN_CHANGE_EVENT, handleTokenChange);
+            window.removeEventListener("storage", handleStorage);
         };
     }, [applyServerModelCatalog]);
 

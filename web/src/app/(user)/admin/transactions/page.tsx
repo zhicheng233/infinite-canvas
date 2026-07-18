@@ -4,6 +4,8 @@ import { useEffect, useState, useCallback } from "react";
 import { Table, Tag, Typography, App } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { listTransactions, type TransactionItem } from "@/services/api/admin";
+import { CreditTransactionDetailButton } from "@/components/credits/credit-transaction-detail-button";
+import { creditTransactionModel } from "@/lib/credit-display";
 
 const { Title } = Typography;
 
@@ -66,9 +68,31 @@ export default function AdminTransactionsPage() {
         </span>
       ),
     },
-    { title: "余额", dataIndex: "balance_after", key: "balance_after", width: 100 },
+    {
+      title: "余额",
+      key: "balance",
+      width: 150,
+      render: (_, record) => (
+        <span className="font-mono">
+          {typeof record.balance_before === "number" ? `${record.balance_before} → ` : ""}
+          {record.balance_after}
+        </span>
+      ),
+    },
     { title: "来源", dataIndex: "ref_type", key: "ref_type", width: 100 },
-    { title: "备注", dataIndex: "note", key: "note" },
+    {
+      title: "模型",
+      key: "model",
+      width: 190,
+      ellipsis: true,
+      render: (_, record) => creditTransactionModel(record),
+    },
+    {
+      title: "详情",
+      key: "detail",
+      width: 360,
+      render: (_, record) => <CreditTransactionDetailButton record={record} />,
+    },
     {
       title: "时间",
       dataIndex: "created_at",
@@ -86,6 +110,7 @@ export default function AdminTransactionsPage() {
         columns={columns}
         dataSource={transactions}
         loading={loading}
+        scroll={{ x: 1140 }}
         pagination={{
           ...pagination,
           showSizeChanger: true,

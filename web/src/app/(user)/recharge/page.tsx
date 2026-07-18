@@ -6,6 +6,8 @@ import { Button, Card, Table, Tag, Spin } from "antd";
 import { Zap, CheckCircle2, Clock, XCircle, ArrowDownLeft, ArrowUpRight, ReceiptText } from "lucide-react";
 import { listPayouts, listMyOrders, type CreditPayout, type RechargeOrder } from "@/services/api/recharge";
 import { getBalance, getTransactions } from "@/services/api/credits";
+import { CreditTransactionDetailButton } from "@/components/credits/credit-transaction-detail-button";
+import { creditTransactionModel } from "@/lib/credit-display";
 import { cn } from "@/lib/utils";
 
 const payoutColors: Record<string, { bg: string; border: string; badge: string }> = {
@@ -51,7 +53,7 @@ export default function RechargePage() {
   const [totalSpent, setTotalSpent] = useState<number>(0);
   const [orders, setOrders] = useState<RechargeOrder[]>([]);
   const [ordersLoading, setOrdersLoading] = useState(false);
-  const [transactions, setTransactions] = useState<Array<{ id: number; type: string; amount: number; balance_after: number; ref_type: string; note: string; created_at: string }>>([]);
+  const [transactions, setTransactions] = useState<Array<{ id: number; type: string; amount: number; balance_before?: number; balance_after: number; ref_type: string; ref_id?: string; note: string; metadata?: string; created_at: string }>>([]);
   const [transactionsLoading, setTransactionsLoading] = useState(false);
 
   const fetchData = useCallback(async () => {
@@ -183,10 +185,14 @@ export default function RechargePage() {
     },
     {
       title: "余额",
-      dataIndex: "balance_after",
-      key: "balance_after",
-      width: 100,
-      render: (value: number) => <span className="font-mono">{value}</span>,
+      key: "balance",
+      width: 150,
+      render: (_: unknown, record: { balance_before?: number; balance_after: number }) => (
+        <span className="font-mono">
+          {typeof record.balance_before === "number" ? `${record.balance_before} → ` : ""}
+          {record.balance_after}
+        </span>
+      ),
     },
     {
       title: "来源",
@@ -196,11 +202,17 @@ export default function RechargePage() {
       render: (value: string) => refTypeLabel(value),
     },
     {
-      title: "备注",
-      dataIndex: "note",
-      key: "note",
+      title: "模型",
+      key: "model",
+      width: 160,
       ellipsis: true,
-      render: (value: string) => value || "-",
+      render: (_: unknown, record: { metadata?: string; ref_id?: string }) => creditTransactionModel(record),
+    },
+    {
+      title: "详情",
+      key: "detail",
+      width: 340,
+      render: (_: unknown, record: { id?: number; type?: string; amount?: number; balance_before?: number; balance_after?: number; ref_type?: string; ref_id?: string; note?: string; metadata?: string; created_at?: string }) => <CreditTransactionDetailButton record={record} />,
     },
     {
       title: "时间",
@@ -314,7 +326,7 @@ export default function RechargePage() {
           loading={transactionsLoading}
           pagination={false}
           locale={{ emptyText: "暂无积分流水" }}
-          scroll={{ x: 860 }}
+          scroll={{ x: 1080 }}
         />
       </Card>
     </main>

@@ -34,7 +34,7 @@ export default function LoginPage() {
     <main className="flex min-h-full items-center justify-center bg-background px-4">
       <div className="w-full max-w-sm">
         <div className="mb-6 flex justify-center">
-          <Image src="/logo.svg" alt="无限画布" width={120} height={120} className="rounded-xl" />
+          <Image src="/logo.png" alt="无限画布" width={120} height={137} className="rounded-xl" />
         </div>
         <h1 className="mb-8 text-center text-2xl font-semibold text-stone-950 dark:text-stone-100">登录</h1>
         <Form layout="vertical" onFinish={onFinish} autoComplete="off">

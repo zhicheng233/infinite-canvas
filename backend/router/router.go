@@ -8,10 +8,12 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func Setup(r *gin.Engine, authService *service.AuthService, authHandler *handler.AuthHandler, adminHandler *handler.AdminHandler, userHandler *handler.UserHandler, creditHandler *handler.CreditHandler, generateHandler *handler.GenerateHandler, apiConfigHandler *handler.ApiConfigHandler, proxyHandler *handler.ProxyHandler, canvasHandler *handler.CanvasHandler, generationRecordHandler *handler.GenerationRecordHandler, rechargeHandler *handler.RechargeHandler, captchaHandler *handler.CaptchaHandler) {
+func Setup(r *gin.Engine, authService *service.AuthService, authHandler *handler.AuthHandler, adminHandler *handler.AdminHandler, userHandler *handler.UserHandler, creditHandler *handler.CreditHandler, generateHandler *handler.GenerateHandler, apiConfigHandler *handler.ApiConfigHandler, proxyHandler *handler.ProxyHandler, canvasHandler *handler.CanvasHandler, generationRecordHandler *handler.GenerationRecordHandler, rechargeHandler *handler.RechargeHandler, captchaHandler *handler.CaptchaHandler, tempMediaHandler *handler.TempMediaHandler, channelStatusHandler *handler.ChannelStatusHandler) {
 	r.Use(middleware.Cors())
 
 	api := r.Group("/backend-api")
+	api.GET("/media/tmp/:filename", tempMediaHandler.Serve)
+	api.GET("/channel-status", channelStatusHandler.GetChannelStatus)
 
 	api.GET("/auth/captcha", captchaHandler.Generate)
 	api.POST("/auth/register", authHandler.Register)
@@ -28,6 +30,7 @@ func Setup(r *gin.Engine, authService *service.AuthService, authHandler *handler
 		auth.GET("/credits/transactions", creditHandler.GetTransactions)
 		auth.GET("/credits/estimate", creditHandler.EstimateCost)
 		auth.GET("/api-config/catalog", apiConfigHandler.Catalog)
+		auth.POST("/media/tmp", tempMediaHandler.UploadImage)
 
 		auth.POST("/generate/image", generateHandler.Image)
 		auth.POST("/generate/text", generateHandler.Text)
@@ -59,6 +62,7 @@ func Setup(r *gin.Engine, authService *service.AuthService, authHandler *handler
 			admin.GET("/users", userHandler.List)
 			admin.GET("/api-config", apiConfigHandler.Get)
 			admin.POST("/api-config", apiConfigHandler.Save)
+			admin.POST("/api-config/test-model", apiConfigHandler.TestModel)
 			admin.GET("/credits/pricing", creditHandler.ListPricing)
 			admin.POST("/credits/pricing", creditHandler.SavePricing)
 			admin.DELETE("/credits/pricing/:id", creditHandler.DeletePricing)
@@ -67,6 +71,8 @@ func Setup(r *gin.Engine, authService *service.AuthService, authHandler *handler
 			admin.GET("/stats", adminHandler.GetStats)
 			admin.GET("/users-with-balance", adminHandler.GetUsersWithBalance)
 			admin.GET("/transactions", adminHandler.ListTransactions)
+			admin.GET("/model-health", adminHandler.GetModelHealth)
+			admin.GET("/model-call-logs", adminHandler.ListModelCallLogs)
 		}
 
 		superAdmin := auth.Group("")

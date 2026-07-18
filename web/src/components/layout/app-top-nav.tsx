@@ -30,7 +30,7 @@ export function AppTopNav() {
                         <div className="flex min-w-0 items-center">
                             <Link href="/" className="flex h-full shrink-0 items-center gap-2 text-sm font-semibold leading-none tracking-tight text-stone-950 transition hover:text-stone-600 dark:text-stone-100 dark:hover:text-stone-300">
                                 <img
-                                    src="/logo.svg"
+                                    src="/logo.png"
                                     alt="Logo"
                                     className="h-8 w-auto shrink-0"
                                 />
