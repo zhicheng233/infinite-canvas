@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, App, Button, Card, Checkbox, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Switch, Tabs, Popover } from "antd";
-import { Settings, Plus, RefreshCw, Lock, X } from "lucide-react";
+import { Settings, Plus, RefreshCw, Lock, X, Play } from "lucide-react";
 import type { ColumnsType } from "antd/es/table";
 
 import { useUserStore } from "@/stores/use-user-store";
@@ -11,6 +11,7 @@ import { listChannelModelsAdmin, syncChannelModels, updateChannelModel, enableCh
 import { getMetricsConfig, updateMetricsConfig, type MetricsConfig } from "@/services/api/metrics-config-admin";
 import { type ChannelModelInfo } from "@/services/api/channel";
 import { listPricing, savePricing, comparePricing, type PricingItem } from "@/services/api/pricing";
+import { testApiModel, type ApiModelTestResult } from "@/services/api/api-config";
 
 const imageRouteOptions = [
     { label: "自动判断", value: "auto" },
@@ -134,6 +135,13 @@ export default function AdminApiConfigPage() {
         channels: [],
         model: null,
     });
+
+    // Model test state
+    const [testModalOpen, setTestModalOpen] = useState(false);
+    const [testingModel, setTestingModel] = useState<ChannelModelInfo | null>(null);
+    const [testLoading, setTestLoading] = useState(false);
+    const [testResult, setTestResult] = useState<ApiModelTestResult | null>(null);
+    const [testGeneration, setTestGeneration] = useState("text");
 
     // Load initial data
     const fetchChannels = async () => {
@@ -477,6 +485,32 @@ export default function AdminApiConfigPage() {
         setPricingModal({ open: false, channels: [], model: null });
     };
 
+    // -- Model test handlers --
+
+    const handleOpenTest = (model: ChannelModelInfo) => {
+        setTestingModel(model);
+        setTestGeneration(model.capabilities.includes("image") ? "image" : model.capabilities.includes("video") ? "video" : "text");
+        setTestResult(null);
+        setTestModalOpen(true);
+    };
+
+    const handleRunTest = async () => {
+        if (!testingModel || !selectedChannel) return;
+        setTestLoading(true);
+        setTestResult(null);
+        try {
+            const result = await testApiModel({
+                model: testingModel.model_name,
+                generation: testGeneration,
+            });
+            setTestResult(result);
+        } catch (err: any) {
+            message.error(err?.message || "模型测试失败");
+        } finally {
+            setTestLoading(false);
+        }
+    };
+
     // Open model edit modal
     const openModelModal = (model: ChannelModelInfo) => {
         setEditingModel(model);
@@ -764,7 +798,7 @@ export default function AdminApiConfigPage() {
         {
             title: "操作",
             key: "actions",
-            width: 260,
+            width: 340,
             render: (_, record) => {
                 const caps = modelCapabilities[record.id] || record.capabilities || [];
                 return (
@@ -788,11 +822,18 @@ export default function AdminApiConfigPage() {
                         >
                             保存计费
                         </Button>
+                        <Button
+                            size="small"
+                            icon={<Play className="size-3" />}
+                            onClick={() => handleOpenTest(record)}
+                        >
+                            测试
+                        </Button>
                     </Space>
                 );
             },
         },
-    ], [modelCapabilities, modelPricing, pricingData, selectedChannel, isSuperAdmin, toggleCap, handlePricingChange, handlePricingRuleChange, handleSavePricing, handleSaveCapabilities, openModelModal, handleToggleModel]);
+    ], [modelCapabilities, modelPricing, pricingData, selectedChannel, isSuperAdmin, toggleCap, handlePricingChange, handlePricingRuleChange, handleSavePricing, handleSaveCapabilities, openModelModal, handleToggleModel, handleOpenTest]);
 
     return (
         <div>
@@ -801,7 +842,7 @@ export default function AdminApiConfigPage() {
                 API 与模型配置
             </h2>
             <Alert
-                className="mb-6"
+                className="mb-6 !bg-yellow-50 !border-yellow-200"
                 type="info"
                 showIcon
                 message="这里统一管理上游全局渠道、模型目录和指标服务配置"
@@ -968,6 +1009,66 @@ export default function AdminApiConfigPage() {
                 onApplyLocal={handlePricingApplyLocal}
                 onCancel={handlePricingCancel}
             />
+
+            {/* Model Test Modal */}
+            <Modal
+                title={`模型测试 — ${testingModel?.model_name || ""}`}
+                open={testModalOpen}
+                onCancel={() => setTestModalOpen(false)}
+                footer={
+                    <Space>
+                        <Button onClick={() => setTestModalOpen(false)}>关闭</Button>
+                        <Button type="primary" icon={<Play className="size-4" />} loading={testLoading} onClick={handleRunTest}>
+                            运行测试
+                        </Button>
+                    </Space>
+                }
+            >
+                <div className="space-y-4">
+                    <div>
+                        <label className="text-sm text-stone-500 mb-1 block">生成类型</label>
+                        <Select
+                            value={testGeneration}
+                            onChange={setTestGeneration}
+                            style={{ width: 200 }}
+                            options={[
+                                { label: "文本", value: "text" },
+                                { label: "图片", value: "image" },
+                                { label: "视频", value: "video" },
+                                { label: "音频", value: "audio" },
+                            ]}
+                        />
+                    </div>
+
+                    {testResult && (
+                        <div className={`rounded-lg border p-3 text-sm ${testResult.success ? "border-green-200 bg-green-50 dark:border-green-800 dark:bg-green-950" : "border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-950"}`}>
+                            <div className="flex items-center gap-2 mb-2">
+                                <Tag color={testResult.success ? "green" : "red"}>{testResult.success ? "成功" : "失败"}</Tag>
+                                <span className="text-stone-500">HTTP {testResult.status_code}</span>
+                                <span className="text-stone-500">{testResult.response_time_ms}ms</span>
+                            </div>
+                            {testResult.route && (
+                                <div className="mb-1">
+                                    <span className="text-stone-400">路由: </span>
+                                    <code className="text-xs bg-stone-100 dark:bg-stone-800 px-1 rounded">{testResult.method} {testResult.path}</code>
+                                </div>
+                            )}
+                            {testResult.error_message && (
+                                <div className="mt-2">
+                                    <span className="text-red-500 font-medium">错误: </span>
+                                    <pre className="mt-1 whitespace-pre-wrap text-xs font-mono bg-stone-100 dark:bg-stone-800 p-2 rounded max-h-40 overflow-auto">{testResult.error_message}</pre>
+                                </div>
+                            )}
+                            {testResult.response_body && (
+                                <div className="mt-2">
+                                    <span className="text-stone-500 font-medium">响应: </span>
+                                    <pre className="mt-1 whitespace-pre-wrap text-xs font-mono bg-stone-100 dark:bg-stone-800 p-2 rounded max-h-60 overflow-auto">{testResult.response_body}</pre>
+                                </div>
+                            )}
+                        </div>
+                    )}
+                </div>
+            </Modal>
         </div>
     );
 }
