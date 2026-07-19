@@ -67,6 +67,7 @@ func Setup(r *gin.Engine, authService *service.AuthService, authHandler *handler
 			admin.POST("/api-config", apiConfigHandler.Save)
 			admin.POST("/api-config/test-model", apiConfigHandler.TestModel)
 			admin.GET("/credits/pricing", creditHandler.ListPricing)
+			admin.GET("/credits/pricing/compare", creditHandler.ComparePricing)
 			admin.POST("/credits/pricing", creditHandler.SavePricing)
 			admin.DELETE("/credits/pricing/:id", creditHandler.DeletePricing)
 			admin.POST("/credits/recharge", creditHandler.Recharge)

@@ -8,6 +8,7 @@ export type PricingItem = {
     unit_type: string;
     pricing_mode?: string;
     pricing_rule?: string;
+    channel_id?: number;
 };
 
 export async function listPricing() {
@@ -31,6 +32,19 @@ export async function savePricing(input: PricingItem) {
 export async function deletePricing(id: number) {
     const res = await apiClient.delete(`/credits/pricing/${id}`);
     return res.data;
+}
+
+export type ComparePricingResult = {
+    channels: Array<{
+        channel_id: number;
+        channel_name: string;
+        has_model: boolean;
+    }>;
+};
+
+export async function comparePricing(modelName: string) {
+    const res = await apiClient.get("/credits/pricing/compare", { params: { model: modelName } });
+    return res.data.data as ComparePricingResult;
 }
 
 export type RechargeResult = {

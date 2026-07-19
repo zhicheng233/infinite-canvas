@@ -85,7 +85,7 @@ func (s *GenerateService) TestModel(tenantID, userID uint, input ModelTestInput)
 	if err != nil {
 		return nil, err
 	}
-	if _, _, err := s.getRequiredPricing(tenantID, testReq.Generation, modelName, testReq.ContentType, testReq.Body); err != nil {
+	if _, _, err := s.getRequiredPricing(tenantID, input.ChannelID, testReq.Generation, modelName, testReq.ContentType, testReq.Body); err != nil {
 		s.recordModelFailureWithRoute(tenantID, userID, testReq.Generation, modelName, testReq.Method, testReq.Path, 0, nil, err.Error(), route)
 		return nil, err
 	}

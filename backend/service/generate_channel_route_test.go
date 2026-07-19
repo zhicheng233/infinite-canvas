@@ -49,11 +49,8 @@ type fakePricingReader struct {
 	items map[string]*model.CreditPricing
 }
 
-func (f fakePricingReader) FindPricing(_ uint, modelName string) (*model.CreditPricing, error) {
+func (f fakePricingReader) FindPricing(_ uint, modelName string, _ uint) (*model.CreditPricing, error) {
 	item := f.items[modelName]
-	if item == nil {
-		return nil, errors.New("not found")
-	}
 	return item, nil
 }
 
@@ -61,16 +58,16 @@ type countingPricingReader struct {
 	calls int
 }
 
-func (f *countingPricingReader) FindPricing(_ uint, _ string) (*model.CreditPricing, error) {
+func (f *countingPricingReader) FindPricing(_ uint, _ string, _ uint) (*model.CreditPricing, error) {
 	f.calls++
-	return nil, errors.New("pricing should not be reached")
+	return nil, nil
 }
 
 type fakePricingMapReader struct {
-	items map[string]model.CreditPricing
+	items map[string]map[uint]model.CreditPricing
 }
 
-func (f fakePricingMapReader) FindPricingMap(_ uint) (map[string]model.CreditPricing, error) {
+func (f fakePricingMapReader) FindPricingMap(_ uint) (map[string]map[uint]model.CreditPricing, error) {
 	return f.items, nil
 }
 
@@ -178,7 +175,7 @@ func TestSharedRawModelPricingAppliesAcrossChannels(t *testing.T) {
 		if _, err := svc.resolveChannelRoute(selection, "image", "same-model"); err != nil {
 			t.Fatalf("resolve channel %d failed: %v", selection.ChannelID, err)
 		}
-		cost, result, err := svc.getRequiredPricing(1, "image", "same-model", "application/json", []byte(`{"model":"same-model","n":2}`))
+		cost, result, err := svc.getRequiredPricing(1, selection.ChannelID, "image", "same-model", "application/json", []byte(`{"model":"same-model","n":2}`))
 		if err != nil {
 			t.Fatalf("pricing channel %d failed: %v", selection.ChannelID, err)
 		}
@@ -198,8 +195,8 @@ func TestUserCatalogKeepsPricedSameNamePerChannelAndDropsUnpriced(t *testing.T) 
 		{BaseModel: model.BaseModel{ID: 22}, ChannelID: 2, ModelName: "same-model", Enabled: true, Capabilities: `["image"]`},
 		{BaseModel: model.BaseModel{ID: 23}, ChannelID: 2, ModelName: "unpriced-model", Enabled: true, Capabilities: `["image"]`},
 	}}
-	pricingRepo := fakePricingMapReader{items: map[string]model.CreditPricing{
-		"same-model": {Model: "same-model", CreditsPerUnit: 1, UnitType: model.UnitPerImage},
+	pricingRepo := fakePricingMapReader{items: map[string]map[uint]model.CreditPricing{
+		"same-model": {0: {Model: "same-model", CreditsPerUnit: 1, UnitType: model.UnitPerImage}},
 	}}
 	svc := NewChannelModelService(nil, channelRepo, modelRepo, pricingRepo)
 

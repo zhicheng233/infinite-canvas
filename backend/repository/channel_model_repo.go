@@ -66,3 +66,9 @@ func (r *ChannelModelRepo) Upsert(item *model.ChannelModel) error {
 func (r *ChannelModelRepo) SetEnabled(id uint, enabled bool) error {
 	return r.db.Model(&model.ChannelModel{}).Where("id = ?", id).Update("enabled", enabled).Error
 }
+
+func (r *ChannelModelRepo) FindByModelName(modelName string) ([]model.ChannelModel, error) {
+	var items []model.ChannelModel
+	err := r.db.Where("model_name = ?", modelName).Order("channel_id ASC").Find(&items).Error
+	return items, err
+}

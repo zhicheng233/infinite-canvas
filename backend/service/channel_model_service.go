@@ -34,7 +34,7 @@ type channelModelRepo interface {
 }
 
 type pricingMapReader interface {
-	FindPricingMap(tenantID uint) (map[string]model.CreditPricing, error)
+	FindPricingMap(tenantID uint) (map[string]map[uint]model.CreditPricing, error)
 }
 
 func NewChannelModelService(channelService *ChannelService, channelRepo channelModelChannelRepo, modelRepo channelModelRepo, creditRepo pricingMapReader) *ChannelModelService {
@@ -92,8 +92,15 @@ func (s *ChannelModelService) ListUserCatalog(tenantID, channelID uint) ([]model
 	}
 	result := make([]model.ChannelModelInfo, 0, len(items))
 	for i := range items {
-		pricing, ok := pricingMap[items[i].ModelName]
-		if !ok || !pricing.HasValidPricingRule() {
+		pricingByChannel, ok := pricingMap[items[i].ModelName]
+		if !ok || len(pricingByChannel) == 0 {
+			continue
+		}
+		pricing, hasPricing := pricingByChannel[items[i].ChannelID]
+		if !hasPricing {
+			pricing, hasPricing = pricingByChannel[0]
+		}
+		if !hasPricing || !pricing.HasValidPricingRule() {
 			continue
 		}
 		info, err := channelModelToInfo(&items[i])

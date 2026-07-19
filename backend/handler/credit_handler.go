@@ -12,13 +12,15 @@ import (
 )
 
 type CreditHandler struct {
-	creditService *service.CreditService
-	creditRepo    *repository.CreditRepo
-	generateSvc   *service.GenerateService
+	creditService    *service.CreditService
+	creditRepo       *repository.CreditRepo
+	generateSvc      *service.GenerateService
+	channelModelRepo *repository.ChannelModelRepo
+	channelRepo      *repository.ChannelRepo
 }
 
-func NewCreditHandler(creditService *service.CreditService, creditRepo *repository.CreditRepo, generateSvc *service.GenerateService) *CreditHandler {
-	return &CreditHandler{creditService: creditService, creditRepo: creditRepo, generateSvc: generateSvc}
+func NewCreditHandler(creditService *service.CreditService, creditRepo *repository.CreditRepo, generateSvc *service.GenerateService, channelModelRepo *repository.ChannelModelRepo, channelRepo *repository.ChannelRepo) *CreditHandler {
+	return &CreditHandler{creditService: creditService, creditRepo: creditRepo, generateSvc: generateSvc, channelModelRepo: channelModelRepo, channelRepo: channelRepo}
 }
 
 func (h *CreditHandler) GetBalance(c *gin.Context) {
@@ -54,7 +56,8 @@ func (h *CreditHandler) GetTransactions(c *gin.Context) {
 
 func (h *CreditHandler) ListPricing(c *gin.Context) {
 	claims := c.MustGet("claims").(*service.Claims)
-	items, err := h.creditRepo.ListPricing(claims.TenantID)
+	channelID := parseUintQuery(c.Query("channel_id"))
+	items, err := h.creditRepo.ListPricing(claims.TenantID, channelID)
 	if err != nil {
 		model.Fail(c, 500, err.Error())
 		return
@@ -181,14 +184,14 @@ func (h *CreditHandler) EstimateCost(c *gin.Context) {
 		return
 	}
 	genType := strings.TrimSpace(c.DefaultQuery("type", ""))
+	selection := service.ChannelSelection{ChannelID: parseUintQuery(c.Query("channel_id")), ChannelModelID: parseUintQuery(c.Query("channel_model_id"))}
 	if h.generateSvc != nil {
-		selection := service.ChannelSelection{ChannelID: parseUintQuery(c.Query("channel_id")), ChannelModelID: parseUintQuery(c.Query("channel_model_id"))}
 		if err := h.generateSvc.ResolveChannelRouteForEstimate(selection, genType, modelName); err != nil {
 			model.Fail(c, 400, err.Error())
 			return
 		}
 	}
-	pricing, err := h.creditRepo.FindPricing(claims.TenantID, modelName)
+	pricing, err := h.creditRepo.FindPricing(claims.TenantID, modelName, selection.ChannelID)
 	if err != nil {
 		model.Fail(c, 403, "该模型未配置计费，暂不可用")
 		return
@@ -235,6 +238,53 @@ func (h *CreditHandler) EstimateCost(c *gin.Context) {
 		"resolution":       cost.Resolution,
 		"formula":          cost.Formula,
 	})
+}
+
+// ComparePricingResponse is returned by ComparePricing.
+type ComparePricingResponse struct {
+	ChannelID   uint                  `json:"channel_id"`
+	ChannelName string                `json:"channel_name"`
+	HasModel    bool                  `json:"has_model"`
+	Pricing     *model.CreditPricing  `json:"pricing,omitempty"`
+}
+
+func (h *CreditHandler) ComparePricing(c *gin.Context) {
+	claims := c.MustGet("claims").(*service.Claims)
+	modelName := strings.TrimSpace(c.Query("model"))
+	if modelName == "" {
+		model.Fail(c, 400, "请指定模型")
+		return
+	}
+
+	channelModels, err := h.channelModelRepo.FindByModelName(modelName)
+	if err != nil {
+		model.Fail(c, 500, "查询渠道模型失败")
+		return
+	}
+
+	channels := make([]ComparePricingResponse, 0, len(channelModels))
+	for _, cm := range channelModels {
+		channel, err := h.channelRepo.FindByID(cm.ChannelID)
+		if err != nil {
+			continue
+		}
+		entry := ComparePricingResponse{
+			ChannelID:   cm.ChannelID,
+			ChannelName: channel.Name,
+			HasModel:    true,
+		}
+		// Try channel-specific pricing first, then fall back to global (channel_id=0)
+		pricing, err := h.creditRepo.FindPricing(claims.TenantID, modelName, cm.ChannelID)
+		if err != nil {
+			pricing, err = h.creditRepo.FindPricing(claims.TenantID, modelName, 0)
+		}
+		if err == nil {
+			entry.Pricing = pricing
+		}
+		channels = append(channels, entry)
+	}
+
+	model.OK(c, gin.H{"channels": channels})
 }
 
 func parseUintQuery(value string) uint {

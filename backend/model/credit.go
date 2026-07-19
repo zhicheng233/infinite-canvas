@@ -49,8 +49,9 @@ func (CreditTransaction) TableName() string { return "credit_transactions" }
 
 type CreditPricing struct {
 	BaseModel
-	TenantID       uint              `gorm:"index;not null" json:"tenant_id"`
-	Model          string            `gorm:"size:100;not null" json:"model"`
+	ChannelID      uint              `gorm:"default:0;uniqueIndex:idx_tenant_model_channel" json:"channel_id"`
+	TenantID       uint              `gorm:"uniqueIndex:idx_tenant_model_channel;not null" json:"tenant_id"`
+	Model          string            `gorm:"uniqueIndex:idx_tenant_model_channel;size:100;not null" json:"model"`
 	CreditsPerUnit int               `gorm:"not null" json:"credits_per_unit"`
 	UnitType       CreditPricingUnit `gorm:"size:20;default:per_image" json:"unit_type"`
 	PricingMode    CreditPricingMode `gorm:"size:30;default:per_unit" json:"pricing_mode"`

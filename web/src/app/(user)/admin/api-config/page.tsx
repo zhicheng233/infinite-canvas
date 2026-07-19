@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, App, Button, Card, Checkbox, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Switch, Tabs, Popover } from "antd";
 import { Settings, Plus, RefreshCw, Lock, X } from "lucide-react";
 import type { ColumnsType } from "antd/es/table";
@@ -10,7 +10,7 @@ import { listAllChannels, createChannel, updateChannel, disableChannel, type Cha
 import { listChannelModelsAdmin, syncChannelModels, updateChannelModel, enableChannelModel, disableChannelModel } from "@/services/api/channel-models-admin";
 import { getMetricsConfig, updateMetricsConfig, type MetricsConfig } from "@/services/api/metrics-config-admin";
 import { type ChannelModelInfo } from "@/services/api/channel";
-import { listPricing, savePricing, type PricingItem } from "@/services/api/pricing";
+import { listPricing, savePricing, comparePricing, type PricingItem } from "@/services/api/pricing";
 
 const imageRouteOptions = [
     { label: "自动判断", value: "auto" },
@@ -44,6 +44,52 @@ function parseDurationInput(value: string) {
 
 function formatDurationInput(values?: number[]) {
     return (values || []).join(",");
+}
+
+function PricingScopeModal({
+    open,
+    channels,
+    onApplyGlobal,
+    onApplyLocal,
+    onCancel,
+}: {
+    open: boolean;
+    channels: Array<{ channel_id: number; channel_name: string }>;
+    onApplyGlobal: () => void;
+    onApplyLocal: () => void;
+    onCancel: () => void;
+}) {
+    return (
+        <Modal
+            title="该模型存在于多个渠道"
+            open={open}
+            onCancel={onCancel}
+            footer={null}
+        >
+            <p className="mb-3 text-sm text-stone-600 dark:text-stone-400">
+                该模型在以下渠道均存在，请选择计费设置的作用范围：
+            </p>
+            <ul className="mb-4 space-y-1">
+                {channels.map((ch) => (
+                    <li key={ch.channel_id} className="text-sm text-stone-800 dark:text-stone-200">
+                        {ch.channel_name}
+                    </li>
+                ))}
+            </ul>
+            <div className="flex justify-end gap-2">
+                <Button onClick={onApplyLocal}>仅本渠道</Button>
+                <Button type="primary" onClick={onApplyGlobal}>应用到所有渠道</Button>
+            </div>
+        </Modal>
+    );
+}
+
+/** Wraps InputNumber with local state so typing doesn't trigger full page re-render. */
+function PricingInput({ value, onChange, ...rest }: { value: number; onChange: (v: number) => void } & Omit<React.ComponentProps<typeof InputNumber>, "value" | "onChange">) {
+    const [localVal, setLocalVal] = useState(value);
+    // Sync external changes (e.g., after save resets pricingData)
+    useEffect(() => { setLocalVal(value); }, [value]);
+    return <InputNumber size="small" min={0} value={localVal} onChange={(v) => setLocalVal(v ?? 0)} onBlur={() => onChange(localVal)} {...rest} />;
 }
 
 export default function AdminApiConfigPage() {
@@ -83,6 +129,11 @@ export default function AdminApiConfigPage() {
     const [modelPricing, setModelPricing] = useState<Record<number, { unit_type: string; pricing_mode: string; credits_per_unit: number; pricing_rule: string }>>({});
     const [savingPricing, setSavingPricing] = useState<Record<number, boolean>>({});
     const [pricingData, setPricingData] = useState<PricingItem[]>([]);
+    const [pricingModal, setPricingModal] = useState<{ open: boolean; channels: { channel_id: number; channel_name: string }[]; model: ChannelModelInfo | null }>({
+        open: false,
+        channels: [],
+        model: null,
+    });
 
     // Load initial data
     const fetchChannels = async () => {
@@ -308,19 +359,25 @@ export default function AdminApiConfigPage() {
         pricing_rule: "",
     });
 
-    const getPricingForModel = (modelId: number, modelName: string) => {
+    const getPricingForModel = (modelId: number, modelName: string, channelId?: number) => {
         if (modelPricing[modelId]) return modelPricing[modelId];
-        const existing = pricingData.find((p) => p.model === modelName);
-        if (existing) {
-            return {
-                unit_type: existing.unit_type || "per_image",
-                pricing_mode: existing.pricing_mode || "per_unit",
-                credits_per_unit: existing.credits_per_unit || 0,
-                pricing_rule: existing.pricing_rule || "",
-            };
+        // Try channel-specific pricing first
+        if (channelId) {
+            const cp = pricingData.find((p) => p.model === modelName && p.channel_id === channelId);
+            if (cp) return formatPricing(cp);
         }
+        // Fallback to global (channel_id=0 or undefined)
+        const gp = pricingData.find((p) => p.model === modelName && (!p.channel_id || p.channel_id === 0));
+        if (gp) return formatPricing(gp);
         return getPricingDefaults();
     };
+
+    const formatPricing = (p: PricingItem) => ({
+        unit_type: p.unit_type || "per_image",
+        pricing_mode: p.pricing_mode || "per_unit",
+        credits_per_unit: p.credits_per_unit || 0,
+        pricing_rule: p.pricing_rule || "",
+    });
 
     const parsePricingRule = (ruleStr?: string) => {
         if (!ruleStr) return { base_credits: 0, resolution_second_rates: {} as Record<string, number> };
@@ -355,8 +412,7 @@ export default function AdminApiConfigPage() {
         });
     };
 
-    const handleSavePricing = async (model: ChannelModelInfo) => {
-        if (!selectedChannel) return;
+    const doSavePricing = async (model: ChannelModelInfo, channelId: number) => {
         const pricing = modelPricing[model.id];
         if (!pricing) return;
         setSavingPricing((prev) => ({ ...prev, [model.id]: true }));
@@ -367,10 +423,10 @@ export default function AdminApiConfigPage() {
                 unit_type: pricing.unit_type || "per_image",
                 pricing_mode: pricing.pricing_mode || "per_unit",
                 pricing_rule: pricing.pricing_rule || "",
+                channel_id: channelId,
             });
             message.success("保存计费成功");
             await fetchPricing();
-            // Reset local pricing edits so getPricingForModel reads fresh data
             setModelPricing((prev) => {
                 const next = { ...prev };
                 delete next[model.id];
@@ -381,6 +437,44 @@ export default function AdminApiConfigPage() {
         } finally {
             setSavingPricing((prev) => ({ ...prev, [model.id]: false }));
         }
+    };
+
+    const handleSavePricing = async (model: ChannelModelInfo) => {
+        if (!selectedChannel) return;
+        const pricing = modelPricing[model.id];
+        if (!pricing) return;
+
+        // Check for cross-channel duplicates
+        try {
+            const result = await comparePricing(model.model_name);
+            if (result.channels.length > 1) {
+                setPricingModal({ open: true, channels: result.channels, model });
+                return; // Wait for user choice in modal
+            }
+        } catch {
+            // If compare fails, fall through to single-channel save
+        }
+
+        // Single-channel flow: save immediately
+        await doSavePricing(model, selectedChannel.id);
+    };
+
+    const handlePricingApplyGlobal = async () => {
+        const model = pricingModal.model;
+        if (!model) return;
+        setPricingModal((prev) => ({ ...prev, open: false }));
+        await doSavePricing(model, 0);
+    };
+
+    const handlePricingApplyLocal = async () => {
+        const model = pricingModal.model;
+        if (!model) return;
+        setPricingModal((prev) => ({ ...prev, open: false }));
+        await doSavePricing(model, selectedChannel!.id);
+    };
+
+    const handlePricingCancel = () => {
+        setPricingModal({ open: false, channels: [], model: null });
     };
 
     // Open model edit modal
@@ -516,7 +610,7 @@ export default function AdminApiConfigPage() {
     ];
 
     // Model table columns inside panel
-    const modelColumns: ColumnsType<ChannelModelInfo> = [
+    const modelColumns: ColumnsType<ChannelModelInfo> = useMemo(() => [
         { title: "模型名称", dataIndex: "model_name", key: "model_name", width: 200, ellipsis: true },
         {
             title: "能力",
@@ -550,7 +644,7 @@ export default function AdminApiConfigPage() {
             key: "pricing_mode",
             width: 200,
             render: (_, record) => {
-                const pricing = getPricingForModel(record.id, record.model_name);
+                const pricing = getPricingForModel(record.id, record.model_name, selectedChannel?.id);
                 const rule = parsePricingRule(pricing.pricing_rule);
                 const isDynamic = pricing.pricing_mode === "video_dynamic";
                 return (
@@ -569,11 +663,9 @@ export default function AdminApiConfigPage() {
                         {isDynamic && (
                             <div className="border-t pt-1 space-y-1 w-full">
                                 <div className="text-xs text-stone-500">基础积分:</div>
-                                <InputNumber
-                                    size="small"
-                                    min={0}
+                                <PricingInput
                                     value={rule.base_credits}
-                                    onChange={(v) => handlePricingRuleChange(record.id, "base_credits", v ?? 0)}
+                                    onChange={(v) => handlePricingRuleChange(record.id, "base_credits", v)}
                                     disabled={!isSuperAdmin}
                                     style={{ width: "100%" }}
                                 />
@@ -581,11 +673,9 @@ export default function AdminApiConfigPage() {
                                 {["720p", "1080p"].map((res) => (
                                     <div key={res} className="flex items-center gap-1">
                                         <span className="text-xs text-stone-500 w-10">{res}:</span>
-                                        <InputNumber
-                                            size="small"
-                                            min={0}
+                                        <PricingInput
                                             value={rule.resolution_second_rates[res] || 0}
-                                            onChange={(v) => handlePricingRuleChange(record.id, res, v ?? 0)}
+                                            onChange={(v) => handlePricingRuleChange(record.id, res, v)}
                                             disabled={!isSuperAdmin}
                                             style={{ width: "70%" }}
                                         />
@@ -602,7 +692,7 @@ export default function AdminApiConfigPage() {
             key: "unit_type",
             width: 150,
             render: (_, record) => {
-                const pricing = getPricingForModel(record.id, record.model_name);
+                const pricing = getPricingForModel(record.id, record.model_name, selectedChannel?.id);
                 return (
                     <Select
                         value={pricing.unit_type}
@@ -625,13 +715,11 @@ export default function AdminApiConfigPage() {
             key: "credits_per_unit",
             width: 100,
             render: (_, record) => {
-                const pricing = getPricingForModel(record.id, record.model_name);
+                const pricing = getPricingForModel(record.id, record.model_name, selectedChannel?.id);
                 return (
-                    <InputNumber
-                        size="small"
-                        min={0}
+                    <PricingInput
                         value={pricing.credits_per_unit}
-                        onChange={(v) => handlePricingChange(record.id, "credits_per_unit", v ?? 0)}
+                        onChange={(v) => handlePricingChange(record.id, "credits_per_unit", v)}
                         disabled={!isSuperAdmin}
                         style={{ width: "100%" }}
                     />
@@ -704,7 +792,7 @@ export default function AdminApiConfigPage() {
                 );
             },
         },
-    ];
+    ], [modelCapabilities, modelPricing, pricingData, selectedChannel, isSuperAdmin, toggleCap, handlePricingChange, handlePricingRuleChange, handleSavePricing, handleSaveCapabilities, openModelModal, handleToggleModel]);
 
     return (
         <div>
@@ -871,6 +959,15 @@ export default function AdminApiConfigPage() {
                     )}
                 </Form>
             </Modal>
+
+            {/* Pricing Scope Modal */}
+            <PricingScopeModal
+                open={pricingModal.open}
+                channels={pricingModal.channels}
+                onApplyGlobal={handlePricingApplyGlobal}
+                onApplyLocal={handlePricingApplyLocal}
+                onCancel={handlePricingCancel}
+            />
         </div>
     );
 }

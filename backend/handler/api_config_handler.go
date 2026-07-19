@@ -206,7 +206,7 @@ func (h *ApiConfigHandler) TestModel(c *gin.Context) {
 	model.OK(c, result)
 }
 
-func filterModelsByPricing(models []string, pricingMap map[string]model.CreditPricing) []string {
+func filterModelsByPricing(models []string, pricingMap map[string]map[uint]model.CreditPricing) []string {
 	if len(models) == 0 {
 		return []string{}
 	}
@@ -217,8 +217,8 @@ func filterModelsByPricing(models []string, pricingMap map[string]model.CreditPr
 		if name == "" {
 			continue
 		}
-		pricing, exists := pricingMap[name]
-		if !exists || !pricing.HasValidPricingRule() {
+		pricingByChannel, exists := pricingMap[name]
+		if !exists || len(pricingByChannel) == 0 || !hasPricingRule(pricingByChannel) {
 			continue
 		}
 		if _, duplicated := seen[name]; duplicated {
@@ -230,7 +230,7 @@ func filterModelsByPricing(models []string, pricingMap map[string]model.CreditPr
 	return items
 }
 
-func collectDisabledModels(models []string, pricingMap map[string]model.CreditPricing) []string {
+func collectDisabledModels(models []string, pricingMap map[string]map[uint]model.CreditPricing) []string {
 	items := make([]string, 0)
 	seen := make(map[string]struct{})
 	for _, item := range models {
@@ -238,7 +238,7 @@ func collectDisabledModels(models []string, pricingMap map[string]model.CreditPr
 		if name == "" {
 			continue
 		}
-		if pricing, ok := pricingMap[name]; ok && pricing.HasValidPricingRule() {
+		if pricingByChannel, ok := pricingMap[name]; ok && len(pricingByChannel) > 0 && hasPricingRule(pricingByChannel) {
 			continue
 		}
 		if _, duplicated := seen[name]; duplicated {
@@ -250,14 +250,14 @@ func collectDisabledModels(models []string, pricingMap map[string]model.CreditPr
 	return items
 }
 
-func filterModelDurationsByPricing(items map[string][]int, pricingMap map[string]model.CreditPricing) map[string][]int {
+func filterModelDurationsByPricing(items map[string][]int, pricingMap map[string]map[uint]model.CreditPricing) map[string][]int {
 	if len(items) == 0 {
 		return map[string][]int{}
 	}
 	filtered := make(map[string][]int, len(items))
 	for modelName, durations := range items {
-		pricing, ok := pricingMap[modelName]
-		if !ok || !pricing.HasValidPricingRule() {
+		pricingByChannel, ok := pricingMap[modelName]
+		if !ok || len(pricingByChannel) == 0 || !hasPricingRule(pricingByChannel) {
 			continue
 		}
 		filtered[modelName] = append([]int(nil), durations...)
@@ -265,7 +265,7 @@ func filterModelDurationsByPricing(items map[string][]int, pricingMap map[string
 	return filtered
 }
 
-func filterBoolMapByPricing(items map[string]bool, pricingMap map[string]model.CreditPricing) map[string]bool {
+func filterBoolMapByPricing(items map[string]bool, pricingMap map[string]map[uint]model.CreditPricing) map[string]bool {
 	if len(items) == 0 {
 		return map[string]bool{}
 	}
@@ -274,13 +274,23 @@ func filterBoolMapByPricing(items map[string]bool, pricingMap map[string]model.C
 		if !enabled {
 			continue
 		}
-		pricing, ok := pricingMap[modelName]
-		if !ok || !pricing.HasValidPricingRule() {
+		pricingByChannel, ok := pricingMap[modelName]
+		if !ok || len(pricingByChannel) == 0 || !hasPricingRule(pricingByChannel) {
 			continue
 		}
 		filtered[modelName] = true
 	}
 	return filtered
+}
+
+// hasPricingRule checks whether any channel in the nested pricing map has a valid pricing rule.
+func hasPricingRule(pricingByChannel map[uint]model.CreditPricing) bool {
+	for _, p := range pricingByChannel {
+		if p.HasValidPricingRule() {
+			return true
+		}
+	}
+	return false
 }
 
 func encodeStringList(items []string) (string, error) {

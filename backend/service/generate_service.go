@@ -51,7 +51,7 @@ type channelKeyReader interface {
 }
 
 type pricingReader interface {
-	FindPricing(tenantID uint, modelName string) (*model.CreditPricing, error)
+	FindPricing(tenantID uint, modelName string, channelID uint) (*model.CreditPricing, error)
 }
 
 func NewGenerateService(apiConfigRepo *repository.ApiConfigRepo, creditService *CreditService, creditRepo *repository.CreditRepo, logService *ModelCallLogService, encryptKey string, repairService *OnDemandRepairService, channelSvc *ChannelService, channelRepo *repository.ChannelRepo, modelRepo *repository.ChannelModelRepo) *GenerateService {
@@ -348,7 +348,7 @@ func (s *GenerateService) proxy(tenantID, userID uint, genType, path, contentTyp
 		return nil, err
 	}
 
-	cost, pricingResult, err := s.getRequiredPricing(tenantID, genType, modelName, contentType, body)
+	cost, pricingResult, err := s.getRequiredPricing(tenantID, selection.ChannelID, genType, modelName, contentType, body)
 	if err != nil {
 		s.recordModelFailureWithRoute(tenantID, userID, genType, modelName, http.MethodPost, path, 0, nil, err.Error(), route)
 		return nil, err
@@ -428,9 +428,12 @@ func (s *GenerateService) proxy(tenantID, userID uint, genType, path, contentTyp
 	}, nil
 }
 
-func (s *GenerateService) getRequiredPricing(tenantID uint, genType, modelName, contentType string, body []byte) (int, CreditCostResult, error) {
-	pricing, err := s.creditRepo.FindPricing(tenantID, modelName)
+func (s *GenerateService) getRequiredPricing(tenantID uint, channelID uint, genType, modelName, contentType string, body []byte) (int, CreditCostResult, error) {
+	pricing, err := s.creditRepo.FindPricing(tenantID, modelName, channelID)
 	if err != nil {
+		return 0, CreditCostResult{}, err
+	}
+	if pricing == nil {
 		return 0, CreditCostResult{}, fmt.Errorf("模型 %s 未配置计费，暂不可用", modelName)
 	}
 	result, err := CalculateCreditCost(pricing, genType, contentType, body)
@@ -509,7 +512,7 @@ func (s *GenerateService) ProxyRaw(tenantID, userID uint, method, path, contentT
 		s.recordModelFailure(tenantID, userID, chargeType, modelName, method, path, 0, nil, err.Error())
 		return nil, err
 	}
-	cost, _, pricingResult, err := s.getProxyCostByGeneration(tenantID, method, chargeType, contentType, body, modelName)
+	cost, _, pricingResult, err := s.getProxyCostByGeneration(tenantID, selection.ChannelID, method, chargeType, contentType, body, modelName)
 	if err != nil {
 		s.recordModelFailureWithRoute(tenantID, userID, chargeType, modelName, method, path, 0, nil, err.Error(), route)
 		return nil, err
@@ -608,7 +611,7 @@ func (s *GenerateService) ProxyRawWithRepair(tenantID, userID uint, method, path
 		s.recordModelFailure(tenantID, userID, generation, modelName, method, path, 0, nil, err.Error())
 		return nil, err
 	}
-	cost, chargeType, pricingResult, err := s.getProxyCostByGeneration(tenantID, method, generation, contentType, body, modelName)
+	cost, chargeType, pricingResult, err := s.getProxyCostByGeneration(tenantID, selection.ChannelID, method, generation, contentType, body, modelName)
 	if err != nil {
 		s.recordModelFailureWithRoute(tenantID, userID, generation, modelName, method, path, 0, nil, err.Error(), route)
 		return nil, err
@@ -697,14 +700,14 @@ func (s *GenerateService) ProxyRawWithRepair(tenantID, userID uint, method, path
 	}, nil
 }
 
-func (s *GenerateService) getProxyCostByGeneration(tenantID uint, method, generation, contentType string, body []byte, modelName string) (int, string, CreditCostResult, error) {
+func (s *GenerateService) getProxyCostByGeneration(tenantID uint, channelID uint, method, generation, contentType string, body []byte, modelName string) (int, string, CreditCostResult, error) {
 	if strings.ToUpper(strings.TrimSpace(method)) != http.MethodPost {
 		return 0, generation, CreditCostResult{}, nil
 	}
 	if generation == "" || modelName == "" {
 		return 0, generation, CreditCostResult{}, nil
 	}
-	cost, result, err := s.getRequiredPricing(tenantID, generation, modelName, contentType, body)
+	cost, result, err := s.getRequiredPricing(tenantID, channelID, generation, modelName, contentType, body)
 	if err != nil {
 		return 0, generation, CreditCostResult{}, err
 	}

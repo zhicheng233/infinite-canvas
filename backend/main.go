@@ -74,7 +74,7 @@ func main() {
 	authHandler := handler.NewAuthHandler(authService, userService)
 	adminHandler := handler.NewAdminHandler(tenantRepo, userRepo, creditService, creditRepo, rechargeRepo, modelCallLogRepo, modelCallLogService)
 	userHandler := handler.NewUserHandler(userService)
-	creditHandler := handler.NewCreditHandler(creditService, creditRepo, generateService)
+	creditHandler := handler.NewCreditHandler(creditService, creditRepo, generateService, channelModelRepo, channelRepo)
 	generateHandler := handler.NewGenerateHandler(generateService)
 	apiConfigHandler := handler.NewApiConfigHandler(apiConfigRepo, creditRepo, generateService, cfg)
 	proxyHandler := handler.NewProxyHandler(generateService)

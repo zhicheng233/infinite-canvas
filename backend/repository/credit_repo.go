@@ -1,6 +1,8 @@
 package repository
 
 import (
+	"errors"
+
 	"gorm.io/gorm"
 	"infinite-canvas-server/model"
 )
@@ -43,49 +45,70 @@ func (r *CreditRepo) ListTransactions(accountID uint, page, pageSize int) ([]mod
 	return txs, total, err
 }
 
-func (r *CreditRepo) FindPricing(tenantID uint, modelName string) (*model.CreditPricing, error) {
+func (r *CreditRepo) FindPricing(tenantID uint, modelName string, channelID uint) (*model.CreditPricing, error) {
 	var pricing model.CreditPricing
-	err := r.db.Where("tenant_id = ? AND model = ?", tenantID, modelName).First(&pricing).Error
-	if err != nil {
+	// First try exact channel match
+	err := r.db.Where("tenant_id = ? AND model = ? AND channel_id = ?", tenantID, modelName, channelID).First(&pricing).Error
+	if err == nil {
+		return &pricing, nil
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, err
 	}
-	return &pricing, nil
+	// Fallback to global pricing (channel_id=0)
+	if channelID != 0 {
+		err = r.db.Where("tenant_id = ? AND model = ? AND channel_id = 0", tenantID, modelName).First(&pricing).Error
+		if err == nil {
+			return &pricing, nil
+		}
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, err
+		}
+	}
+	// No pricing found at all
+	return nil, nil
 }
 
-func (r *CreditRepo) FindPricingMap(tenantID uint) (map[string]model.CreditPricing, error) {
+func (r *CreditRepo) FindPricingMap(tenantID uint) (map[string]map[uint]model.CreditPricing, error) {
 	var items []model.CreditPricing
 	if err := r.db.Where("tenant_id = ?", tenantID).Find(&items).Error; err != nil {
 		return nil, err
 	}
-	result := make(map[string]model.CreditPricing, len(items))
+	result := make(map[string]map[uint]model.CreditPricing, len(items))
 	for _, item := range items {
-		result[item.Model] = item
+		if result[item.Model] == nil {
+			result[item.Model] = make(map[uint]model.CreditPricing)
+		}
+		result[item.Model][item.ChannelID] = item
 	}
 	return result, nil
 }
 
 func (r *CreditRepo) SavePricing(pricing *model.CreditPricing) error {
-	if pricing.ID == 0 {
-		return r.db.Create(pricing).Error
-	}
-	if err := r.db.Model(&model.CreditPricing{}).
-		Where("id = ?", pricing.ID).
-		Updates(map[string]interface{}{
-			"tenant_id":        pricing.TenantID,
-			"model":            pricing.Model,
+	var existing model.CreditPricing
+	err := r.db.Where("tenant_id = ? AND model = ? AND channel_id = ?",
+		pricing.TenantID, pricing.Model, pricing.ChannelID).First(&existing).Error
+	if err == nil {
+		return r.db.Model(&existing).Updates(map[string]interface{}{
 			"credits_per_unit": pricing.CreditsPerUnit,
 			"unit_type":        pricing.UnitType,
 			"pricing_mode":     pricing.PricingMode,
 			"pricing_rule":     pricing.PricingRule,
-		}).Error; err != nil {
+		}).Error
+	}
+	if err != gorm.ErrRecordNotFound {
 		return err
 	}
-	return r.db.First(pricing, pricing.ID).Error
+	return r.db.Create(pricing).Error
 }
 
-func (r *CreditRepo) ListPricing(tenantID uint) ([]model.CreditPricing, error) {
+func (r *CreditRepo) ListPricing(tenantID uint, channelID uint) ([]model.CreditPricing, error) {
 	var items []model.CreditPricing
-	err := r.db.Where("tenant_id = ?", tenantID).Order("model ASC").Find(&items).Error
+	query := r.db.Where("tenant_id = ?", tenantID)
+	if channelID > 0 {
+		query = query.Where("channel_id = ?", channelID)
+	}
+	err := query.Order("model ASC").Find(&items).Error
 	return items, err
 }
 
