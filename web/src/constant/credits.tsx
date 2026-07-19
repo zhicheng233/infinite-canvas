@@ -135,9 +135,7 @@ export function CreditCostHint({ credits, balance, compact = false }: { credits:
                 <CreditSymbol className={insufficient ? "text-red-500" : "text-amber-500"} />
                 {balance === null ? "正在读取当前积分" : `当前余额 ${balance}，预计生成后剩余 ${Math.max(postBalance || 0, 0)}`}
             </span>
-            <span className={insufficient ? "text-red-500" : ""}>
-                {hasCost ? `本次预计扣除 ${credits} 积分${insufficient ? "，余额不足" : ""}` : "当前模型未配置扣费"}
-            </span>
+            <span className={insufficient ? "text-red-500" : ""}>{hasCost ? `本次预计扣除 ${credits} 积分${insufficient ? "，余额不足" : ""}` : "当前模型未配置扣费"}</span>
             {insufficient ? (
                 <Button size="small" type="link" href="/recharge" className="!h-auto !p-0">
                     去充值

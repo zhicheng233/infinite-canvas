@@ -8,7 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func Setup(r *gin.Engine, authService *service.AuthService, authHandler *handler.AuthHandler, adminHandler *handler.AdminHandler, userHandler *handler.UserHandler, creditHandler *handler.CreditHandler, generateHandler *handler.GenerateHandler, apiConfigHandler *handler.ApiConfigHandler, proxyHandler *handler.ProxyHandler, canvasHandler *handler.CanvasHandler, generationRecordHandler *handler.GenerationRecordHandler, rechargeHandler *handler.RechargeHandler, captchaHandler *handler.CaptchaHandler, tempMediaHandler *handler.TempMediaHandler, channelStatusHandler *handler.ChannelStatusHandler) {
+func Setup(r *gin.Engine, authService *service.AuthService, authHandler *handler.AuthHandler, adminHandler *handler.AdminHandler, userHandler *handler.UserHandler, creditHandler *handler.CreditHandler, generateHandler *handler.GenerateHandler, apiConfigHandler *handler.ApiConfigHandler, proxyHandler *handler.ProxyHandler, canvasHandler *handler.CanvasHandler, generationRecordHandler *handler.GenerationRecordHandler, rechargeHandler *handler.RechargeHandler, captchaHandler *handler.CaptchaHandler, tempMediaHandler *handler.TempMediaHandler, channelStatusHandler *handler.ChannelStatusHandler, channelHandler *handler.ChannelHandler, channelModelHandler *handler.ChannelModelHandler, metricsHandler *handler.MetricsHandler) {
 	r.Use(middleware.Cors())
 
 	api := r.Group("/backend-api")
@@ -30,6 +30,9 @@ func Setup(r *gin.Engine, authService *service.AuthService, authHandler *handler
 		auth.GET("/credits/transactions", creditHandler.GetTransactions)
 		auth.GET("/credits/estimate", creditHandler.EstimateCost)
 		auth.GET("/api-config/catalog", apiConfigHandler.Catalog)
+		auth.GET("/channels", channelHandler.List)
+		auth.GET("/channels/metrics", metricsHandler.Read)
+		auth.GET("/channels/:id/models", channelModelHandler.List)
 		auth.POST("/media/tmp", tempMediaHandler.UploadImage)
 
 		auth.POST("/generate/image", generateHandler.Image)
@@ -82,6 +85,15 @@ func Setup(r *gin.Engine, authService *service.AuthService, authHandler *handler
 			superAdmin.GET("/admin/users", adminHandler.ListAllUsers)
 			superAdmin.POST("/admin/credits/adjust", adminHandler.AdjustCredits)
 			superAdmin.GET("/admin/recharges", adminHandler.ListAllRecharges)
+			superAdmin.GET("/admin/channels", channelHandler.ListAdmin)
+			superAdmin.POST("/admin/channels", channelHandler.Create)
+			superAdmin.PUT("/admin/channels/:id", channelHandler.Update)
+			superAdmin.POST("/admin/channels/:id/disable", channelHandler.Disable)
+			superAdmin.GET("/admin/channels/:id/models", channelModelHandler.ListAdmin)
+			superAdmin.POST("/admin/channels/:id/models/sync", channelModelHandler.Sync)
+			superAdmin.PUT("/admin/channels/:id/models/:modelId", channelModelHandler.Update)
+			superAdmin.GET("/admin/metrics-config", metricsHandler.GetConfig)
+			superAdmin.POST("/admin/metrics-config", metricsHandler.SaveConfig)
 		}
 	}
 }

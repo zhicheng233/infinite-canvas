@@ -14,10 +14,11 @@ import (
 type CreditHandler struct {
 	creditService *service.CreditService
 	creditRepo    *repository.CreditRepo
+	generateSvc   *service.GenerateService
 }
 
-func NewCreditHandler(creditService *service.CreditService, creditRepo *repository.CreditRepo) *CreditHandler {
-	return &CreditHandler{creditService: creditService, creditRepo: creditRepo}
+func NewCreditHandler(creditService *service.CreditService, creditRepo *repository.CreditRepo, generateSvc *service.GenerateService) *CreditHandler {
+	return &CreditHandler{creditService: creditService, creditRepo: creditRepo, generateSvc: generateSvc}
 }
 
 func (h *CreditHandler) GetBalance(c *gin.Context) {
@@ -179,6 +180,14 @@ func (h *CreditHandler) EstimateCost(c *gin.Context) {
 		model.Fail(c, 400, "请指定模型")
 		return
 	}
+	genType := strings.TrimSpace(c.DefaultQuery("type", ""))
+	if h.generateSvc != nil {
+		selection := service.ChannelSelection{ChannelID: parseUintQuery(c.Query("channel_id")), ChannelModelID: parseUintQuery(c.Query("channel_model_id"))}
+		if err := h.generateSvc.ResolveChannelRouteForEstimate(selection, genType, modelName); err != nil {
+			model.Fail(c, 400, err.Error())
+			return
+		}
+	}
 	pricing, err := h.creditRepo.FindPricing(claims.TenantID, modelName)
 	if err != nil {
 		model.Fail(c, 403, "该模型未配置计费，暂不可用")
@@ -201,7 +210,6 @@ func (h *CreditHandler) EstimateCost(c *gin.Context) {
 		fields["n"] = count
 	}
 	body, _ := json.Marshal(fields)
-	genType := strings.TrimSpace(c.DefaultQuery("type", ""))
 	if genType == "" {
 		if pricing.PricingMode == model.PricingModeVideoDynamic || pricing.UnitType == model.UnitPerVideo || pricing.UnitType == model.UnitPerVideoSecond {
 			genType = "video"
@@ -227,4 +235,9 @@ func (h *CreditHandler) EstimateCost(c *gin.Context) {
 		"resolution":       cost.Resolution,
 		"formula":          cost.Formula,
 	})
+}
+
+func parseUintQuery(value string) uint {
+	parsed, _ := strconv.ParseUint(strings.TrimSpace(value), 10, 64)
+	return uint(parsed)
 }

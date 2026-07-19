@@ -16,13 +16,13 @@ docker compose up -d --build
 
 如果你修改了 `.env` 里的 `NEXT_PUBLIC_API_URL`，记得重新执行一次 `docker compose up -d --build app`，否则浏览器仍可能拿到旧的前端接口地址。
 
-如果你在线上用同域名反向代理，例如 `https://your-domain/backend-api`，本地开发阶段仍建议继续使用 `http://localhost:18080/api` 或显式设置 `NEXT_PUBLIC_API_URL=http://localhost:18080/api`，避免和线上域名混用。
+生产环境继续使用 Docker 和同源反向代理配置；下面的 `BACKEND_API_URL` 只由 Next.js 开发服务器读取，不会暴露为浏览器端的 `NEXT_PUBLIC_*` 配置。
 
 默认访问：
 
 ```text
 前端：http://localhost:3001
-后端：http://localhost:18080/api
+后端：http://localhost:18080/backend-api
 ```
 
 ## 2. 初始化管理员
@@ -62,13 +62,24 @@ UPDATE users SET role = 'super_admin' WHERE username = '你的管理员用户名
 
 ## 4. 单独调试前端
 
-如果只需要改前端页面：
+如果只需要改前端页面，并且后端已经在本机 `127.0.0.1:18080` 运行：
 
 ```bash
 cd web
 bun install
 bun run dev
 ```
+
+开发服务器会把 `/backend-api/:path*` 转发到
+`http://127.0.0.1:18080/backend-api/:path*`。如需连接其他本地后端地址，设置
+`BACKEND_API_URL` 后再启动：
+
+```bash
+cd web
+BACKEND_API_URL=http://127.0.0.1:28080 bun run dev
+```
+
+也可以将 `BACKEND_API_URL` 设置为已经包含 `/backend-api` 的地址；开发重写会自动规范化该前缀，避免重复拼接。
 
 ## 5. 单独调试文档站
 

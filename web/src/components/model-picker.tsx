@@ -5,7 +5,7 @@ import { Cpu } from "lucide-react";
 
 import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import { modelOptionLabel, modelOptionName, selectableModelsByCapability, type AiConfig, type ModelCapability } from "@/stores/use-config-store";
+import { channelModelOptionsByCapability, modelOptionLabel, modelOptionName, selectableModelsByCapability, selectedChannelId, useConfigStore, type AiConfig, type ModelCapability } from "@/stores/use-config-store";
 
 type ModelPickerProps = {
     config: AiConfig;
@@ -21,8 +21,12 @@ type ModelPickerProps = {
 export function ModelPicker({ config, value, onChange, capability, className, fullWidth = false, placeholder = "选择模型", onMissingConfig }: ModelPickerProps) {
     const pickerId = useId();
     const [open, setOpen] = useState(false);
-    const options = useMemo(() => Array.from(new Set([...(config.channelMode === "local" && !capability ? [value] : []), ...selectableModelsByCapability(config, capability)].filter((model): model is string => Boolean(model)))), [capability, config, value]);
+    const options = useMemo(() => Array.from(new Set([...(capability ? [] : [value]), ...selectableModelsByCapability(config, capability)].filter((model): model is string => Boolean(model)))), [capability, config, value]);
     const current = value || "";
+    const channels = useConfigStore((state) => state.serverChannels);
+    const serverCatalogLoading = useConfigStore((state) => state.serverCatalogLoading);
+    const serverCatalogError = useConfigStore((state) => state.serverCatalogError);
+    const selectCapabilityChannel = useConfigStore((state) => state.selectCapabilityChannel);
 
     useEffect(() => {
         const closeOtherPicker = (event: Event) => {
@@ -32,12 +36,12 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
         return () => window.removeEventListener("model-picker-open", closeOtherPicker);
     }, [pickerId]);
 
-    return (
+    const picker = (
         <Select
             open={open}
             value={current}
             onOpenChange={(nextOpen) => {
-                if (nextOpen && !options.length && config.channelMode === "local") onMissingConfig?.();
+                if (nextOpen && !options.length) onMissingConfig?.();
                 if (nextOpen) window.dispatchEvent(new CustomEvent("model-picker-open", { detail: pickerId }));
                 setOpen(nextOpen);
             }}
@@ -70,32 +74,67 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
                 {options.length ? (
                     options.map((model) => (
                         <SelectItem key={model} value={model} textValue={modelOptionLabel(config, model)}>
-                            <ModelLabel config={config} model={model} />
+                            <ModelLabel config={config} model={model} capability={capability} />
                         </SelectItem>
                     ))
                 ) : (
                     <SelectItem value="__empty__" disabled>
-                        {emptyModelLabel(config, capability)}
+                        {serverCatalogLoading ? "正在加载模型…" : serverCatalogError ? "模型列表加载失败，请稍后重试" : emptyModelLabel(config, capability)}
                     </SelectItem>
                 )}
             </SelectContent>
         </Select>
+    );
+
+    if (!capability) return picker;
+    const channelId = selectedChannelId(config, capability);
+    return (
+        <div className={cn("flex min-w-0 gap-2", fullWidth && "w-full")}>
+            <Select value={channelId ? String(channelId) : ""} onValueChange={(value) => selectCapabilityChannel(capability, Number(value) || null)}>
+                <SelectTrigger className="h-8 min-w-[7rem] max-w-[10rem] justify-start rounded-full border border-input bg-transparent px-3 text-sm shadow-sm" title={channels.find((channel) => channel.id === channelId)?.name || "选择渠道"}>
+                    <span className="truncate">{channels.find((channel) => channel.id === channelId)?.name || "选择渠道"}</span>
+                </SelectTrigger>
+                <SelectContent className="z-[1200] max-w-[calc(100vw-24px)]" position="popper" align="start" side="bottom" sideOffset={6}>
+                    {channels.length ? (
+                        channels.map((channel) => (
+                            <SelectItem key={channel.id} value={String(channel.id)}>
+                                {channel.name}
+                            </SelectItem>
+                        ))
+                    ) : (
+                        <SelectItem value="__empty_channel__" disabled>
+                            暂无可用渠道
+                        </SelectItem>
+                    )}
+                </SelectContent>
+            </Select>
+            <div className={cn("min-w-0", fullWidth && "flex-1")}>{picker}</div>
+        </div>
     );
 }
 
 function emptyModelLabel(config: AiConfig, capability?: ModelCapability) {
     const label = capability === "image" ? "生图" : capability === "video" ? "视频" : capability === "text" ? "文本" : capability === "audio" ? "音频" : "";
     if (capability && config.models.length) return "请先在上方配置可选模型";
-    return config.models.length ? `暂无匹配的${label}模型` : "请先到配置里添加渠道和模型";
+    return config.models.length ? `暂无匹配的${label}模型` : "暂无可用模型，请联系管理员配置";
 }
 
-function ModelLabel({ config, model }: { config: AiConfig; model: string }) {
+function ModelLabel({ config, model, capability }: { config: AiConfig; model: string; capability?: ModelCapability }) {
+    const option = capability ? channelModelOptionsByCapability(capability).find((item) => item.value === model) : null;
     return (
-        <span className="flex min-w-0 items-center gap-2">
+        <span className="flex min-w-0 items-center gap-2" data-channel-model-id={option?.channelModelId}>
             <ModelIcon model={model} />
-            <span className="truncate">{modelOptionLabel(config, model)}</span>
+            <span className="min-w-0 flex-1 truncate">{modelOptionLabel(config, model)}</span>
+            {option ? <span className="shrink-0 text-xs opacity-55">{option.successRate === null ? rateUnavailableLabel(option.metricsStatus) : `${option.successRate}%`}</span> : null}
         </span>
     );
+}
+
+function rateUnavailableLabel(status: string) {
+    if (status === "stale") return "已过期";
+    if (status === "error") return "获取失败";
+    if (status === "unmapped") return "未映射";
+    return "暂无数据";
 }
 
 function ModelIcon({ model }: { model: string }) {

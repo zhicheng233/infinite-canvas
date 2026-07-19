@@ -191,11 +191,7 @@ export const useCanvasStore = create<CanvasStore>()(
             },
             renameProject: (id, title) => {
                 set((state) => ({
-                    projects: state.projects.map((project) =>
-                        project.id === id
-                            ? { ...project, title: title.trim() || project.title, updatedAt: new Date().toISOString() }
-                            : project,
-                    ),
+                    projects: state.projects.map((project) => (project.id === id ? { ...project, title: title.trim() || project.title, updatedAt: new Date().toISOString() } : project)),
                 }));
                 const project = get().projects.find((p) => p.id === id);
                 if (project) scheduleCloudSave(project);
@@ -211,9 +207,7 @@ export const useCanvasStore = create<CanvasStore>()(
             replaceProjects: (projects) => set({ projects }),
             updateProject: (id, patch) => {
                 set((state) => ({
-                    projects: state.projects.map((project) =>
-                        project.id === id ? { ...project, ...patch, updatedAt: new Date().toISOString() } : project,
-                    ),
+                    projects: state.projects.map((project) => (project.id === id ? { ...project, ...patch, updatedAt: new Date().toISOString() } : project)),
                 }));
                 const project = get().projects.find((p) => p.id === id);
                 if (project) scheduleCloudSave(project);

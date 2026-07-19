@@ -1,10 +1,10 @@
 package handler
 
 import (
-	"net/http"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
+	"infinite-canvas-server/model"
 	"infinite-canvas-server/service"
 )
 
@@ -26,9 +26,9 @@ func (h *ChannelStatusHandler) GetChannelStatus(c *gin.Context) {
 
 	status, err := h.channelStatusService.GetChannelStatus(0, days)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		model.Fail(c, 500, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, status)
+	model.OK(c, status)
 }

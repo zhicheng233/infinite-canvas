@@ -2,7 +2,7 @@ import axios from "axios";
 import { isLoggedIn, proxyAiPost, proxyAiGet, proxyAiGetPath } from "./ai-proxy";
 import { API_BASE } from "./client";
 
-import { buildApiUrl, imageEditRouteForModel, imageGenerateRouteForModel, modelOptionName, resolveModelRequestConfig, type AiConfig, type ModelChannel } from "@/stores/use-config-store";
+import { buildApiUrl, buildProxyApiUrl, imageEditRouteForModel, imageGenerateRouteForModel, modelOptionName, readLocalAiCredentials, resolveModelRequestConfig, type AiConfig, type LocalAiCredentials } from "@/stores/use-config-store";
 import { nanoid } from "nanoid";
 import { buildImageReferencePromptText } from "@/lib/image-reference-prompt";
 import { dataUrlToFile } from "@/lib/image-utils";
@@ -21,10 +21,7 @@ export type ResponseToolCall = {
     function: { name: string; arguments: string };
 };
 
-export type ResponseInputMessage =
-    | AiTextMessage
-    | { type: "function_call"; call_id: string; name: string; arguments: string }
-    | { role: "tool"; tool_call_id: string; content: string };
+export type ResponseInputMessage = AiTextMessage | { type: "function_call"; call_id: string; name: string; arguments: string } | { role: "tool"; tool_call_id: string; content: string };
 
 export type ResponseFunctionTool = {
     type: "function";
@@ -44,10 +41,7 @@ export type ToolResponseResult = {
 type ToolChoice = "auto" | "required" | { type: "function"; name: string };
 type ResponseMessageContent = AiTextMessage["content"] | string;
 type ResponseInputContent = { type: "input_text"; text: string } | { type: "input_image"; image_url: string };
-type ResponseInputItem =
-    | { role: "system" | "user" | "assistant"; content: string | ResponseInputContent[] }
-    | { type: "function_call"; call_id: string; name: string; arguments: string }
-    | { type: "function_call_output"; call_id: string; output: string };
+type ResponseInputItem = { role: "system" | "user" | "assistant"; content: string | ResponseInputContent[] } | { type: "function_call"; call_id: string; name: string; arguments: string } | { type: "function_call_output"; call_id: string; output: string };
 type ResponseApiToolDefinition = {
     type: "function";
     name: string;
@@ -55,9 +49,7 @@ type ResponseApiToolDefinition = {
     parameters: Record<string, unknown>;
     strict?: boolean;
 };
-type ResponseApiOutputItem =
-    | { type?: "message"; content?: Array<{ type?: string; text?: string }> }
-    | { type?: "function_call"; id?: string; call_id?: string; name?: string; arguments?: string };
+type ResponseApiOutputItem = { type?: "message"; content?: Array<{ type?: string; text?: string }> } | { type?: "function_call"; id?: string; call_id?: string; name?: string; arguments?: string };
 type ResponseApiPayload = {
     id?: string;
     output?: ResponseApiOutputItem[];
@@ -334,9 +326,7 @@ async function requestChatImageGeneration(config: AiConfig, prompt: string, opti
 async function requestBananaImage(config: AiConfig, prompt: string, references: ReferenceImage[], options?: RequestOptions) {
     const requestConfig = resolveModelRequestConfig(config, config.model || config.imageModel);
     const requestPrompt = references.length ? buildImageReferencePromptText(prompt, references) : prompt;
-    const text = references.length
-        ? `${withSystemPrompt(requestConfig, requestPrompt)}\n\n请基于参考图片完成图片生成，只返回最终图片结果。`
-        : withSystemPrompt(requestConfig, prompt);
+    const text = references.length ? `${withSystemPrompt(requestConfig, requestPrompt)}\n\n请基于参考图片完成图片生成，只返回最终图片结果。` : withSystemPrompt(requestConfig, prompt);
     const content: string | Array<{ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }> = references.length ? [{ type: "text", text }] : text;
     const referenceUrls = await Promise.all(references.map(async (image) => await imageToDataUrl(image)));
     if (Array.isArray(content)) {
@@ -388,8 +378,10 @@ function withSystemPrompt(config: AiConfig, prompt: string) {
 }
 
 function aiApiUrl(config: AiConfig, path: string) {
-    if (isLoggedIn()) return API_BASE + "/proxy?path=" + encodeURIComponent(path);
-    return buildApiUrl(config.baseUrl, path);
+    if (isLoggedIn()) {
+        return buildProxyApiUrl(API_BASE, config, config.model, path);
+    }
+    return buildApiUrl(readLocalAiCredentials().baseUrl, path);
 }
 
 function aiHeaders(config: AiConfig, contentType?: string) {
@@ -398,7 +390,7 @@ function aiHeaders(config: AiConfig, contentType?: string) {
         const token = typeof window !== "undefined" ? localStorage.getItem("infinite-canvas:auth_token") : null;
         if (token) headers["Authorization"] = "Bearer " + token;
     } else {
-        headers["Authorization"] = "Bearer " + config.apiKey;
+        headers["Authorization"] = "Bearer " + readLocalAiCredentials().apiKey;
     }
     if (contentType) headers["Content-Type"] = contentType;
     return headers;
@@ -643,10 +635,18 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
 export async function requestImageQuestion(config: AiConfig, messages: AiTextMessage[], onDelta: (text: string) => void, options?: RequestOptions) {
     const requestConfig = resolveModelRequestConfig(config, config.model || config.textModel);
     try {
-        const answer = (await requestStreamingResponse(requestConfig, {
-            model: requestConfig.model,
-            input: toResponseInput(withSystemMessage(requestConfig, messages)),
-        }, onDelta, options)).content || "没有返回内容";
+        const answer =
+            (
+                await requestStreamingResponse(
+                    requestConfig,
+                    {
+                        model: requestConfig.model,
+                        input: toResponseInput(withSystemMessage(requestConfig, messages)),
+                    },
+                    onDelta,
+                    options,
+                )
+            ).content || "没有返回内容";
         if (answer === "没有返回内容") onDelta(answer);
         return answer;
     } catch (error) {
@@ -657,19 +657,24 @@ export async function requestImageQuestion(config: AiConfig, messages: AiTextMes
 export async function requestToolResponse(config: AiConfig, messages: ResponseInputMessage[], tools: ResponseFunctionTool[], toolChoice: ToolChoice = "auto", onDelta?: (text: string) => void, options?: RequestOptions): Promise<ToolResponseResult> {
     const requestConfig = resolveModelRequestConfig(config, config.model || config.textModel);
     try {
-        return await requestStreamingResponse(requestConfig, {
-            model: requestConfig.model,
-            input: toResponseInput(withSystemMessage(requestConfig, messages)),
-            tools: tools.map(toResponseTool),
-            tool_choice: toolChoice,
-            parallel_tool_calls: false,
-        }, onDelta, options);
+        return await requestStreamingResponse(
+            requestConfig,
+            {
+                model: requestConfig.model,
+                input: toResponseInput(withSystemMessage(requestConfig, messages)),
+                tools: tools.map(toResponseTool),
+                tool_choice: toolChoice,
+                parallel_tool_calls: false,
+            },
+            onDelta,
+            options,
+        );
     } catch (error) {
         throw new Error(readAxiosError(error, "请求失败"));
     }
 }
 
-export async function fetchImageModels(config: Pick<AiConfig, "baseUrl" | "apiKey">) {
+export async function fetchImageModels(config: LocalAiCredentials) {
     try {
         const response = await axios.get<{ data?: Array<{ id?: string }>; error?: { message?: string } }>(buildApiUrl(config.baseUrl, "/models"), {
             headers: {
@@ -685,6 +690,6 @@ export async function fetchImageModels(config: Pick<AiConfig, "baseUrl" | "apiKe
     }
 }
 
-export async function fetchChannelModels(channel: ModelChannel) {
-    return fetchImageModels({ baseUrl: channel.baseUrl, apiKey: channel.apiKey });
+export async function fetchChannelModels(channel: LocalAiCredentials) {
+    return fetchImageModels(channel);
 }

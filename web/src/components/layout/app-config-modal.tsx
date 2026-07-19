@@ -1,25 +1,23 @@
 "use client";
 
-import { App, Button, Form, Input, Modal, Select, Tabs } from "antd";
+import { App, Button, Form, Input, Modal, Tabs } from "antd";
 import { useEffect, useState } from "react";
 
 import { ModelPicker } from "@/components/model-picker";
-import { getApiModelCatalog } from "@/services/api/api-config";
-import { modelOptionLabel, normalizeModelOptionValue, useConfigStore, type ModelCapability } from "@/stores/use-config-store";
+import { getChannels, getChannelModels } from "@/services/api/channel";
+import { modelOptionName, useConfigStore, type ModelCapability } from "@/stores/use-config-store";
 
 type ModelGroup = {
     capability: ModelCapability;
     modelKey: "imageModel" | "videoModel" | "textModel" | "audioModel";
-    modelsKey: "imageModels" | "videoModels" | "textModels" | "audioModels";
     defaultLabel: string;
-    optionsLabel: string;
 };
 
 const modelGroups: ModelGroup[] = [
-    { capability: "image", modelKey: "imageModel", modelsKey: "imageModels", defaultLabel: "默认生图模型", optionsLabel: "生图模型可选项" },
-    { capability: "video", modelKey: "videoModel", modelsKey: "videoModels", defaultLabel: "默认视频模型", optionsLabel: "视频模型可选项" },
-    { capability: "text", modelKey: "textModel", modelsKey: "textModels", defaultLabel: "默认文本模型", optionsLabel: "文本模型可选项" },
-    { capability: "audio", modelKey: "audioModel", modelsKey: "audioModels", defaultLabel: "默认音频模型", optionsLabel: "音频模型可选项" },
+    { capability: "image", modelKey: "imageModel", defaultLabel: "生图渠道和默认模型" },
+    { capability: "video", modelKey: "videoModel", defaultLabel: "视频渠道和默认模型" },
+    { capability: "text", modelKey: "textModel", defaultLabel: "文本渠道和默认模型" },
+    { capability: "audio", modelKey: "audioModel", defaultLabel: "音频渠道和默认模型" },
 ];
 
 export function AppConfigModal() {
@@ -27,30 +25,23 @@ export function AppConfigModal() {
     const [activeTab, setActiveTab] = useState("preferences");
     const config = useConfigStore((state) => state.config);
     const updateConfig = useConfigStore((state) => state.updateConfig);
-    const applyServerModelCatalog = useConfigStore((state) => state.applyServerModelCatalog);
+    const applyServerChannelCatalog = useConfigStore((state) => state.applyServerChannelCatalog);
+    const serverCatalogLoading = useConfigStore((state) => state.serverCatalogLoading);
+    const serverCatalogError = useConfigStore((state) => state.serverCatalogError);
     const isConfigOpen = useConfigStore((state) => state.isConfigOpen);
     const shouldPromptContinue = useConfigStore((state) => state.shouldPromptContinue);
     const setConfigDialogOpen = useConfigStore((state) => state.setConfigDialogOpen);
     const clearPromptContinue = useConfigStore((state) => state.clearPromptContinue);
-    const modelOptions = config.models.map((model) => ({ label: modelOptionLabel(config, model), value: model }));
 
     useEffect(() => {
         if (!isConfigOpen) return;
         let mounted = true;
         const fetchCatalog = async () => {
             try {
-                const apiConfig = await getApiModelCatalog();
+                const channels = await getChannels();
+                const entries = await Promise.all(channels.map(async (channel) => [channel.id, await getChannelModels(channel.id)] as const));
                 if (!mounted) return;
-                applyServerModelCatalog({
-                    models: apiConfig.models,
-                    imageModels: apiConfig.image_models,
-                    videoModels: apiConfig.video_models,
-                    textModels: apiConfig.text_models,
-                    audioModels: apiConfig.audio_models,
-                    modelRoutes: apiConfig.model_routes,
-                    modelVideoDurations: apiConfig.model_video_durations,
-                    modelVideoCustomizable: apiConfig.model_video_customizable,
-                });
+                applyServerChannelCatalog(channels, Object.fromEntries(entries));
             } catch (err: any) {
                 if (mounted) message.error(err?.message || "加载模型列表失败");
             }
@@ -59,7 +50,7 @@ export function AppConfigModal() {
         return () => {
             mounted = false;
         };
-    }, [applyServerModelCatalog, isConfigOpen, message]);
+    }, [applyServerChannelCatalog, isConfigOpen, message]);
 
     const finishConfig = () => {
         setConfigDialogOpen(false);
@@ -67,12 +58,6 @@ export function AppConfigModal() {
             message.success("配置已保存，请继续刚才的请求");
             clearPromptContinue();
         }
-    };
-
-    const updateCapabilityModels = (group: ModelGroup, models: string[]) => {
-        const next = Array.from(new Set(models.map((model) => normalizeModelOptionValue(model, config.channels)).filter(Boolean)));
-        updateConfig(group.modelsKey, next);
-        if (!next.includes(config[group.modelKey])) updateConfig(group.modelKey, next[0] || "");
     };
 
     function normalizeImageCount(value: string) {
@@ -115,24 +100,11 @@ export function AppConfigModal() {
                                 </div>
                                 <div className="grid gap-4 md:grid-cols-2">
                                     {modelGroups.map((group) => (
-                                        <Form.Item key={group.modelsKey} label={group.optionsLabel} className="mb-0">
-                                            <Select
-                                                mode="tags"
-                                                showSearch
-                                                allowClear
-                                                maxTagCount="responsive"
-                                                placeholder={config.models.length ? "请选择模型" : "暂无可用模型，请联系管理员配置"}
-                                                value={config[group.modelsKey]}
-                                                options={modelOptions}
-                                                onChange={(models) => updateCapabilityModels(group, models)}
-                                            />
-                                        </Form.Item>
-                                    ))}
-                                </div>
-                                <div className="mt-4 grid gap-4 md:grid-cols-2">
-                                    {modelGroups.map((group) => (
                                         <Form.Item key={group.modelKey} label={group.defaultLabel} className="mb-0">
                                             <ModelPicker config={config} value={config[group.modelKey]} onChange={(model) => updateConfig(group.modelKey, model)} capability={group.capability} fullWidth />
+                                            <div className="mt-1 truncate text-xs text-stone-500">
+                                                {serverCatalogLoading ? "正在加载渠道模型…" : serverCatalogError ? `加载失败：${serverCatalogError}` : config[group.modelKey] ? modelOptionName(config[group.modelKey]) : "所选渠道暂无可用模型"}
+                                            </div>
                                         </Form.Item>
                                     ))}
                                 </div>

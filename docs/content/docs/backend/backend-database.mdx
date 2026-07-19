@@ -67,6 +67,50 @@ description: 当前后端数据库表结构说明
 | models_json | longtext | 模型目录 JSON |
 | model_routes | longtext | 模型视频接口路由 JSON |
 
+## channels 表
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | uint | 主键 |
+| name | string(100) | 渠道显示名称，带索引 |
+| base_url | string(500) | 上游 API 基础地址 |
+| api_key | string(500) | 加密后的上游 API Key；模型 JSON 输出中隐藏该字段 |
+| enabled | bool | 渠道是否启用，默认 true，带索引 |
+| new_api_channel_id | int | 可为空，对应 new-api 的 channel_id |
+| new_api_channel_id_val | string(100) | new-api 渠道人类可读映射名称 |
+| sync_status | string(20) | 模型同步状态：pending/syncing/success/failed |
+| sync_error | string(500) | 最近一次同步错误信息 |
+| synced_at | datetime | 可为空，最近一次成功同步时间 |
+
+API Key 仅用于后端代理调用，按 `API_KEY_ENCRYPTION_KEY` 配置加密存储，不应出现在 JSON 响应中。
+
+## channel_models 表
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | uint | 主键 |
+| channel_id | uint | 所属渠道 ID，非空，带索引 |
+| model_name | string(200) | 上游原始模型名，非空 |
+| capabilities | string(100) | 模型能力 JSON 数组，可包含 image/video/text/audio |
+| enabled | bool | 渠道内模型是否启用，默认 true |
+| image_generate_route | string(30) | 图片生成路由：auto/generations/edits/chat/banana |
+| image_edit_route | string(30) | 图片编辑路由 |
+| video_route | string(30) | 视频路由：auto/openai/veo_json/waninter/yijia/xai/newapi/seedance |
+| video_durations | string(200) | 视频时长 JSON 数组，例如 `[5,10]` |
+| video_customizable | bool | 视频参数是否支持用户自定义，默认 false |
+| sort_order | int | 前台展示排序，默认 0 |
+
+`channel_id` 与 `model_name` 组成唯一约束 `idx_channel_model`，避免同一渠道重复记录同名模型。
+
+## metrics_configs 表
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | uint | 主键 |
+| metrics_base_url | string(500) | SuperAdmin 配置的 new-api 管理端基础地址；后端拼接 `/api/perf-metrics/channels?hours=N` 读取指标 |
+
+该地址仅由后端请求，不保存或发送渠道 API Key，也不向普通用户暴露配置值。
+
 ## canvas_projects 表
 
 | 字段 | 类型 | 说明 |
@@ -102,6 +146,8 @@ description: 当前后端数据库表结构说明
 | display_name | string(64) | 显示名称快照 |
 | generation | string(20) | 生成类型 image/video/audio/text |
 | model | string(100) | 调用模型 |
+| channel_id | uint | 所属渠道 ID，非空，带索引 |
+| channel_model_id | uint | 所属渠道模型 ID，非空，带索引 |
 | method | string(10) | HTTP 方法 |
 | path | string(255) | 上游接口路径 |
 | status_code | int | 上游状态码，0 表示本地校验或网络错误 |

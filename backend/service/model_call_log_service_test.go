@@ -63,3 +63,23 @@ func TestBuildModelHealthSummary(t *testing.T) {
 		t.Fatalf("unexpected recent errors: %#v", summary.RecentErrors)
 	}
 }
+
+func TestBuildModelHealthSummarySeparatesSameNameByChannel(t *testing.T) {
+	now := time.Date(2026, 6, 27, 12, 0, 0, 0, time.UTC)
+	channelA, channelB := uint(1), uint(2)
+	modelA, modelB := uint(11), uint(22)
+	logs := []model.ModelCallLog{
+		{BaseModel: model.BaseModel{CreatedAt: now.Add(-time.Hour)}, Model: "same-model", Generation: "image", ChannelID: &channelA, ChannelModelID: &modelA, ErrorMessage: "A failed"},
+		{BaseModel: model.BaseModel{CreatedAt: now.Add(-2 * time.Hour)}, Model: "same-model", Generation: "image", ChannelID: &channelB, ChannelModelID: &modelB, ErrorMessage: "B failed"},
+	}
+
+	summary := buildModelHealthSummary(logs, now)
+	if len(summary.TopModels) != 2 {
+		t.Fatalf("top models = %#v, want separate channel entries", summary.TopModels)
+	}
+	for _, item := range summary.TopModels {
+		if item.Failures != 1 {
+			t.Fatalf("same-name channel entry merged unexpectedly: %#v", summary.TopModels)
+		}
+	}
+}

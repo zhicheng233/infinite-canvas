@@ -2,31 +2,31 @@
 
 import type { ReactNode } from "react";
 import { useEffect, useRef } from "react";
-import { getApiModelCatalog } from "@/services/api/api-config";
+import { getChannels, getChannelModels } from "@/services/api/channel";
 import { AUTH_TOKEN_CHANGE_EVENT, getStoredToken } from "@/services/api/client";
+import { getMetrics } from "@/services/api/metrics";
+import { listPricing } from "@/services/api/pricing";
 import { useConfigStore } from "@/stores/use-config-store";
 
 export function ClientRootInit({ children }: { children: ReactNode }) {
     const handledConfigParams = useRef(false);
-    const applyServerModelCatalog = useConfigStore((state) => state.applyServerModelCatalog);
+    const applyServerChannelCatalog = useConfigStore((state) => state.applyServerChannelCatalog);
+    const applyServerOptionMetadata = useConfigStore((state) => state.applyServerOptionMetadata);
+    const setServerCatalogError = useConfigStore((state) => state.setServerCatalogError);
+    const setServerCatalogLoading = useConfigStore((state) => state.setServerCatalogLoading);
 
     // URL-based config import removed - API config is now admin-only via server backend
     useEffect(() => {
         if (handledConfigParams.current) return;
         handledConfigParams.current = true;
         const searchParams = new URLSearchParams(window.location.search);
-        const hasConfig = searchParams.get("baseUrl") || searchParams.get("baseurl")
-            || searchParams.get("apiKey") || searchParams.get("apikey");
+        const hasConfig = searchParams.get("baseUrl") || searchParams.get("baseurl") || searchParams.get("apiKey") || searchParams.get("apikey");
         if (hasConfig) {
             searchParams.delete("baseUrl");
             searchParams.delete("baseurl");
             searchParams.delete("apiKey");
             searchParams.delete("apikey");
-            window.history.replaceState(
-                null,
-                "",
-                window.location.pathname + (searchParams.size ? "?" + searchParams : "") + window.location.hash,
-            );
+            window.history.replaceState(null, "", window.location.pathname + (searchParams.size ? "?" + searchParams : "") + window.location.hash);
         }
     }, []);
 
@@ -34,20 +34,19 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
         let cancelled = false;
         const syncCatalog = async () => {
             if (!getStoredToken()) return;
+            setServerCatalogLoading(true);
+            setServerCatalogError(null);
             try {
-                const catalog = await getApiModelCatalog();
+                const channels = await getChannels();
+                const entries = await Promise.all(channels.map(async (channel) => [channel.id, await getChannelModels(channel.id)] as const));
                 if (cancelled) return;
-                applyServerModelCatalog({
-                    models: catalog.models,
-                    imageModels: catalog.image_models,
-                    videoModels: catalog.video_models,
-                    textModels: catalog.text_models,
-                    audioModels: catalog.audio_models,
-                    modelRoutes: catalog.model_routes,
-                    modelVideoDurations: catalog.model_video_durations,
-                    modelVideoCustomizable: catalog.model_video_customizable,
-                });
-            } catch {
+                applyServerChannelCatalog(channels, Object.fromEntries(entries));
+                const [pricing, metrics] = await Promise.all([listPricing(), getMetrics(24).catch(() => null)]);
+                if (!cancelled) applyServerOptionMetadata(pricing, metrics);
+            } catch (reason) {
+                if (!cancelled) setServerCatalogError(reason instanceof Error ? reason.message : "加载模型列表失败");
+            } finally {
+                if (!cancelled) setServerCatalogLoading(false);
             }
         };
 
@@ -68,7 +67,7 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
             window.removeEventListener(AUTH_TOKEN_CHANGE_EVENT, handleTokenChange);
             window.removeEventListener("storage", handleStorage);
         };
-    }, [applyServerModelCatalog]);
+    }, [applyServerChannelCatalog, applyServerOptionMetadata, setServerCatalogError, setServerCatalogLoading]);
 
     return <>{children}</>;
 }

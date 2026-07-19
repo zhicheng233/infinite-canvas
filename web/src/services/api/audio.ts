@@ -5,13 +5,15 @@ import { API_BASE } from "./client";
 import { notifyCreditBalanceChanged } from "@/constant/credits";
 import { audioMimeType, normalizeAudioFormatValue, normalizeAudioSpeedValue, normalizeAudioVoiceValue } from "@/lib/audio-generation";
 import { uploadMediaFile, type UploadedFile } from "@/services/file-storage";
-import { buildApiUrl, resolveModelRequestConfig, type AiConfig } from "@/stores/use-config-store";
+import { buildApiUrl, buildProxyApiUrl, readLocalAiCredentials, resolveModelRequestConfig, type AiConfig } from "@/stores/use-config-store";
 
 type RequestOptions = { signal?: AbortSignal };
 
 function aiApiUrl(config: AiConfig, path: string) {
-    if (isLoggedIn()) return API_BASE + "/proxy?path=" + encodeURIComponent(path);
-    return buildApiUrl(config.baseUrl, path);
+    if (isLoggedIn()) {
+        return buildProxyApiUrl(API_BASE, config, config.model || config.audioModel, path);
+    }
+    return buildApiUrl(readLocalAiCredentials().baseUrl, path);
 }
 
 function aiHeaders(config: AiConfig) {
@@ -22,7 +24,7 @@ function aiHeaders(config: AiConfig) {
         const token = typeof window !== "undefined" ? localStorage.getItem("infinite-canvas:auth_token") : null;
         if (token) headers.Authorization = `Bearer ${token}`;
     } else {
-        headers.Authorization = `Bearer ${config.apiKey}`;
+        headers.Authorization = `Bearer ${readLocalAiCredentials().apiKey}`;
     }
     return headers;
 }
@@ -63,8 +65,9 @@ export async function storeGeneratedAudio(blob: Blob, format = "mp3"): Promise<U
 function assertAudioConfig(config: AiConfig, model: string) {
     if (!model) throw new Error("请先配置音频模型");
     if (isLoggedIn()) return;
-    if (!config.baseUrl.trim()) throw new Error("请先配置 Base URL");
-    if (!config.apiKey.trim()) throw new Error("请先配置 API Key");
+    const local = readLocalAiCredentials();
+    if (!local.baseUrl.trim()) throw new Error("请先配置 Base URL");
+    if (!local.apiKey.trim()) throw new Error("请先配置 API Key");
 }
 
 async function assertAudioBlob(blob: Blob) {

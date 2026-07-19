@@ -8,6 +8,12 @@ import { parseChangelog } from "@/lib/release";
 const webDir = dirname(fileURLToPath(import.meta.url));
 const localVersion = readFileSync(resolve(webDir, "../VERSION"), "utf8").trim() || "dev";
 const localChangelog = readFileSync(resolve(webDir, "../CHANGELOG.md"), "utf8");
+const defaultBackendApiUrl = "http://127.0.0.1:18080/backend-api";
+
+function resolveBackendApiUrl(): string {
+    const configured = process.env.BACKEND_API_URL?.trim() || defaultBackendApiUrl;
+    return configured.replace(/\/+$/, "").replace(/\/backend-api$/, "");
+}
 
 export default function nextConfig(phase: string): NextConfig {
     const isDev = phase === PHASE_DEVELOPMENT_SERVER;
@@ -16,6 +22,16 @@ export default function nextConfig(phase: string): NextConfig {
     return {
         output: "standalone",
         allowedDevOrigins: isDev ? ["*.*.*.*"] : [],
+        ...(isDev
+            ? {
+                  rewrites: async () => [
+                      {
+                          source: "/backend-api/:path*",
+                          destination: `${resolveBackendApiUrl()}/backend-api/:path*`,
+                      },
+                  ],
+              }
+            : {}),
         typescript: {
             ignoreBuildErrors: true,
         },

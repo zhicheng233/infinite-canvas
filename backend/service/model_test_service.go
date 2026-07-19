@@ -17,6 +17,8 @@ import (
 
 type ModelTestInput struct {
 	Model          string `json:"model"`
+	ChannelID      uint   `json:"channel_id"`
+	ChannelModelID uint   `json:"channel_model_id"`
 	Generation     string `json:"generation"`
 	Route          string `json:"route"`
 	Prompt         string `json:"prompt"`
@@ -62,40 +64,47 @@ var testReferencePNG = []byte{
 }
 
 func (s *GenerateService) TestModel(tenantID, userID uint, input ModelTestInput) (*ModelTestResult, error) {
-	cfg, err := s.apiConfigRepo.FindByTenant(tenantID)
-	if err != nil {
-		return nil, errors.New("租户未配置 API，请先保存上游 API 配置")
-	}
 	modelName := strings.TrimSpace(input.Model)
 	if modelName == "" {
 		return nil, errors.New("请指定模型")
 	}
+	selection := ChannelSelection{ChannelID: input.ChannelID, ChannelModelID: input.ChannelModelID}
+	generation := strings.TrimSpace(input.Generation)
+	if generation == "" {
+		generation = resolveGenerationByChannelModel(selection, modelName, s.modelRepo)
+	}
+	route, err := s.resolveChannelRoute(selection, generation, modelName)
+	if err != nil {
+		return nil, err
+	}
+	input.Generation = generation
+	input.Route = routeForModelTest(input.Route, generation, route.ChannelModel)
+	cfg := configForChannelModel(route.ChannelModel)
 
 	testReq, err := buildModelTestRequest(cfg, input)
 	if err != nil {
 		return nil, err
 	}
-
-	apiKey, err := s.getDecryptedApiKey(tenantID)
-	if err != nil {
-		apiKey = cfg.ApiKey
+	if _, _, err := s.getRequiredPricing(tenantID, testReq.Generation, modelName, testReq.ContentType, testReq.Body); err != nil {
+		s.recordModelFailureWithRoute(tenantID, userID, testReq.Generation, modelName, testReq.Method, testReq.Path, 0, nil, err.Error(), route)
+		return nil, err
 	}
 
-	req, err := http.NewRequest(testReq.Method, buildUpstreamURL(cfg.BaseUrl, testReq.Path), bytes.NewReader(testReq.Body))
+	req, err := http.NewRequest(testReq.Method, buildUpstreamURL(route.Channel.BaseUrl, testReq.Path), bytes.NewReader(testReq.Body))
 	if err != nil {
 		return nil, err
 	}
 	if testReq.ContentType != "" {
 		req.Header.Set("Content-Type", testReq.ContentType)
 	}
-	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set("Authorization", "Bearer "+route.ApiKey)
 
 	startTime := time.Now()
 	resp, err := s.httpClient.Do(req)
 	responseTimeMs := int(time.Since(startTime).Milliseconds())
 	if err != nil {
 		message := fmt.Sprintf("上游 API 请求失败: %v", err)
-		s.recordModelFailure(tenantID, userID, testReq.Generation, modelName, testReq.Method, testReq.Path, 0, nil, message)
+		s.recordModelFailureWithRoute(tenantID, userID, testReq.Generation, modelName, testReq.Method, testReq.Path, 0, nil, message, route)
 		return &ModelTestResult{
 			Success:        false,
 			Model:          modelName,
@@ -112,7 +121,7 @@ func (s *GenerateService) TestModel(tenantID, userID uint, input ModelTestInput)
 
 	respBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		s.recordModelFailure(tenantID, userID, testReq.Generation, modelName, testReq.Method, testReq.Path, resp.StatusCode, nil, err.Error())
+		s.recordModelFailureWithRoute(tenantID, userID, testReq.Generation, modelName, testReq.Method, testReq.Path, resp.StatusCode, nil, err.Error(), route)
 		return nil, err
 	}
 	if resp.StatusCode < 400 {
@@ -133,20 +142,81 @@ func (s *GenerateService) TestModel(tenantID, userID uint, input ModelTestInput)
 		ResponseBody:   responseSnippet(resp.Header.Get("Content-Type"), respBytes),
 	}
 	if result.Success {
-		s.recordModelSuccess(tenantID, userID, testReq.Generation, modelName, testReq.Method, testReq.Path, resp.StatusCode, responseTimeMs)
+		s.recordModelSuccessWithRoute(tenantID, userID, testReq.Generation, modelName, testReq.Method, testReq.Path, resp.StatusCode, responseTimeMs, route)
 	} else {
 		result.ErrorMessage = buildModelCallErrorSummary(resp.StatusCode, respBytes, "")
-		s.recordModelFailure(tenantID, userID, testReq.Generation, modelName, testReq.Method, testReq.Path, resp.StatusCode, respBytes, "")
+		s.recordModelFailureWithRoute(tenantID, userID, testReq.Generation, modelName, testReq.Method, testReq.Path, resp.StatusCode, respBytes, "", route)
 	}
 	return result, nil
+}
+
+func routeForModelTest(override, generation string, item *model.ChannelModel) string {
+	if strings.TrimSpace(override) != "" && strings.TrimSpace(override) != "auto" {
+		return strings.TrimSpace(override)
+	}
+	if item == nil {
+		return ""
+	}
+	switch generation {
+	case "image":
+		if strings.TrimSpace(item.ImageGenerateRoute) != "" {
+			return strings.TrimSpace(item.ImageGenerateRoute)
+		}
+	case "video":
+		if strings.TrimSpace(item.VideoRoute) != "" {
+			return strings.TrimSpace(item.VideoRoute)
+		}
+	}
+	return ""
+}
+
+func configForChannelModel(item *model.ChannelModel) *model.TenantApiConfig {
+	cfg := &model.TenantApiConfig{}
+	if item == nil {
+		return cfg
+	}
+	routes := map[string]string{}
+	if item.ImageGenerateRoute != "" {
+		routes["image_generate:"+item.ModelName] = item.ImageGenerateRoute
+	}
+	if item.ImageEditRoute != "" {
+		routes["image_edit:"+item.ModelName] = item.ImageEditRoute
+	}
+	if item.VideoRoute != "" {
+		routes["video:"+item.ModelName] = item.VideoRoute
+	}
+	if encoded, err := json.Marshal(routes); err == nil {
+		cfg.ModelRoutes = string(encoded)
+	}
+	if strings.TrimSpace(item.VideoDurations) != "" {
+		cfg.ModelVideoDurations = fmt.Sprintf(`{"%s":%s}`, item.ModelName, item.VideoDurations)
+	}
+	if item.VideoCustomizable {
+		cfg.ModelVideoCustomizable = fmt.Sprintf(`{"%s":true}`, item.ModelName)
+	}
+	return cfg
+}
+
+func resolveGenerationByChannelModel(selection ChannelSelection, modelName string, modelRepo interface {
+	FindByID(uint) (*model.ChannelModel, error)
+}) string {
+	if selection.ChannelModelID == 0 || modelRepo == nil {
+		return ""
+	}
+	item, err := modelRepo.FindByID(selection.ChannelModelID)
+	if err != nil || strings.TrimSpace(item.ModelName) != strings.TrimSpace(modelName) {
+		return ""
+	}
+	capabilities := parseChannelCapabilities(item.Capabilities)
+	if len(capabilities) == 1 {
+		return capabilities[0]
+	}
+	return ""
 }
 
 func buildModelTestRequest(cfg *model.TenantApiConfig, input ModelTestInput) (modelTestRequest, error) {
 	modelName := strings.TrimSpace(input.Model)
 	generation := strings.TrimSpace(input.Generation)
-	if generation == "" {
-		generation = resolveGenerationByApiConfig(cfg, modelName, "")
-	}
 	prompt := strings.TrimSpace(input.Prompt)
 	if prompt == "" {
 		prompt = defaultModelTestPrompt(generation)
@@ -245,7 +315,6 @@ func buildImageModelTestRequest(cfg *model.TenantApiConfig, input ModelTestInput
 		})
 	case "edits":
 		return imageEditModelTestRequest(route, modelName, prompt, size)
-		return modelTestRequest{}, errors.New("图片编辑接口需要参考图，模型测试请使用文生图或聊天生图路由")
 	default:
 		return modelTestRequest{}, fmt.Errorf("不支持的图片路由：%s", route)
 	}

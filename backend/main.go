@@ -31,6 +31,9 @@ func main() {
 		&model.CreditPricing{},
 		&model.GenerationRecord{},
 		&model.TenantApiConfig{},
+		&model.Channel{},
+		&model.ChannelModel{},
+		&model.MetricsConfig{},
 		&model.RechargeOrder{},
 		&model.CanvasProject{},
 		&model.ModelCallLog{},
@@ -46,6 +49,9 @@ func main() {
 	canvasRepo := repository.NewCanvasRepo(db)
 	generationRecordRepo := repository.NewGenerationRecordRepo(db)
 	modelCallLogRepo := repository.NewModelCallLogRepo(db)
+	channelRepo := repository.NewChannelRepo(db)
+	channelModelRepo := repository.NewChannelModelRepo(db)
+	metricsConfigRepo := repository.NewMetricsConfigRepo(db)
 
 	captchaService := service.NewCaptchaService()
 
@@ -55,9 +61,12 @@ func main() {
 	}
 	userService := service.NewUserService(userRepo)
 	creditService := service.NewCreditService(creditRepo)
+	channelService := service.NewChannelService(channelRepo, cfg.ApiKeyEncryptKey)
+	channelModelService := service.NewChannelModelService(channelService, channelRepo, channelModelRepo, creditRepo)
+	metricsService := service.NewMetricsService(metricsConfigRepo, channelRepo, channelModelRepo)
 	modelCallLogService := service.NewModelCallLogService(modelCallLogRepo, userRepo)
 	onDemandRepairService := service.NewOnDemandRepairService(cfg.OnDemandRepairURL, cfg.OnDemandRepairUser, cfg.OnDemandRepairPass, cfg.OnDemandRepairTimeoutSeconds)
-	generateService := service.NewGenerateService(apiConfigRepo, creditService, creditRepo, modelCallLogService, cfg.ApiKeyEncryptKey, onDemandRepairService)
+	generateService := service.NewGenerateService(apiConfigRepo, creditService, creditRepo, modelCallLogService, cfg.ApiKeyEncryptKey, onDemandRepairService, channelService, channelRepo, channelModelRepo)
 	tempMediaService := service.NewTempMediaService(cfg)
 	channelStatusService := service.NewChannelStatusService(modelCallLogRepo, apiConfigRepo)
 	paymentGateway := service.NewMockPaymentGateway(rechargeRepo, creditService)
@@ -65,7 +74,7 @@ func main() {
 	authHandler := handler.NewAuthHandler(authService, userService)
 	adminHandler := handler.NewAdminHandler(tenantRepo, userRepo, creditService, creditRepo, rechargeRepo, modelCallLogRepo, modelCallLogService)
 	userHandler := handler.NewUserHandler(userService)
-	creditHandler := handler.NewCreditHandler(creditService, creditRepo)
+	creditHandler := handler.NewCreditHandler(creditService, creditRepo, generateService)
 	generateHandler := handler.NewGenerateHandler(generateService)
 	apiConfigHandler := handler.NewApiConfigHandler(apiConfigRepo, creditRepo, generateService, cfg)
 	proxyHandler := handler.NewProxyHandler(generateService)
@@ -75,9 +84,12 @@ func main() {
 	captchaHandler := handler.NewCaptchaHandler(captchaService)
 	tempMediaHandler := handler.NewTempMediaHandler(tempMediaService)
 	channelStatusHandler := handler.NewChannelStatusHandler(channelStatusService)
+	channelHandler := handler.NewChannelHandler(channelService)
+	channelModelHandler := handler.NewChannelModelHandler(channelModelService)
+	metricsHandler := handler.NewMetricsHandler(metricsService)
 
 	r := gin.Default()
-	router.Setup(r, authService, authHandler, adminHandler, userHandler, creditHandler, generateHandler, apiConfigHandler, proxyHandler, canvasHandler, generationRecordHandler, rechargeHandler, captchaHandler, tempMediaHandler, channelStatusHandler)
+	router.Setup(r, authService, authHandler, adminHandler, userHandler, creditHandler, generateHandler, apiConfigHandler, proxyHandler, canvasHandler, generationRecordHandler, rechargeHandler, captchaHandler, tempMediaHandler, channelStatusHandler, channelHandler, channelModelHandler, metricsHandler)
 
 	log.Printf("Server starting on port %s", cfg.Port)
 	if err := r.Run(":" + cfg.Port); err != nil {

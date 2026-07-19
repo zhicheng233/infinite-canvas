@@ -29,7 +29,7 @@ func (h *ProxyHandler) Proxy(c *gin.Context) {
 	contentType := c.GetHeader("Content-Type")
 	body, _ := io.ReadAll(c.Request.Body)
 
-	result, err := h.generateService.ProxyRawWithRepair(claims.TenantID, claims.UserID, method, targetPath, contentType, body)
+	result, err := h.generateService.ProxyRawWithRepair(claims.TenantID, claims.UserID, method, targetPath, contentType, body, channelSelectionFromRequest(c))
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{"code": 500, "msg": err.Error()})
 		return
@@ -58,7 +58,7 @@ func (h *ProxyHandler) ProxyGet(c *gin.Context) {
 		return
 	}
 
-	result, err := h.generateService.ProxyRawWithRepair(claims.TenantID, claims.UserID, "GET", targetPath, "", nil)
+	result, err := h.generateService.ProxyRawWithRepair(claims.TenantID, claims.UserID, "GET", targetPath, "", nil, channelSelectionFromRequest(c))
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{"code": 500, "msg": err.Error()})
 		return
@@ -85,7 +85,7 @@ func (h *ProxyHandler) ProxyGetPath(c *gin.Context) {
 		targetPath += "?" + query
 	}
 
-	result, err := h.generateService.ProxyRawWithRepair(claims.TenantID, claims.UserID, "GET", targetPath, "", nil)
+	result, err := h.generateService.ProxyRawWithRepair(claims.TenantID, claims.UserID, "GET", targetPath, "", nil, channelSelectionFromRequest(c))
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{"code": 500, "msg": err.Error()})
 		return

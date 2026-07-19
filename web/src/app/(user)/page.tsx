@@ -114,10 +114,7 @@ function PublicHome() {
                         {features.map((feature) => {
                             const Icon = feature.icon;
                             return (
-                                <div
-                                    key={feature.title}
-                                    className="group rounded-2xl border border-stone-200 bg-stone-50/80 p-6 transition hover:border-stone-300 hover:shadow-sm dark:border-stone-800 dark:bg-stone-900/50 dark:hover:border-stone-700"
-                                >
+                                <div key={feature.title} className="group rounded-2xl border border-stone-200 bg-stone-50/80 p-6 transition hover:border-stone-300 hover:shadow-sm dark:border-stone-800 dark:bg-stone-900/50 dark:hover:border-stone-700">
                                     <div className="mb-4 inline-flex size-12 items-center justify-center rounded-xl bg-stone-200/80 dark:bg-stone-800">
                                         <Icon className="size-6 text-stone-600 dark:text-stone-300" />
                                     </div>
@@ -220,7 +217,7 @@ export default function IndexPage() {
                         ，让创作从单次生成变成连续推演。
                     </p>
                     <div className="mt-10 flex flex-wrap items-center justify-center gap-3">
-                        <Button type="primary" size="large" href={'/' + primaryTool.slug} icon={<ArrowRight className="size-4" />} iconPlacement="end">
+                        <Button type="primary" size="large" href={"/" + primaryTool.slug} icon={<ArrowRight className="size-4" />} iconPlacement="end">
                             开始使用
                         </Button>
                         <Button size="large" href="/canvas">

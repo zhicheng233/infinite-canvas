@@ -3,6 +3,7 @@ package handler
 import (
 	"io"
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"infinite-canvas-server/service"
@@ -32,7 +33,7 @@ func (h *GenerateHandler) Audio(c *gin.Context) {
 	h.handleProxy(c, h.generateService.ProxyAudio)
 }
 
-type proxyFunc func(tenantID, userID uint, contentType string, body []byte) (*service.ProxyResult, error)
+type proxyFunc func(tenantID, userID uint, contentType string, body []byte, selection service.ChannelSelection) (*service.ProxyResult, error)
 
 func (h *GenerateHandler) handleProxy(c *gin.Context, fn proxyFunc) {
 	claims := c.MustGet("claims").(*service.Claims)
@@ -43,7 +44,7 @@ func (h *GenerateHandler) handleProxy(c *gin.Context, fn proxyFunc) {
 		return
 	}
 
-	result, err := fn(claims.TenantID, claims.UserID, contentType, body)
+	result, err := fn(claims.TenantID, claims.UserID, contentType, body, channelSelectionFromRequest(c))
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{"code": 500, "msg": err.Error()})
 		return
@@ -82,4 +83,16 @@ func itoa(n int) string {
 		buf[i] = '-'
 	}
 	return string(buf[i:])
+}
+
+func channelSelectionFromRequest(c *gin.Context) service.ChannelSelection {
+	return service.ChannelSelection{
+		ChannelID:      uintQuery(c, "channel_id"),
+		ChannelModelID: uintQuery(c, "channel_model_id"),
+	}
+}
+
+func uintQuery(c *gin.Context, key string) uint {
+	value, _ := strconv.ParseUint(c.Query(key), 10, 64)
+	return uint(value)
 }

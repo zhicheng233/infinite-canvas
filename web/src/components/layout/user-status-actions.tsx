@@ -79,11 +79,7 @@ export function UserStatusActions({ showConfig = true, variant = "default", onOp
             {getStoredToken() ? (
                 <>
                     {user ? (
-                        <Dropdown
-                            menu={{ items: userMenuItems }}
-                            trigger={["click"]}
-                            placement="bottomRight"
-                        >
+                        <Dropdown menu={{ items: userMenuItems }} trigger={["click"]} placement="bottomRight">
                             <button
                                 type="button"
                                 className="ml-1 inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-xs text-stone-500 transition hover:bg-stone-100 hover:text-stone-900 dark:text-stone-400 dark:hover:bg-stone-800 dark:hover:text-white"
@@ -97,14 +93,7 @@ export function UserStatusActions({ showConfig = true, variant = "default", onOp
                     ) : null}
                 </>
             ) : (
-                <button
-                    type="button"
-                    className={naturalIconClass}
-                    style={iconStyle}
-                    onClick={() => router.push("/auth/login")}
-                    aria-label="登录"
-                    title="登录"
-                >
+                <button type="button" className={naturalIconClass} style={iconStyle} onClick={() => router.push("/auth/login")} aria-label="登录" title="登录">
                     <LogIn className="size-4" />
                 </button>
             )}

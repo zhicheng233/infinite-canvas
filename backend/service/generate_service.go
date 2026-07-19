@@ -14,11 +14,11 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
 
-	"infinite-canvas-server/crypto"
 	"infinite-canvas-server/model"
 	"infinite-canvas-server/repository"
 )
@@ -28,20 +28,42 @@ const maxVideoReferenceImageBase64Chars = 460 * 1024
 type GenerateService struct {
 	apiConfigRepo *repository.ApiConfigRepo
 	creditService *CreditService
-	creditRepo    *repository.CreditRepo
+	creditRepo    pricingReader
 	logService    *ModelCallLogService
 	repairService *OnDemandRepairService
+	channelSvc    channelKeyReader
+	channelRepo   channelReader
+	modelRepo     channelModelReader
 	httpClient    *http.Client
 	encryptKey    string
 }
 
-func NewGenerateService(apiConfigRepo *repository.ApiConfigRepo, creditService *CreditService, creditRepo *repository.CreditRepo, logService *ModelCallLogService, encryptKey string, repairService *OnDemandRepairService) *GenerateService {
+type channelReader interface {
+	FindByID(id uint) (*model.Channel, error)
+}
+
+type channelModelReader interface {
+	FindByID(id uint) (*model.ChannelModel, error)
+}
+
+type channelKeyReader interface {
+	DecryptedApiKey(id uint) (string, error)
+}
+
+type pricingReader interface {
+	FindPricing(tenantID uint, modelName string) (*model.CreditPricing, error)
+}
+
+func NewGenerateService(apiConfigRepo *repository.ApiConfigRepo, creditService *CreditService, creditRepo *repository.CreditRepo, logService *ModelCallLogService, encryptKey string, repairService *OnDemandRepairService, channelSvc *ChannelService, channelRepo *repository.ChannelRepo, modelRepo *repository.ChannelModelRepo) *GenerateService {
 	return &GenerateService{
 		apiConfigRepo: apiConfigRepo,
 		creditService: creditService,
 		creditRepo:    creditRepo,
 		logService:    logService,
 		repairService: repairService,
+		channelSvc:    channelSvc,
+		channelRepo:   channelRepo,
+		modelRepo:     modelRepo,
 		httpClient:    &http.Client{Timeout: 10 * time.Minute},
 		encryptKey:    encryptKey,
 	}
@@ -62,31 +84,212 @@ type upstreamCallResult struct {
 	ResponseTimeMs int
 }
 
-func (s *GenerateService) ProxyImage(tenantID, userID uint, contentType string, body []byte) (*ProxyResult, error) {
-	return s.proxy(tenantID, userID, "image", "/v1/images/generations", contentType, body)
+type ChannelSelection struct {
+	ChannelID      uint
+	ChannelModelID uint
 }
 
-func (s *GenerateService) ProxyText(tenantID, userID uint, contentType string, body []byte) (*ProxyResult, error) {
-	return s.proxy(tenantID, userID, "text", "/v1/chat/completions", contentType, body)
+type channelRouteContext struct {
+	Channel        *model.Channel
+	ChannelModel   *model.ChannelModel
+	ApiKey         string
+	ChannelID      *uint
+	ChannelModelID *uint
 }
 
-func (s *GenerateService) ProxyVideo(tenantID, userID uint, contentType string, body []byte) (*ProxyResult, error) {
-	return s.proxy(tenantID, userID, "video", "/v1/video/generations", contentType, body)
+func (s *GenerateService) ProxyImage(tenantID, userID uint, contentType string, body []byte, selection ChannelSelection) (*ProxyResult, error) {
+	return s.proxy(tenantID, userID, "image", "/v1/images/generations", contentType, body, selection)
 }
 
-func (s *GenerateService) ProxyAudio(tenantID, userID uint, contentType string, body []byte) (*ProxyResult, error) {
-	return s.proxy(tenantID, userID, "audio", "/v1/audio/speech", contentType, body)
+func (s *GenerateService) ProxyText(tenantID, userID uint, contentType string, body []byte, selection ChannelSelection) (*ProxyResult, error) {
+	return s.proxy(tenantID, userID, "text", "/v1/chat/completions", contentType, body, selection)
 }
 
-func (s *GenerateService) getDecryptedApiKey(tenantID uint) (string, error) {
-	cfg, err := s.apiConfigRepo.FindByTenant(tenantID)
+func (s *GenerateService) ProxyVideo(tenantID, userID uint, contentType string, body []byte, selection ChannelSelection) (*ProxyResult, error) {
+	return s.proxy(tenantID, userID, "video", "/v1/video/generations", contentType, body, selection)
+}
+
+func (s *GenerateService) ProxyAudio(tenantID, userID uint, contentType string, body []byte, selection ChannelSelection) (*ProxyResult, error) {
+	return s.proxy(tenantID, userID, "audio", "/v1/audio/speech", contentType, body, selection)
+}
+
+func (s *GenerateService) resolveChannelRoute(selection ChannelSelection, capability, modelName string) (*channelRouteContext, error) {
+	if selection.ChannelID == 0 || selection.ChannelModelID == 0 {
+		return nil, errors.New("请选择有效的渠道和模型")
+	}
+	if s.channelRepo == nil || s.modelRepo == nil || s.channelSvc == nil {
+		return nil, errors.New("渠道服务未配置")
+	}
+	channel, err := s.channelRepo.FindByID(selection.ChannelID)
 	if err != nil {
-		return "", err
+		return nil, errors.New("渠道不存在或不可用")
 	}
-	if s.encryptKey != "" {
-		return crypto.Decrypt(s.encryptKey, cfg.ApiKey)
+	if !channel.Enabled {
+		return nil, errors.New("渠道已禁用")
 	}
-	return cfg.ApiKey, nil
+	channelModel, err := s.modelRepo.FindByID(selection.ChannelModelID)
+	if err != nil {
+		return nil, errors.New("渠道模型不存在或不可用")
+	}
+	if channelModel.ChannelID != channel.ID {
+		return nil, errors.New("渠道模型不属于所选渠道")
+	}
+	if !channelModel.Enabled {
+		return nil, errors.New("渠道模型已禁用")
+	}
+	if strings.TrimSpace(channelModel.ModelName) != strings.TrimSpace(modelName) {
+		return nil, errors.New("渠道模型与请求模型不匹配")
+	}
+	if !channelModelSupports(channelModel, capability) {
+		return nil, errors.New("渠道模型不支持当前能力")
+	}
+	apiKey, err := s.channelSvc.DecryptedApiKey(channel.ID)
+	if err != nil {
+		return nil, err
+	}
+	return &channelRouteContext{
+		Channel:        channel,
+		ChannelModel:   channelModel,
+		ApiKey:         apiKey,
+		ChannelID:      uintPtr(channel.ID),
+		ChannelModelID: uintPtr(channelModel.ID),
+	}, nil
+}
+
+func (s *GenerateService) ResolveChannelRouteForEstimate(selection ChannelSelection, capability, modelName string) error {
+	_, err := s.resolveChannelRoute(selection, capability, modelName)
+	return err
+}
+
+func uintPtr(value uint) *uint {
+	return &value
+}
+
+func channelModelSupports(item *model.ChannelModel, capability string) bool {
+	capability = strings.TrimSpace(capability)
+	if capability == "" {
+		return true
+	}
+	capabilities := parseChannelCapabilities(item.Capabilities)
+	if len(capabilities) == 0 {
+		capabilities = defaultChannelModelCapabilities()
+	}
+	for _, item := range capabilities {
+		if item == capability {
+			return true
+		}
+	}
+	return false
+}
+
+func parseChannelCapabilities(raw string) []string {
+	items := make([]string, 0)
+	if strings.TrimSpace(raw) == "" {
+		return items
+	}
+	if strings.HasPrefix(strings.TrimSpace(raw), "[") {
+		_ = json.Unmarshal([]byte(raw), &items)
+	} else {
+		items = strings.Split(raw, ",")
+	}
+	cleaned := make([]string, 0, len(items))
+	for _, item := range items {
+		value := strings.TrimSpace(item)
+		if value != "" {
+			cleaned = append(cleaned, value)
+		}
+	}
+	return cleaned
+}
+
+func defaultChannelModelCapabilities() []string {
+	return []string{string(model.CapabilityImage), string(model.CapabilityVideo), string(model.CapabilityText), string(model.CapabilityAudio)}
+}
+
+func defaultChannelModelCapabilitiesJSON() string {
+	encoded, _ := json.Marshal(defaultChannelModelCapabilities())
+	return string(encoded)
+}
+
+func mergeSelection(primary, fallback ChannelSelection) ChannelSelection {
+	if primary.ChannelID == 0 {
+		primary.ChannelID = fallback.ChannelID
+	}
+	if primary.ChannelModelID == 0 {
+		primary.ChannelModelID = fallback.ChannelModelID
+	}
+	return primary
+}
+
+func extractChannelSelection(contentType string, body []byte, path string) ChannelSelection {
+	selection := channelSelectionFromQuery(path)
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(contentType)), "application/json") && len(body) > 0 {
+		var payload map[string]interface{}
+		if json.Unmarshal(body, &payload) == nil {
+			selection = mergeSelection(selection, ChannelSelection{ChannelID: uintFromAny(payload["channel_id"]), ChannelModelID: uintFromAny(payload["channel_model_id"])})
+		}
+	}
+	return selection
+}
+
+func channelSelectionFromQuery(path string) ChannelSelection {
+	parsed, err := url.Parse(path)
+	if err != nil {
+		return ChannelSelection{}
+	}
+	values := parsed.Query()
+	return ChannelSelection{ChannelID: parseUintParam(values.Get("channel_id")), ChannelModelID: parseUintParam(values.Get("channel_model_id"))}
+}
+
+func parseUintParam(value string) uint {
+	parsed, _ := strconv.ParseUint(strings.TrimSpace(value), 10, 64)
+	return uint(parsed)
+}
+
+func uintFromAny(value interface{}) uint {
+	switch typed := value.(type) {
+	case float64:
+		if typed > 0 {
+			return uint(typed)
+		}
+	case string:
+		return parseUintParam(typed)
+	}
+	return 0
+}
+
+func stripChannelIdentityQuery(path string) string {
+	parsed, err := url.Parse(path)
+	if err != nil || parsed.RawQuery == "" {
+		return path
+	}
+	values := parsed.Query()
+	values.Del("channel_id")
+	values.Del("channel_model_id")
+	parsed.RawQuery = values.Encode()
+	return parsed.String()
+}
+
+func stripJSONChannelIdentity(contentType string, body []byte) []byte {
+	if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(contentType)), "application/json") || len(body) == 0 {
+		return body
+	}
+	var payload map[string]interface{}
+	if json.Unmarshal(body, &payload) != nil {
+		return body
+	}
+	if _, ok := payload["channel_id"]; !ok {
+		if _, ok := payload["channel_model_id"]; !ok {
+			return body
+		}
+	}
+	delete(payload, "channel_id")
+	delete(payload, "channel_model_id")
+	updated, err := json.Marshal(payload)
+	if err != nil {
+		return body
+	}
+	return updated
 }
 
 func (s *GenerateService) doUpstreamRequest(method, baseURL, apiKey, path, contentType string, body []byte) (*upstreamCallResult, error) {
@@ -124,51 +327,48 @@ func (s *GenerateService) doUpstreamRequest(method, baseURL, apiKey, path, conte
 	}, nil
 }
 
-func (s *GenerateService) proxy(tenantID, userID uint, genType, path, contentType string, body []byte) (*ProxyResult, error) {
-	cfg, err := s.apiConfigRepo.FindByTenant(tenantID)
-	if err != nil {
-		return nil, errors.New("租户未配置 API，请联系管理员")
-	}
-
-	apiKey, err := s.getDecryptedApiKey(tenantID)
-	if err != nil {
-		apiKey = cfg.ApiKey
-	}
-
+func (s *GenerateService) proxy(tenantID, userID uint, genType, path, contentType string, body []byte, selection ChannelSelection) (*ProxyResult, error) {
+	selection = mergeSelection(selection, extractChannelSelection(contentType, body, path))
+	path = stripChannelIdentityQuery(path)
+	body = stripJSONChannelIdentity(contentType, body)
 	if normalizedBody, changed := normalizeVideoReferenceImages(http.MethodPost, path, contentType, body); changed {
 		log.Printf("compressed video reference image payload path=%s", cleanPath(path))
 		body = normalizedBody
 	}
 
 	modelName := extractModelName(contentType, body)
-	genType = resolveGenerationByApiConfig(cfg, modelName, genType)
 	if modelName == "" {
 		err := errors.New("请指定模型")
+		s.recordModelFailure(tenantID, userID, genType, modelName, http.MethodPost, path, 0, nil, err.Error())
+		return nil, err
+	}
+	route, err := s.resolveChannelRoute(selection, genType, modelName)
+	if err != nil {
 		s.recordModelFailure(tenantID, userID, genType, modelName, http.MethodPost, path, 0, nil, err.Error())
 		return nil, err
 	}
 
 	cost, pricingResult, err := s.getRequiredPricing(tenantID, genType, modelName, contentType, body)
 	if err != nil {
-		s.recordModelFailure(tenantID, userID, genType, modelName, http.MethodPost, path, 0, nil, err.Error())
+		s.recordModelFailureWithRoute(tenantID, userID, genType, modelName, http.MethodPost, path, 0, nil, err.Error(), route)
 		return nil, err
 	}
 
 	account, err := s.creditService.GetOrCreateAccount(tenantID, userID)
 	if err != nil {
-		s.recordModelFailure(tenantID, userID, genType, modelName, http.MethodPost, path, 0, nil, err.Error())
+		s.recordModelFailureWithRoute(tenantID, userID, genType, modelName, http.MethodPost, path, 0, nil, err.Error(), route)
 		return nil, err
 	}
 	if account.Balance < cost {
 		err := fmt.Errorf("积分不足，需要 %d 积分，当前余额 %d", cost, account.Balance)
-		s.recordModelFailure(tenantID, userID, genType, modelName, http.MethodPost, path, 0, nil, err.Error())
+		s.recordModelFailureWithRoute(tenantID, userID, genType, modelName, http.MethodPost, path, 0, nil, err.Error(), route)
 		return nil, err
 	}
 
-	upstream, err := s.doUpstreamRequest(http.MethodPost, cfg.BaseUrl, apiKey, path, contentType, body)
+	upstream, err := s.doUpstreamRequest(http.MethodPost, route.Channel.BaseUrl, route.ApiKey, path, contentType, body)
 	if err != nil {
-		s.recordModelFailure(tenantID, userID, genType, modelName, http.MethodPost, path, 0, nil, err.Error())
-		if retry, ok := s.repairAndRetryUpstream(tenantID, userID, genType, modelName, http.MethodPost, path, contentType, body, 0, nil, err.Error()); ok {
+		s.recordModelFailureWithRoute(tenantID, userID, genType, modelName, http.MethodPost, path, 0, nil, err.Error(), route)
+		if retry, ok := s.repairAndRetryUpstream(tenantID, userID, genType, modelName, http.MethodPost, path, contentType, body, 0, nil, err.Error(), route); ok {
 			upstream = retry
 		} else {
 			return nil, fmt.Errorf("涓婃父 API 璇锋眰澶辫触: %v", err)
@@ -185,8 +385,8 @@ func (s *GenerateService) proxy(tenantID, userID uint, genType, path, contentTyp
 	}
 
 	if upstream.StatusCode >= 400 {
-		s.recordModelFailure(tenantID, userID, genType, modelName, http.MethodPost, path, upstream.StatusCode, respBytes, "")
-		if retry, ok := s.repairAndRetryUpstream(tenantID, userID, genType, modelName, http.MethodPost, path, contentType, body, upstream.StatusCode, respBytes, ""); ok {
+		s.recordModelFailureWithRoute(tenantID, userID, genType, modelName, http.MethodPost, path, upstream.StatusCode, respBytes, "", route)
+		if retry, ok := s.repairAndRetryUpstream(tenantID, userID, genType, modelName, http.MethodPost, path, contentType, body, upstream.StatusCode, respBytes, "", route); ok {
 			upstream = retry
 			respBytes = upstream.Body
 			if upstream.StatusCode < 400 {
@@ -204,7 +404,7 @@ func (s *GenerateService) proxy(tenantID, userID uint, genType, path, contentTyp
 		}, nil
 	}
 
-	s.recordModelSuccess(tenantID, userID, genType, modelName, http.MethodPost, path, upstream.StatusCode, upstream.ResponseTimeMs)
+	s.recordModelSuccessWithRoute(tenantID, userID, genType, modelName, http.MethodPost, path, upstream.StatusCode, upstream.ResponseTimeMs, route)
 
 	if cost > 0 {
 		metadata, note := buildCreditSpendDetail(genType, modelName, path, pricingResult)
@@ -280,215 +480,81 @@ func extractModelFromMultipart(body []byte, boundary string) string {
 	return ""
 }
 
-func (s *GenerateService) ProxyRaw(tenantID, userID uint, method, path, contentType string, body []byte) (*ProxyResult, error) {
-	cfg, err := s.apiConfigRepo.FindByTenant(tenantID)
-	if err != nil {
-		return nil, errors.New("租户未配置 API，请联系管理员")
-	}
-
-	url := buildUpstreamURL(cfg.BaseUrl, path)
-
-	apiKey, err := s.getDecryptedApiKey(tenantID)
-	if err != nil {
-		apiKey = cfg.ApiKey
-	}
-
+func (s *GenerateService) ProxyRaw(tenantID, userID uint, method, path, contentType string, body []byte, selection ChannelSelection) (*ProxyResult, error) {
+	selection = mergeSelection(selection, extractChannelSelection(contentType, body, path))
+	path = stripChannelIdentityQuery(path)
+	body = stripJSONChannelIdentity(contentType, body)
 	if normalizedBody, changed := normalizeVideoReferenceImages(method, path, contentType, body); changed {
 		log.Printf("compressed video reference image payload path=%s", cleanPath(path))
 		body = normalizedBody
 	}
 
-	var reqBody io.Reader
-	if body != nil {
-		reqBody = bytes.NewReader(body)
+	modelName := extractModelName(contentType, body)
+	chargeType := generationTypeFromPath(path)
+	if modelName == "" && strings.ToUpper(strings.TrimSpace(method)) == http.MethodGet && selection.ChannelModelID != 0 && s.modelRepo != nil {
+		if item, err := s.modelRepo.FindByID(selection.ChannelModelID); err == nil {
+			modelName = item.ModelName
+		}
 	}
-	req, err := http.NewRequest(method, url, reqBody)
-	if err != nil {
+	if chargeType == "" {
+		return nil, errors.New("无法识别代理请求能力")
+	}
+	if modelName == "" {
+		err := errors.New("请指定模型")
+		s.recordModelFailure(tenantID, userID, chargeType, modelName, method, path, 0, nil, err.Error())
 		return nil, err
 	}
-	if contentType != "" {
-		req.Header.Set("Content-Type", contentType)
+	route, err := s.resolveChannelRoute(selection, chargeType, modelName)
+	if err != nil {
+		s.recordModelFailure(tenantID, userID, chargeType, modelName, method, path, 0, nil, err.Error())
+		return nil, err
 	}
-	req.Header.Set("Authorization", "Bearer "+apiKey)
-
-	modelName := extractModelName(contentType, body)
-	cost, chargeType, pricingResult := s.getProxyCost(cfg, tenantID, method, path, contentType, body, modelName)
-	if chargeType != "" {
-		if modelName == "" {
-			err := errors.New("请指定模型")
-			s.recordModelFailure(tenantID, userID, chargeType, modelName, method, path, 0, nil, err.Error())
-			return nil, err
-		}
-		if _, _, err := s.getRequiredPricing(tenantID, chargeType, modelName, contentType, body); err != nil {
-			s.recordModelFailure(tenantID, userID, chargeType, modelName, method, path, 0, nil, err.Error())
-			return nil, err
-		}
+	cost, _, pricingResult, err := s.getProxyCostByGeneration(tenantID, method, chargeType, contentType, body, modelName)
+	if err != nil {
+		s.recordModelFailureWithRoute(tenantID, userID, chargeType, modelName, method, path, 0, nil, err.Error(), route)
+		return nil, err
 	}
 
 	if cost > 0 {
 		account, err := s.creditService.GetOrCreateAccount(tenantID, userID)
 		if err != nil {
-			s.recordModelFailure(tenantID, userID, chargeType, modelName, method, path, 0, nil, err.Error())
+			s.recordModelFailureWithRoute(tenantID, userID, chargeType, modelName, method, path, 0, nil, err.Error(), route)
 			return nil, err
 		}
 		if account.Balance < cost {
 			err := fmt.Errorf("积分不足，需要 %d 积分，当前余额 %d", cost, account.Balance)
-			s.recordModelFailure(tenantID, userID, chargeType, modelName, method, path, 0, nil, err.Error())
+			s.recordModelFailureWithRoute(tenantID, userID, chargeType, modelName, method, path, 0, nil, err.Error(), route)
 			return nil, err
 		}
 	}
 
-	startTime := time.Now()
-	resp, err := s.httpClient.Do(req)
-	responseTimeMs := int(time.Since(startTime).Milliseconds())
-
+	upstream, err := s.doUpstreamRequest(method, route.Channel.BaseUrl, route.ApiKey, path, contentType, body)
 	if err != nil {
-		s.recordModelFailure(tenantID, userID, chargeType, modelName, method, path, 0, nil, err.Error())
+		s.recordModelFailureWithRoute(tenantID, userID, chargeType, modelName, method, path, 0, nil, err.Error(), route)
 		return nil, fmt.Errorf("上游 API 请求失败: %v", err)
 	}
-	defer resp.Body.Close()
-
-	respBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		s.recordModelFailure(tenantID, userID, chargeType, modelName, method, path, resp.StatusCode, nil, err.Error())
-		return nil, err
-	}
-
-	if resp.StatusCode < 400 {
-		if converted, ok := transformImageResponseToChatFormat(path, respBytes); ok {
-			respBytes = converted
-		}
-	}
-
-	if resp.StatusCode >= 400 && chargeType != "" {
-		s.recordModelFailure(tenantID, userID, chargeType, modelName, method, path, resp.StatusCode, respBytes, "")
-	}
-	if resp.StatusCode < 400 && strings.ToUpper(strings.TrimSpace(method)) == http.MethodGet {
-		if failed, responseModel, message := readFailedModelTaskResponse(respBytes); failed {
-			if modelName == "" {
-				modelName = responseModel
-			}
-			s.recordModelFailure(tenantID, userID, resolveGenerationByApiConfig(cfg, modelName, generationTypeFromPath(path)), modelName, method, path, resp.StatusCode, respBytes, message)
-		} else if chargeType != "" && modelName != "" {
-			s.recordModelSuccess(tenantID, userID, chargeType, modelName, method, path, resp.StatusCode, responseTimeMs)
-		}
-	} else if resp.StatusCode < 400 && chargeType != "" && modelName != "" {
-		s.recordModelSuccess(tenantID, userID, chargeType, modelName, method, path, resp.StatusCode, responseTimeMs)
-	}
-
-	if resp.StatusCode < 400 && cost > 0 {
-		metadata, note := buildCreditSpendDetail(chargeType, modelName, path, pricingResult)
-		if err := s.creditService.SpendWithMetadata(0, userID, cost, chargeType, modelName, note, metadata); err != nil {
-			return nil, err
-		}
-	}
-
-	account, _ := s.creditService.GetOrCreateAccount(tenantID, userID)
-	balance := 0
-	if account != nil {
-		balance = account.Balance
-	}
-
-	return &ProxyResult{
-		StatusCode: resp.StatusCode,
-		Body:       respBytes,
-		Headers:    resp.Header,
-		Cost:       cost,
-		Balance:    balance,
-	}, nil
-}
-
-func (s *GenerateService) ProxyRawWithRepair(tenantID, userID uint, method, path, contentType string, body []byte) (*ProxyResult, error) {
-	cfg, err := s.apiConfigRepo.FindByTenant(tenantID)
-	if err != nil {
-		return nil, errors.New("tenant API is not configured")
-	}
-
-	apiKey, err := s.getDecryptedApiKey(tenantID)
-	if err != nil {
-		apiKey = cfg.ApiKey
-	}
-
-	if normalizedBody, changed := normalizeVideoReferenceImages(method, path, contentType, body); changed {
-		log.Printf("compressed video reference image payload path=%s", cleanPath(path))
-		body = normalizedBody
-	}
-
-	modelName := extractModelName(contentType, body)
-	cost, chargeType, pricingResult := s.getProxyCost(cfg, tenantID, method, path, contentType, body, modelName)
-	if chargeType != "" {
-		if modelName == "" {
-			err := errors.New("model is required")
-			s.recordModelFailure(tenantID, userID, chargeType, modelName, method, path, 0, nil, err.Error())
-			return nil, err
-		}
-		if _, _, err := s.getRequiredPricing(tenantID, chargeType, modelName, contentType, body); err != nil {
-			s.recordModelFailure(tenantID, userID, chargeType, modelName, method, path, 0, nil, err.Error())
-			return nil, err
-		}
-	}
-
-	if cost > 0 {
-		account, err := s.creditService.GetOrCreateAccount(tenantID, userID)
-		if err != nil {
-			s.recordModelFailure(tenantID, userID, chargeType, modelName, method, path, 0, nil, err.Error())
-			return nil, err
-		}
-		if account.Balance < cost {
-			err := fmt.Errorf("insufficient credits, need %d, current balance %d", cost, account.Balance)
-			s.recordModelFailure(tenantID, userID, chargeType, modelName, method, path, 0, nil, err.Error())
-			return nil, err
-		}
-	}
-
-	generation := generationForProxyRequest(cfg, modelName, chargeType, path)
-	upstream, err := s.doUpstreamRequest(method, cfg.BaseUrl, apiKey, path, contentType, body)
-	if err != nil {
-		s.recordModelFailure(tenantID, userID, generation, modelName, method, path, 0, nil, err.Error())
-		if retry, ok := s.repairAndRetryUpstream(tenantID, userID, generation, modelName, method, path, contentType, body, 0, nil, err.Error()); ok {
-			upstream = retry
-		} else {
-			return nil, fmt.Errorf("upstream API request failed: %v", err)
-		}
-	}
-	if upstream == nil {
-		return nil, errors.New("upstream request failed")
-	}
-
 	respBytes := upstream.Body
+
 	if upstream.StatusCode < 400 {
 		if converted, ok := transformImageResponseToChatFormat(path, respBytes); ok {
 			respBytes = converted
 		}
 	}
 
-	if upstream.StatusCode >= 400 && generation != "" {
-		s.recordModelFailure(tenantID, userID, generation, modelName, method, path, upstream.StatusCode, respBytes, "")
-		if retry, ok := s.repairAndRetryUpstream(tenantID, userID, generation, modelName, method, path, contentType, body, upstream.StatusCode, respBytes, ""); ok {
-			upstream = retry
-			respBytes = upstream.Body
-			if upstream.StatusCode < 400 {
-				if converted, ok := transformImageResponseToChatFormat(path, respBytes); ok {
-					respBytes = converted
-				}
-			}
-		}
+	if upstream.StatusCode >= 400 && chargeType != "" {
+		s.recordModelFailureWithRoute(tenantID, userID, chargeType, modelName, method, path, upstream.StatusCode, respBytes, "", route)
 	}
-
 	if upstream.StatusCode < 400 && strings.ToUpper(strings.TrimSpace(method)) == http.MethodGet {
 		if failed, responseModel, message := readFailedModelTaskResponse(respBytes); failed {
 			if modelName == "" {
 				modelName = responseModel
 			}
-			generation = generationForProxyRequest(cfg, modelName, generation, path)
-			s.recordModelFailure(tenantID, userID, generation, modelName, method, path, upstream.StatusCode, respBytes, message)
-			requestContext := buildRepairRequestContext(generation, method, path, "application/json", respBytes)
-			s.triggerOnDemandRepairAsync(generation, modelName, message, requestContext)
-		} else if generation != "" && modelName != "" {
-			s.recordModelSuccess(tenantID, userID, generation, modelName, method, path, upstream.StatusCode, upstream.ResponseTimeMs)
+			s.recordModelFailureWithRoute(tenantID, userID, chargeType, modelName, method, path, upstream.StatusCode, respBytes, message, route)
+		} else if chargeType != "" && modelName != "" {
+			s.recordModelSuccessWithRoute(tenantID, userID, chargeType, modelName, method, path, upstream.StatusCode, upstream.ResponseTimeMs, route)
 		}
-	} else if upstream.StatusCode < 400 && generation != "" && modelName != "" {
-		s.recordModelSuccess(tenantID, userID, generation, modelName, method, path, upstream.StatusCode, upstream.ResponseTimeMs)
+	} else if upstream.StatusCode < 400 && chargeType != "" && modelName != "" {
+		s.recordModelSuccessWithRoute(tenantID, userID, chargeType, modelName, method, path, upstream.StatusCode, upstream.ResponseTimeMs, route)
 	}
 
 	if upstream.StatusCode < 400 && cost > 0 {
@@ -513,27 +579,143 @@ func (s *GenerateService) ProxyRawWithRepair(tenantID, userID uint, method, path
 	}, nil
 }
 
-func (s *GenerateService) getProxyCost(cfg *model.TenantApiConfig, tenantID uint, method, path, contentType string, body []byte, modelName string) (int, string, CreditCostResult) {
-	if strings.ToUpper(strings.TrimSpace(method)) != http.MethodPost {
-		return 0, "", CreditCostResult{}
+func (s *GenerateService) ProxyRawWithRepair(tenantID, userID uint, method, path, contentType string, body []byte, selection ChannelSelection) (*ProxyResult, error) {
+	selection = mergeSelection(selection, extractChannelSelection(contentType, body, path))
+	path = stripChannelIdentityQuery(path)
+	body = stripJSONChannelIdentity(contentType, body)
+	if normalizedBody, changed := normalizeVideoReferenceImages(method, path, contentType, body); changed {
+		log.Printf("compressed video reference image payload path=%s", cleanPath(path))
+		body = normalizedBody
 	}
-	chargeType := resolveGenerationByApiConfig(cfg, modelName, generationTypeFromPath(path))
-	if chargeType == "" || modelName == "" {
-		return 0, "", CreditCostResult{}
+
+	modelName := extractModelName(contentType, body)
+	generation := generationTypeFromPath(path)
+	if modelName == "" && strings.ToUpper(strings.TrimSpace(method)) == http.MethodGet && selection.ChannelModelID != 0 && s.modelRepo != nil {
+		if item, err := s.modelRepo.FindByID(selection.ChannelModelID); err == nil {
+			modelName = item.ModelName
+		}
 	}
-	pricing, err := s.creditRepo.FindPricing(tenantID, modelName)
-	if err != nil || pricing == nil {
-		return 0, chargeType, CreditCostResult{}
+	if generation == "" {
+		return nil, errors.New("unknown proxy generation")
 	}
-	result, err := CalculateCreditCost(pricing, chargeType, contentType, body)
+	if modelName == "" {
+		err := errors.New("model is required")
+		s.recordModelFailure(tenantID, userID, generation, modelName, method, path, 0, nil, err.Error())
+		return nil, err
+	}
+	route, err := s.resolveChannelRoute(selection, generation, modelName)
 	if err != nil {
-		return 0, chargeType, CreditCostResult{}
+		s.recordModelFailure(tenantID, userID, generation, modelName, method, path, 0, nil, err.Error())
+		return nil, err
 	}
-	return result.TotalCost, chargeType, result
+	cost, chargeType, pricingResult, err := s.getProxyCostByGeneration(tenantID, method, generation, contentType, body, modelName)
+	if err != nil {
+		s.recordModelFailureWithRoute(tenantID, userID, generation, modelName, method, path, 0, nil, err.Error(), route)
+		return nil, err
+	}
+
+	if cost > 0 {
+		account, err := s.creditService.GetOrCreateAccount(tenantID, userID)
+		if err != nil {
+			s.recordModelFailureWithRoute(tenantID, userID, chargeType, modelName, method, path, 0, nil, err.Error(), route)
+			return nil, err
+		}
+		if account.Balance < cost {
+			err := fmt.Errorf("insufficient credits, need %d, current balance %d", cost, account.Balance)
+			s.recordModelFailureWithRoute(tenantID, userID, chargeType, modelName, method, path, 0, nil, err.Error(), route)
+			return nil, err
+		}
+	}
+
+	upstream, err := s.doUpstreamRequest(method, route.Channel.BaseUrl, route.ApiKey, path, contentType, body)
+	if err != nil {
+		s.recordModelFailureWithRoute(tenantID, userID, generation, modelName, method, path, 0, nil, err.Error(), route)
+		if retry, ok := s.repairAndRetryUpstream(tenantID, userID, generation, modelName, method, path, contentType, body, 0, nil, err.Error(), route); ok {
+			upstream = retry
+		} else {
+			return nil, fmt.Errorf("upstream API request failed: %v", err)
+		}
+	}
+	if upstream == nil {
+		return nil, errors.New("upstream request failed")
+	}
+
+	respBytes := upstream.Body
+	if upstream.StatusCode < 400 {
+		if converted, ok := transformImageResponseToChatFormat(path, respBytes); ok {
+			respBytes = converted
+		}
+	}
+
+	if upstream.StatusCode >= 400 && generation != "" {
+		s.recordModelFailureWithRoute(tenantID, userID, generation, modelName, method, path, upstream.StatusCode, respBytes, "", route)
+		if retry, ok := s.repairAndRetryUpstream(tenantID, userID, generation, modelName, method, path, contentType, body, upstream.StatusCode, respBytes, "", route); ok {
+			upstream = retry
+			respBytes = upstream.Body
+			if upstream.StatusCode < 400 {
+				if converted, ok := transformImageResponseToChatFormat(path, respBytes); ok {
+					respBytes = converted
+				}
+			}
+		}
+	}
+
+	if upstream.StatusCode < 400 && strings.ToUpper(strings.TrimSpace(method)) == http.MethodGet {
+		if failed, responseModel, message := readFailedModelTaskResponse(respBytes); failed {
+			if modelName == "" {
+				modelName = responseModel
+			}
+			s.recordModelFailureWithRoute(tenantID, userID, generation, modelName, method, path, upstream.StatusCode, respBytes, message, route)
+			requestContext := buildRepairRequestContext(generation, method, path, "application/json", respBytes)
+			s.triggerOnDemandRepairAsync(generation, modelName, message, requestContext)
+		} else if generation != "" && modelName != "" {
+			s.recordModelSuccessWithRoute(tenantID, userID, generation, modelName, method, path, upstream.StatusCode, upstream.ResponseTimeMs, route)
+		}
+	} else if upstream.StatusCode < 400 && generation != "" && modelName != "" {
+		s.recordModelSuccessWithRoute(tenantID, userID, generation, modelName, method, path, upstream.StatusCode, upstream.ResponseTimeMs, route)
+	}
+
+	if upstream.StatusCode < 400 && cost > 0 {
+		metadata, note := buildCreditSpendDetail(chargeType, modelName, path, pricingResult)
+		if err := s.creditService.SpendWithMetadata(0, userID, cost, chargeType, modelName, note, metadata); err != nil {
+			return nil, err
+		}
+	}
+
+	account, _ := s.creditService.GetOrCreateAccount(tenantID, userID)
+	balance := 0
+	if account != nil {
+		balance = account.Balance
+	}
+
+	return &ProxyResult{
+		StatusCode: upstream.StatusCode,
+		Body:       respBytes,
+		Headers:    upstream.Headers,
+		Cost:       cost,
+		Balance:    balance,
+	}, nil
 }
 
-func (s *GenerateService) repairAndRetryUpstream(tenantID, userID uint, generation, modelName, method, path, contentType string, body []byte, statusCode int, responseBody []byte, fallback string) (*upstreamCallResult, bool) {
+func (s *GenerateService) getProxyCostByGeneration(tenantID uint, method, generation, contentType string, body []byte, modelName string) (int, string, CreditCostResult, error) {
 	if strings.ToUpper(strings.TrimSpace(method)) != http.MethodPost {
+		return 0, generation, CreditCostResult{}, nil
+	}
+	if generation == "" || modelName == "" {
+		return 0, generation, CreditCostResult{}, nil
+	}
+	cost, result, err := s.getRequiredPricing(tenantID, generation, modelName, contentType, body)
+	if err != nil {
+		return 0, generation, CreditCostResult{}, err
+	}
+	return cost, generation, result, nil
+}
+
+func (s *GenerateService) repairAndRetryUpstream(tenantID, userID uint, generation, modelName, method, path, contentType string, body []byte, statusCode int, responseBody []byte, fallback string, route *channelRouteContext) (*upstreamCallResult, bool) {
+	if strings.ToUpper(strings.TrimSpace(method)) != http.MethodPost {
+		return nil, false
+	}
+	if route == nil || route.Channel == nil {
 		return nil, false
 	}
 	requestContext := buildRepairRequestContext(generation, method, path, contentType, body)
@@ -551,18 +733,9 @@ func (s *GenerateService) repairAndRetryUpstream(tenantID, userID uint, generati
 	if result == nil || !result.Repaired {
 		return nil, false
 	}
-	cfg, err := s.apiConfigRepo.FindByTenant(tenantID)
+	retry, err := s.doUpstreamRequest(method, route.Channel.BaseUrl, route.ApiKey, path, contentType, body)
 	if err != nil {
-		log.Printf("reload tenant API config after repair failed: %v", err)
-		return nil, false
-	}
-	apiKey, err := s.getDecryptedApiKey(tenantID)
-	if err != nil {
-		apiKey = cfg.ApiKey
-	}
-	retry, err := s.doUpstreamRequest(method, cfg.BaseUrl, apiKey, path, contentType, body)
-	if err != nil {
-		s.recordModelFailure(tenantID, userID, generation, modelName, method, path, 0, nil, err.Error())
+		s.recordModelFailureWithRoute(tenantID, userID, generation, modelName, method, path, 0, nil, err.Error(), route)
 		log.Printf("retry after on-demand repair failed generation=%s model=%s: %v", generation, modelName, err)
 		return nil, false
 	}
@@ -924,14 +1097,6 @@ func hasVideoReference(payload map[string]interface{}) bool {
 	return false
 }
 
-func generationForProxyRequest(cfg *model.TenantApiConfig, modelName, fallback, path string) string {
-	pathGeneration := generationTypeFromPath(path)
-	if pathGeneration != "" {
-		return pathGeneration
-	}
-	return resolveGenerationByApiConfig(cfg, modelName, fallback)
-}
-
 func buildRepairReason(method, path string, statusCode int, responseBody []byte, fallback string) string {
 	message := buildModelCallErrorSummary(statusCode, responseBody, fallback)
 	if message == "" {
@@ -941,34 +1106,64 @@ func buildRepairReason(method, path string, statusCode int, responseBody []byte,
 }
 
 func (s *GenerateService) recordModelFailure(tenantID, userID uint, genType, modelName, method, path string, statusCode int, body []byte, fallback string) {
+	s.recordModelFailureWithRoute(tenantID, userID, genType, modelName, method, path, statusCode, body, fallback, nil)
+}
+
+func (s *GenerateService) recordModelFailureWithRoute(tenantID, userID uint, genType, modelName, method, path string, statusCode int, body []byte, fallback string, route *channelRouteContext) {
+	if s.logService == nil {
+		return
+	}
 	if genType == "" {
 		genType = generationTypeFromPath(path)
 	}
+	var channelID *uint
+	var channelModelID *uint
+	if route != nil {
+		channelID = route.ChannelID
+		channelModelID = route.ChannelModelID
+	}
 	s.logService.RecordFailure(ModelCallLogInput{
-		TenantID:     tenantID,
-		UserID:       userID,
-		Generation:   genType,
-		Model:        modelName,
-		Method:       method,
-		Path:         path,
-		StatusCode:   statusCode,
-		ErrorMessage: fallback,
-		ErrorBody:    body,
+		TenantID:       tenantID,
+		UserID:         userID,
+		Generation:     genType,
+		Model:          modelName,
+		Method:         method,
+		Path:           path,
+		StatusCode:     statusCode,
+		ErrorMessage:   fallback,
+		ErrorBody:      body,
+		ChannelID:      channelID,
+		ChannelModelID: channelModelID,
 	})
 }
 
 func (s *GenerateService) recordModelSuccess(tenantID, userID uint, genType, modelName, method, path string, statusCode, responseTimeMs int) {
+	s.recordModelSuccessWithRoute(tenantID, userID, genType, modelName, method, path, statusCode, responseTimeMs, nil)
+}
+
+func (s *GenerateService) recordModelSuccessWithRoute(tenantID, userID uint, genType, modelName, method, path string, statusCode, responseTimeMs int, route *channelRouteContext) {
+	if s.logService == nil {
+		return
+	}
 	if genType == "" {
 		genType = generationTypeFromPath(path)
 	}
+	var channelID *uint
+	var channelModelID *uint
+	if route != nil {
+		channelID = route.ChannelID
+		channelModelID = route.ChannelModelID
+	}
 	s.logService.RecordSuccess(ModelCallLogInput{
-		TenantID:   tenantID,
-		UserID:     userID,
-		Generation: genType,
-		Model:      modelName,
-		Method:     method,
-		Path:       path,
-		StatusCode: statusCode,
+		TenantID:       tenantID,
+		UserID:         userID,
+		Generation:     genType,
+		Model:          modelName,
+		Method:         method,
+		Path:           path,
+		StatusCode:     statusCode,
+		ChannelID:      channelID,
+		ChannelModelID: channelModelID,
 	}, responseTimeMs)
 }
 
@@ -1275,7 +1470,9 @@ func creditUnitLabel(unitType model.CreditPricingUnit) string {
 func buildUpstreamURL(baseURL, path string) string {
 	cleanPath := strings.TrimSpace(path)
 	if strings.HasPrefix(cleanPath, "http://") || strings.HasPrefix(cleanPath, "https://") {
-		return cleanPath
+		if parsed, err := url.Parse(cleanPath); err == nil {
+			cleanPath = parsed.RequestURI()
+		}
 	}
 	normalizedBase := strings.TrimRight(strings.TrimSpace(baseURL), "/")
 	normalizedPath := "/" + strings.TrimLeft(cleanPath, "/")

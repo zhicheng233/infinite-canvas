@@ -111,10 +111,10 @@ func TestBuildUpstreamURL(t *testing.T) {
 			want:    "https://hmgai.life/v1/videos/task_123",
 		},
 		{
-			name:    "absolute url keeps original",
+			name:    "absolute url keeps selected base",
 			baseURL: "https://hmgai.life",
 			path:    "https://api.waninter.com/v1/videos/task_123/content",
-			want:    "https://api.waninter.com/v1/videos/task_123/content",
+			want:    "https://hmgai.life/v1/videos/task_123/content",
 		},
 	}
 

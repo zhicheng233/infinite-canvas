@@ -17,15 +17,17 @@ type ModelCallLogService struct {
 }
 
 type ModelCallLogInput struct {
-	TenantID     uint
-	UserID       uint
-	Generation   string
-	Model        string
-	Method       string
-	Path         string
-	StatusCode   int
-	ErrorMessage string
-	ErrorBody    []byte
+	TenantID       uint
+	UserID         uint
+	Generation     string
+	Model          string
+	Method         string
+	Path           string
+	StatusCode     int
+	ErrorMessage   string
+	ErrorBody      []byte
+	ChannelID      *uint
+	ChannelModelID *uint
 }
 
 type ModelHealthSummary struct {
@@ -72,17 +74,19 @@ func (s *ModelCallLogService) RecordSuccess(input ModelCallLogInput, responseTim
 		}
 	}
 	if err := s.repo.Create(&model.ModelCallLog{
-		TenantID:     input.TenantID,
-		UserID:       input.UserID,
-		Username:     username,
-		DisplayName:  displayName,
-		Generation:   cleanShort(input.Generation, 20),
-		Model:        cleanShort(input.Model, 100),
-		Method:       cleanShort(strings.ToUpper(input.Method), 10),
-		Path:         cleanShort(cleanPath(input.Path), 255),
-		StatusCode:   input.StatusCode,
-		IsSuccess:    true,
-		ResponseTime: responseTimeMs,
+		TenantID:       input.TenantID,
+		UserID:         input.UserID,
+		Username:       username,
+		DisplayName:    displayName,
+		Generation:     cleanShort(input.Generation, 20),
+		Model:          cleanShort(input.Model, 100),
+		Method:         cleanShort(strings.ToUpper(input.Method), 10),
+		Path:           cleanShort(cleanPath(input.Path), 255),
+		StatusCode:     input.StatusCode,
+		IsSuccess:      true,
+		ResponseTime:   responseTimeMs,
+		ChannelID:      input.ChannelID,
+		ChannelModelID: input.ChannelModelID,
 	}); err != nil {
 		log.Printf("record model call success failed: %v", err)
 	}
@@ -101,17 +105,19 @@ func (s *ModelCallLogService) RecordFailure(input ModelCallLogInput) {
 		}
 	}
 	if err := s.repo.Create(&model.ModelCallLog{
-		TenantID:     input.TenantID,
-		UserID:       input.UserID,
-		Username:     username,
-		DisplayName:  displayName,
-		Generation:   cleanShort(input.Generation, 20),
-		Model:        cleanShort(input.Model, 100),
-		Method:       cleanShort(strings.ToUpper(input.Method), 10),
-		Path:         cleanShort(cleanPath(input.Path), 255),
-		StatusCode:   input.StatusCode,
-		ErrorMessage: buildModelCallErrorSummary(input.StatusCode, input.ErrorBody, input.ErrorMessage),
-		ErrorBody:    truncateString(string(input.ErrorBody), 10000),
+		TenantID:       input.TenantID,
+		UserID:         input.UserID,
+		Username:       username,
+		DisplayName:    displayName,
+		Generation:     cleanShort(input.Generation, 20),
+		Model:          cleanShort(input.Model, 100),
+		Method:         cleanShort(strings.ToUpper(input.Method), 10),
+		Path:           cleanShort(cleanPath(input.Path), 255),
+		StatusCode:     input.StatusCode,
+		ErrorMessage:   buildModelCallErrorSummary(input.StatusCode, input.ErrorBody, input.ErrorMessage),
+		ErrorBody:      truncateString(string(input.ErrorBody), 10000),
+		ChannelID:      input.ChannelID,
+		ChannelModelID: input.ChannelModelID,
 	}); err != nil {
 		log.Printf("record model call failure failed: %v", err)
 	}
@@ -144,7 +150,7 @@ func buildModelHealthSummary(logs []model.ModelCallLog, now time.Time) ModelHeal
 		if !item.CreatedAt.Before(dayAgo) {
 			summary.Total24h++
 		}
-		key := item.Generation + "\x00" + item.Model
+		key := modelHealthKey(item)
 		row := models[key]
 		if row == nil {
 			row = &ModelHealthModel{Model: item.Model, Generation: item.Generation, LastError: item.ErrorMessage}
@@ -173,6 +179,18 @@ func buildModelHealthSummary(logs []model.ModelCallLog, now time.Time) ModelHeal
 	summary.TopModels = topModelFailures(models, 5)
 	summary.RecentErrors = recentErrors
 	return summary
+}
+
+func modelHealthKey(item model.ModelCallLog) string {
+	channelID := uint(0)
+	channelModelID := uint(0)
+	if item.ChannelID != nil {
+		channelID = *item.ChannelID
+	}
+	if item.ChannelModelID != nil {
+		channelModelID = *item.ChannelModelID
+	}
+	return fmt.Sprintf("%d\x00%d\x00%s\x00%s", channelID, channelModelID, item.Generation, item.Model)
 }
 
 func topModelFailures(models map[string]*ModelHealthModel, limit int) []ModelHealthModel {
@@ -221,7 +239,7 @@ func readFailedModelTaskResponse(body []byte) (bool, string, string) {
 		return false, "", ""
 	}
 	status := strings.ToLower(readStringPath(payload, "status", "state", "task_status", "data.status", "data.state", "data.task_status"))
-	
+
 	// 视频轮询中间状态不算失败
 	if status == "processing" || status == "in_progress" || status == "queued" || status == "pending" {
 		return false, "", ""

@@ -1,0 +1,16 @@
+Task 20 backend verification
+
+Changed:
+- backend/service/generate_channel_route_test.go: invalid channel identity asserts zero pricing lookup and zero upstream calls.
+- backend/service/model_call_log_service.go: health aggregation key includes ChannelID and ChannelModelID.
+- backend/service/model_call_log_service_test.go: same raw model on two channels remains two health entries.
+
+Commands and results:
+- cd backend && go test ./... && go build ./... => PASS (all packages; service tests pass; build exit 0)
+- gofmt -w service/model_call_log_service.go service/model_call_log_service_test.go service/generate_channel_route_test.go => PASS
+
+Covered behavior:
+- Same raw model remains channel/model identity-specific.
+- Invalid/disabled identity is rejected before pricing/credit path and before fake upstream.
+- Channel-aware log aggregation does not merge same-name models.
+- Existing pricing, routing, sync/metrics-hours/mapping/zero-null/advisory tests remain green.

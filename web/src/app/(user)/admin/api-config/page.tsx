@@ -1,62 +1,16 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { Alert, App, Button, Card, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography } from "antd";
-import { PlayCircle, Plus, Settings, Trash2 } from "lucide-react";
-
-import { saveApiConfig, testApiModel, type ApiConfigInfo, type ApiModelTestResult } from "@/services/api/api-config";
-import { deletePricing, listAdminPricing, savePricing, type PricingItem } from "@/services/api/pricing";
-import { useConfigStore } from "@/stores/use-config-store";
+import { useEffect, useState } from "react";
+import { Alert, App, Button, Card, Checkbox, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Switch, Tabs, Popover } from "antd";
+import { Settings, Plus, RefreshCw, Lock, X } from "lucide-react";
 import type { ColumnsType } from "antd/es/table";
 
-type ModelCapability = "image" | "video" | "text" | "audio";
-
-type ModelRow = {
-    key: string;
-    model: string;
-    enabled: boolean;
-    capabilities: ModelCapability[];
-    credits_per_unit?: number;
-    unit_type: string;
-    image_generate_route: string;
-    image_edit_route: string;
-    video_route: string;
-    video_durations: string;
-    video_customizable: boolean;
-    pricing_id?: number;
-    pricing_mode: string;
-    video_base_credits?: number;
-    video_rate_480p?: number;
-    video_rate_720p?: number;
-    video_rate_1080p?: number;
-    video_rate_2k?: number;
-    video_rate_4k?: number;
-};
-
-type ModelTestState = {
-    row: ModelRow;
-    generation: ModelCapability;
-    prompt: string;
-};
-
-const capabilityOptions = [
-    { label: "图片", value: "image" },
-    { label: "视频", value: "video" },
-    { label: "文本", value: "text" },
-    { label: "音频", value: "audio" },
-];
-
-const unitTypeOptions = [
-    { label: "按图片 (per_image)", value: "per_image" },
-    { label: "按视频 (per_video)", value: "per_video" },
-    { label: "按视频秒数 (per_video_second)", value: "per_video_second" },
-    { label: "按 Token (per_token)", value: "per_token" },
-];
-
-const pricingModeOptions = [
-    { label: "按次/数量", value: "per_unit" },
-    { label: "视频动态", value: "video_dynamic" },
-];
+import { useUserStore } from "@/stores/use-user-store";
+import { listAllChannels, createChannel, updateChannel, disableChannel, type ChannelAdminInfo, type SaveChannelInput, type UpdateChannelInput } from "@/services/api/channels-admin";
+import { listChannelModelsAdmin, syncChannelModels, updateChannelModel, enableChannelModel, disableChannelModel } from "@/services/api/channel-models-admin";
+import { getMetricsConfig, updateMetricsConfig, type MetricsConfig } from "@/services/api/metrics-config-admin";
+import { type ChannelModelInfo } from "@/services/api/channel";
+import { listPricing, savePricing, type PricingItem } from "@/services/api/pricing";
 
 const imageRouteOptions = [
     { label: "自动判断", value: "auto" },
@@ -77,748 +31,6 @@ const videoRouteOptions = [
     { label: "Seedance /contents/generations/tasks", value: "seedance" },
 ];
 
-const videoRateFields: Array<{
-    label: string;
-    key: "video_rate_480p" | "video_rate_720p" | "video_rate_1080p" | "video_rate_2k" | "video_rate_4k";
-}> = [
-    { label: "480p", key: "video_rate_480p" },
-    { label: "720p", key: "video_rate_720p" },
-    { label: "1080p", key: "video_rate_1080p" },
-    { label: "2K", key: "video_rate_2k" },
-    { label: "4K", key: "video_rate_4k" },
-];
-
-const defaultTestPrompts: Record<ModelCapability, string> = {
-    image: "生成一张用于模型连通性测试的简洁图片：一只小猫坐在白色桌面上",
-    video: "模型连通性测试：一只小猫在桌面上轻轻转头",
-    text: "请回复：模型连通性测试成功。",
-    audio: "这是一段音频模型连通性测试。",
-};
-
-export default function AdminApiConfigPage() {
-    const { message } = App.useApp();
-    const applyServerModelCatalog = useConfigStore((state) => state.applyServerModelCatalog);
-    const [apiConfig, setApiConfig] = useState<ApiConfigInfo | null>(null);
-    const [pricingItems, setPricingItems] = useState<PricingItem[]>([]);
-    const [rows, setRows] = useState<ModelRow[]>([]);
-    const [advancedRowKey, setAdvancedRowKey] = useState<string | null>(null);
-    const [modelTest, setModelTest] = useState<ModelTestState | null>(null);
-    const [modelTestResult, setModelTestResult] = useState<ApiModelTestResult | null>(null);
-    const [testingModel, setTestingModel] = useState(false);
-    const [loading, setLoading] = useState(false);
-    const [saving, setSaving] = useState(false);
-    const [form] = Form.useForm();
-
-    const fetchApiConfig = async () => {
-        setLoading(true);
-        try {
-            const { apiConfig: config, pricing } = await listAdminPricing();
-            setApiConfig(config);
-            setPricingItems(pricing);
-            form.setFieldsValue({
-                base_url: config?.base_url || "",
-                api_key: "",
-            });
-            applyServerModelCatalog({
-                models: config?.models || [],
-                imageModels: config?.image_models || [],
-                videoModels: config?.video_models || [],
-                textModels: config?.text_models || [],
-                audioModels: config?.audio_models || [],
-                modelRoutes: config?.model_routes || {},
-                modelVideoDurations: config?.model_video_durations || {},
-                modelVideoCustomizable: config?.model_video_customizable || {},
-            });
-            setRows(buildRows(config, pricing));
-        } catch {
-            setApiConfig(null);
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    useEffect(() => {
-        void fetchApiConfig();
-    }, []);
-
-    const handleSave = async (values: {
-        base_url: string;
-        api_key: string;
-    }) => {
-        setSaving(true);
-        try {
-            const normalizedRows = normalizeRows(rows);
-            if (!normalizedRows.length) throw new Error("请至少配置一个模型");
-
-            const duplicates = findDuplicateModels(normalizedRows);
-            if (duplicates.length) throw new Error(`模型名称重复：${duplicates.join("、")}`);
-            const invalidDynamicRows = normalizedRows.filter((item) => item.enabled && item.pricing_mode === "video_dynamic" && !hasVideoRate(item));
-            if (invalidDynamicRows.length) throw new Error(`请为视频动态计费模型配置至少一个秒单价：${invalidDynamicRows.map((item) => item.model).join("、")}`);
-
-            const nextApiConfig = {
-                base_url: values.base_url,
-                api_key: values.api_key,
-                models: normalizedRows.map((item) => item.model),
-                image_models: normalizedRows.filter((item) => item.enabled && item.capabilities.includes("image")).map((item) => item.model),
-                video_models: normalizedRows.filter((item) => item.enabled && item.capabilities.includes("video")).map((item) => item.model),
-                text_models: normalizedRows.filter((item) => item.enabled && item.capabilities.includes("text")).map((item) => item.model),
-                audio_models: normalizedRows.filter((item) => item.enabled && item.capabilities.includes("audio")).map((item) => item.model),
-                model_routes: Object.fromEntries(
-                    normalizedRows.flatMap((item) => {
-                        const entries: Array<[string, string]> = [];
-                        if (item.enabled && item.capabilities.includes("image") && item.image_generate_route && item.image_generate_route !== "auto") {
-                            entries.push([`image_generate:${item.model}`, item.image_generate_route]);
-                        }
-                        if (item.enabled && item.capabilities.includes("image") && item.image_edit_route && item.image_edit_route !== "auto") {
-                            entries.push([`image_edit:${item.model}`, item.image_edit_route]);
-                        }
-                        if (item.enabled && item.capabilities.includes("video") && item.video_route && item.video_route !== "auto") {
-                            entries.push([`video:${item.model}`, item.video_route]);
-                        }
-                        return entries;
-                    }),
-                ),
-                model_video_durations: Object.fromEntries(
-                    normalizedRows
-                        .filter((item) => item.enabled && item.capabilities.includes("video"))
-                        .map((item) => [item.model, parseDurationInput(item.video_durations)])
-                        .filter(([, durations]) => durations.length > 0),
-                ),
-                model_video_customizable: Object.fromEntries(
-                    normalizedRows
-                        .filter((item) => item.enabled && item.capabilities.includes("video") && item.video_customizable)
-                        .map((item) => [item.model, true]),
-                ),
-            };
-
-            await saveApiConfig(nextApiConfig);
-
-            for (const row of normalizedRows) {
-                if (!rowHasValidPricing(row)) continue;
-                await savePricing({
-                    id: row.pricing_id,
-                    model: row.model,
-                    credits_per_unit: row.pricing_mode === "video_dynamic" ? 0 : Number(row.credits_per_unit || 0),
-                    unit_type: row.pricing_mode === "video_dynamic" ? "per_video_second" : row.unit_type,
-                    pricing_mode: row.pricing_mode,
-                    pricing_rule: row.pricing_mode === "video_dynamic" ? buildVideoPricingRule(row) : "",
-                });
-            }
-
-            for (const item of pricingItems) {
-                const matched = normalizedRows.find((row) => row.pricing_id === item.id || row.model === item.model);
-                if (!matched || !rowHasValidPricing(matched)) {
-                    if (item.id) await deletePricing(item.id);
-                }
-            }
-
-            applyServerModelCatalog({
-                models: normalizedRows.filter(rowHasValidPricing).map((item) => item.model),
-                imageModels: normalizedRows.filter((item) => rowHasValidPricing(item) && item.capabilities.includes("image")).map((item) => item.model),
-                videoModels: normalizedRows.filter((item) => rowHasValidPricing(item) && item.capabilities.includes("video")).map((item) => item.model),
-                textModels: normalizedRows.filter((item) => rowHasValidPricing(item) && item.capabilities.includes("text")).map((item) => item.model),
-                audioModels: normalizedRows.filter((item) => rowHasValidPricing(item) && item.capabilities.includes("audio")).map((item) => item.model),
-                modelRoutes: Object.fromEntries(
-                    normalizedRows.flatMap((item) => {
-                        const entries: Array<[string, string]> = [];
-                        if (rowHasValidPricing(item) && item.capabilities.includes("image") && item.image_generate_route && item.image_generate_route !== "auto") {
-                            entries.push([`image_generate:${item.model}`, item.image_generate_route]);
-                        }
-                        if (rowHasValidPricing(item) && item.capabilities.includes("image") && item.image_edit_route && item.image_edit_route !== "auto") {
-                            entries.push([`image_edit:${item.model}`, item.image_edit_route]);
-                        }
-                        if (rowHasValidPricing(item) && item.capabilities.includes("video") && item.video_route && item.video_route !== "auto") {
-                            entries.push([`video:${item.model}`, item.video_route]);
-                        }
-                        return entries;
-                    }),
-                ),
-                modelVideoDurations: Object.fromEntries(
-                    normalizedRows
-                        .filter((item) => rowHasValidPricing(item) && item.capabilities.includes("video"))
-                        .map((item) => [item.model, parseDurationInput(item.video_durations)])
-                        .filter(([, durations]) => durations.length > 0),
-                ),
-                modelVideoCustomizable: Object.fromEntries(
-                    normalizedRows
-                        .filter((item) => rowHasValidPricing(item) && item.capabilities.includes("video") && item.video_customizable)
-                        .map((item) => [item.model, true]),
-                ),
-            });
-            message.success("API、模型与计费配置已保存");
-            await fetchApiConfig();
-        } catch (err: any) {
-            message.error(err?.message || "保存失败");
-        } finally {
-            setSaving(false);
-        }
-    };
-
-    const enabledCount = useMemo(() => rows.filter(rowHasValidPricing).length, [rows]);
-    const disabledRows = useMemo(() => rows.filter((item) => !item.enabled).map((item) => item.model).filter(Boolean), [rows]);
-    const advancedRow = useMemo(() => rows.find((item) => item.key === advancedRowKey) || null, [advancedRowKey, rows]);
-
-    const openModelTest = (row: ModelRow) => {
-        const generation = row.capabilities[0] || "image";
-        setModelTest({ row, generation, prompt: defaultTestPrompts[generation] });
-        setModelTestResult(null);
-    };
-
-    const runModelTest = async () => {
-        if (!modelTest) return;
-        const row = modelTest.row;
-        const modelName = row.model.trim();
-        if (!modelName) {
-            message.error("请先填写模型名称");
-            return;
-        }
-        setTestingModel(true);
-        setModelTestResult(null);
-        try {
-            const result = await testApiModel({
-                model: modelName,
-                generation: modelTest.generation,
-                route: modelTestRoute(row, modelTest.generation),
-                prompt: modelTest.prompt,
-            });
-            setModelTestResult(result);
-            if (result.success) {
-                message.success("模型测试成功，已写入渠道状态日志");
-            } else {
-                message.error(result.error_message || "模型测试失败");
-            }
-        } catch (err: any) {
-            message.error(err?.message || "模型测试失败");
-        } finally {
-            setTestingModel(false);
-        }
-    };
-
-    const updateRow = (key: string, patch: Partial<ModelRow>) => {
-        setRows((current) => current.map((item) => (item.key === key ? { ...item, ...patch } : item)));
-    };
-
-    const removeRow = (key: string) => {
-        setRows((current) => current.filter((item) => item.key !== key));
-    };
-
-    const addRow = () => {
-        setRows((current) => [
-            ...current,
-            {
-                key: `new-${Date.now()}-${current.length}`,
-                model: "",
-                enabled: true,
-                capabilities: ["image"],
-                credits_per_unit: undefined,
-                unit_type: "per_image",
-                image_generate_route: "auto",
-                image_edit_route: "auto",
-                video_route: "auto",
-                video_durations: "",
-                video_customizable: false,
-                pricing_mode: "per_unit",
-            },
-        ]);
-    };
-
-    const columns: ColumnsType<ModelRow> = [
-        {
-            title: "模型名称",
-            dataIndex: "model",
-            key: "model",
-            width: 260,
-            render: (_, record) => (
-                <Input
-                    value={record.model}
-                    placeholder="例如 gpt-image-2"
-                    onChange={(event) => updateRow(record.key, { model: event.target.value })}
-                />
-            ),
-        },
-        {
-            title: "能力",
-            dataIndex: "capabilities",
-            key: "capabilities",
-            width: 140,
-            render: (_, record) => (
-                <Select
-                    mode="multiple"
-                    value={record.capabilities}
-                    options={capabilityOptions}
-                    className="w-full"
-                    onChange={(value) => updateRow(record.key, { capabilities: value as ModelCapability[] })}
-                />
-            ),
-        },
-        {
-            title: "计费方式",
-            dataIndex: "pricing_mode",
-            key: "pricing_mode",
-            width: 150,
-            render: (_, record) => (
-                <Select
-                    value={record.pricing_mode || "per_unit"}
-                    options={pricingModeOptions}
-                    className="w-full"
-                    disabled={!record.enabled}
-                    onChange={(value) => updateRow(record.key, { pricing_mode: value, unit_type: value === "video_dynamic" ? "per_video_second" : record.unit_type })}
-                />
-            ),
-        },
-        {
-            title: "计费单位",
-            dataIndex: "unit_type",
-            key: "unit_type",
-            width: 180,
-            render: (_, record) => (
-                <Select
-                    value={record.unit_type}
-                    options={unitTypeOptions}
-                    className="w-full"
-                    disabled={!record.enabled || record.pricing_mode === "video_dynamic"}
-                    onChange={(value) => updateRow(record.key, { unit_type: value })}
-                />
-            ),
-        },
-        {
-            title: "按次积分",
-            dataIndex: "credits_per_unit",
-            key: "credits_per_unit",
-            width: 180,
-            render: (_, record) => (
-                <InputNumber
-                    min={0}
-                    className="w-full"
-                    value={record.credits_per_unit}
-                    disabled={!record.enabled || record.pricing_mode === "video_dynamic"}
-                    placeholder={record.pricing_mode === "video_dynamic" ? "动态模式不需要" : "0 表示未定价"}
-                    onChange={(value) => updateRow(record.key, { credits_per_unit: Number(value || 0) })}
-                />
-            ),
-        },
-        {
-            title: "高级配置",
-            key: "advanced",
-            width: 120,
-            render: (_, record) => (
-                <Button size="small" onClick={() => setAdvancedRowKey(record.key)}>
-                    编辑
-                </Button>
-            ),
-        },
-        {
-            title: "状态",
-            key: "status",
-            width: 180,
-            render: (_, record) => (
-                <div className="space-y-1">
-                    <div className="inline-flex overflow-hidden rounded-lg border border-stone-200 bg-white dark:border-stone-700 dark:bg-stone-900">
-                        <button
-                            type="button"
-                            className={[
-                                "px-3 py-1.5 text-sm transition",
-                                record.enabled
-                                    ? "bg-emerald-500 text-white"
-                                    : "bg-transparent text-stone-500 hover:bg-stone-100 dark:text-stone-300 dark:hover:bg-stone-800",
-                            ].join(" ")}
-                            onClick={() => updateRow(record.key, { enabled: true })}
-                        >
-                            启用
-                        </button>
-                        <button
-                            type="button"
-                            className={[
-                                "border-l border-stone-200 px-3 py-1.5 text-sm transition dark:border-stone-700",
-                                !record.enabled
-                                    ? "bg-rose-500 text-white"
-                                    : "bg-transparent text-stone-500 hover:bg-stone-100 dark:text-stone-300 dark:hover:bg-stone-800",
-                            ].join(" ")}
-                            onClick={() => updateRow(record.key, { enabled: false })}
-                        >
-                            禁用
-                        </button>
-                    </div>
-                    {!record.enabled ? (
-                        <Tag>已禁用</Tag>
-                    ) : rowHasValidPricing(record) ? (
-                        <Tag color="green">已开放</Tag>
-                    ) : (
-                        <Tag color="gold">待定价</Tag>
-                    )}
-                </div>
-            ),
-        },
-        {
-            title: "操作",
-            key: "actions",
-            width: 150,
-            render: (_, record) => (
-                <Space size={4}>
-                    <Button size="small" type="text" icon={<PlayCircle className="size-4" />} disabled={!record.model.trim()} onClick={() => openModelTest(record)}>
-                        测试
-                    </Button>
-                    <Button danger type="text" icon={<Trash2 className="size-4" />} onClick={() => removeRow(record.key)} />
-                </Space>
-            ),
-        },
-    ];
-
-    return (
-        <div>
-            <h2 className="mb-4 text-xl font-semibold text-stone-950 dark:text-stone-100">
-                <Settings className="mr-2 inline size-5" />
-                API 与模型配置
-            </h2>
-            <Alert
-                className="mb-6"
-                type="info"
-                showIcon
-                message="这里统一管理上游 API、模型目录和积分定价"
-                description="只有配置了积分价格的模型，才会开放给用户使用。视频模型建议按上游文档显式选择接口路由；未指定时默认走 /v1/videos，不再仅凭模型名称猜测分支。"
-            />
-            <Card loading={loading}>
-                <Form
-                    form={form}
-                    layout="vertical"
-                    onFinish={handleSave}
-                    initialValues={{
-                        base_url: apiConfig?.base_url || "",
-                        api_key: "",
-                    }}
-                    key={apiConfig?.base_url || "empty"}
-                >
-                    <Form.Item
-                        name="base_url"
-                        label="上游 API 地址"
-                        rules={[{ required: true, message: "请输入 API 基础地址" }]}
-                        extra="请输入 OpenAI 兼容 API 根地址，例如: https://api.openai.com 或 http://8.219.243.189:3000；系统会自动拼接 /v1"
-                    >
-                        <Input placeholder="https://api.openai.com" />
-                    </Form.Item>
-                    <Form.Item
-                        name="api_key"
-                        label="API Key"
-                        extra={apiConfig?.has_key ? "已保存 API Key；留空表示继续使用当前 Key，填写则覆盖" : "首次配置需要输入 API Key"}
-                    >
-                        <Input.Password placeholder="sk-..." />
-                    </Form.Item>
-                    <div className="mb-4 grid gap-4 md:grid-cols-3">
-                        <Card size="small">
-                            <div className="text-sm text-stone-500">模型总数</div>
-                            <div className="mt-1 text-2xl font-semibold">{rows.length}</div>
-                        </Card>
-                        <Card size="small">
-                            <div className="text-sm text-stone-500">已启用模型</div>
-                            <div className="mt-1 text-2xl font-semibold">{enabledCount}</div>
-                        </Card>
-                        <Card size="small">
-                            <div className="text-sm text-stone-500">已禁用模型</div>
-                            <div className="mt-1 text-2xl font-semibold">{disabledRows.length}</div>
-                        </Card>
-                    </div>
-                    {disabledRows.length ? (
-                        <Alert
-                            className="mb-4"
-                            type="warning"
-                            showIcon
-                            message="以下模型当前已禁用，不会开放给用户"
-                            description={disabledRows.join("、")}
-                        />
-                    ) : null}
-                    <div className="mb-3 flex items-center justify-between">
-                        <div className="text-base font-semibold text-stone-900 dark:text-stone-100">模型目录与计费</div>
-                        <Button icon={<Plus className="size-4" />} onClick={addRow}>
-                            新增模型
-                        </Button>
-                    </div>
-                    <Table rowKey="key" columns={columns} dataSource={rows} pagination={false} scroll={{ x: 1500 }} />
-                    <Button type="primary" htmlType="submit" loading={saving}>
-                        保存全部配置
-                    </Button>
-                </Form>
-                {apiConfig ? (
-                    <div className="mt-4 text-sm text-stone-500">
-                        当前已配置 API 地址: {apiConfig.base_url}
-                        {apiConfig.has_key ? "（已设置 Key）" : "（未设置 Key）"}
-                    </div>
-                ) : null}
-            </Card>
-            <Modal
-                title={`高级配置${advancedRow?.model ? `：${advancedRow.model}` : ""}`}
-                open={Boolean(advancedRow)}
-                width={760}
-                onCancel={() => setAdvancedRowKey(null)}
-                footer={
-                    <Button type="primary" onClick={() => setAdvancedRowKey(null)}>
-                        完成
-                    </Button>
-                }
-            >
-                {advancedRow ? (
-                    <div className="space-y-5">
-                        <Alert type="info" showIcon message="这里的修改会先暂存在表格中，点击页面底部“保存全部配置”后才会写入后台。" />
-                        <section className="rounded-xl border border-stone-200 p-4 dark:border-stone-700">
-                            <div className="mb-3 text-sm font-semibold text-stone-900 dark:text-stone-100">接口路由</div>
-                            <div className="grid gap-4 md:grid-cols-2">
-                                <label className="space-y-1.5">
-                                    <span className="text-xs text-stone-500 dark:text-stone-400">文生图接口</span>
-                                    <Select
-                                        value={advancedRow.image_generate_route || "auto"}
-                                        options={imageRouteOptions}
-                                        className="w-full"
-                                        disabled={!advancedRow.enabled || !advancedRow.capabilities.includes("image")}
-                                        onChange={(value) => updateRow(advancedRow.key, { image_generate_route: value })}
-                                    />
-                                </label>
-                                <label className="space-y-1.5">
-                                    <span className="text-xs text-stone-500 dark:text-stone-400">图生图接口</span>
-                                    <Select
-                                        value={advancedRow.image_edit_route || "auto"}
-                                        options={imageRouteOptions}
-                                        className="w-full"
-                                        disabled={!advancedRow.enabled || !advancedRow.capabilities.includes("image")}
-                                        onChange={(value) => updateRow(advancedRow.key, { image_edit_route: value })}
-                                    />
-                                </label>
-                                <label className="space-y-1.5">
-                                    <span className="text-xs text-stone-500 dark:text-stone-400">视频接口</span>
-                                    <Select
-                                        value={advancedRow.video_route || "auto"}
-                                        options={videoRouteOptions}
-                                        className="w-full"
-                                        disabled={!advancedRow.enabled || !advancedRow.capabilities.includes("video")}
-                                        onChange={(value) => updateRow(advancedRow.key, { video_route: value })}
-                                    />
-                                </label>
-                            </div>
-                        </section>
-                        <section className="rounded-xl border border-stone-200 p-4 dark:border-stone-700">
-                            <div className="mb-3 text-sm font-semibold text-stone-900 dark:text-stone-100">视频时长</div>
-                            <div className="grid gap-4 md:grid-cols-2">
-                                <label className="space-y-1.5">
-                                    <span className="text-xs text-stone-500 dark:text-stone-400">可选时长</span>
-                                    <Input
-                                        value={advancedRow.video_durations}
-                                        placeholder="如 5,10"
-                                        disabled={!advancedRow.enabled || !advancedRow.capabilities.includes("video")}
-                                        onChange={(event) => updateRow(advancedRow.key, { video_durations: event.target.value })}
-                                    />
-                                </label>
-                                <label className="space-y-1.5">
-                                    <span className="text-xs text-stone-500 dark:text-stone-400">允许用户自定义时长</span>
-                                    <Select
-                                        value={advancedRow.video_customizable ? "true" : "false"}
-                                        options={[
-                                            { label: "关闭", value: "false" },
-                                            { label: "开启", value: "true" },
-                                        ]}
-                                        className="w-full"
-                                        disabled={!advancedRow.enabled || !advancedRow.capabilities.includes("video")}
-                                        onChange={(value) => updateRow(advancedRow.key, { video_customizable: value === "true" })}
-                                    />
-                                </label>
-                            </div>
-                        </section>
-                        <section className="rounded-xl border border-stone-200 p-4 dark:border-stone-700">
-                            <div className="mb-3 flex items-center justify-between gap-3">
-                                <div className="text-sm font-semibold text-stone-900 dark:text-stone-100">动态视频计费</div>
-                                {advancedRow.pricing_mode === "video_dynamic" ? <Tag color="blue">已启用</Tag> : <Tag>需先选择“视频动态”</Tag>}
-                            </div>
-                            <div className="space-y-4">
-                                <label className="block max-w-xs space-y-1.5">
-                                    <span className="text-xs text-stone-500 dark:text-stone-400">基础积分</span>
-                                    <InputNumber
-                                        min={0}
-                                        className="w-full"
-                                        value={advancedRow.video_base_credits}
-                                        disabled={!advancedRow.enabled || advancedRow.pricing_mode !== "video_dynamic"}
-                                        placeholder="0"
-                                        onChange={(value) => updateRow(advancedRow.key, { video_base_credits: Number(value || 0) })}
-                                    />
-                                </label>
-                                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-                                    {videoRateFields.map((field) => (
-                                        <label key={field.key} className="rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 dark:border-stone-700 dark:bg-stone-900/60">
-                                            <span className="mb-2 block text-xs font-medium text-stone-500 dark:text-stone-400">{field.label} 秒单价</span>
-                                            <InputNumber
-                                                min={0}
-                                                className="w-full"
-                                                controls={false}
-                                                value={advancedRow[field.key]}
-                                                disabled={!advancedRow.enabled || advancedRow.pricing_mode !== "video_dynamic"}
-                                                placeholder="0"
-                                                onChange={(value) => updateRow(advancedRow.key, { [field.key]: Number(value || 0) } as Partial<ModelRow>)}
-                                            />
-                                        </label>
-                                    ))}
-                                </div>
-                            </div>
-                        </section>
-                    </div>
-                ) : null}
-            </Modal>
-            <Modal
-                title={`模型测试${modelTest?.row.model ? `：${modelTest.row.model}` : ""}`}
-                open={Boolean(modelTest)}
-                width={780}
-                onCancel={() => setModelTest(null)}
-                footer={[
-                    <Button key="cancel" onClick={() => setModelTest(null)}>
-                        关闭
-                    </Button>,
-                    <Button key="run" type="primary" loading={testingModel} icon={<PlayCircle className="size-4" />} onClick={runModelTest}>
-                        开始测试
-                    </Button>,
-                ]}
-            >
-                {modelTest ? (
-                    <div className="space-y-4">
-                        <Alert
-                            type="warning"
-                            showIcon
-                            message="测试会真实调用上游 API"
-                            description="本次测试不扣平台用户积分，但可能消耗上游 API 额度；成功和失败都会写入模型日志，并影响渠道状态统计。"
-                        />
-                        <div className="grid gap-4 md:grid-cols-2">
-                            <label className="space-y-1.5">
-                                <span className="text-xs text-stone-500 dark:text-stone-400">测试能力</span>
-                                <Select
-                                    value={modelTest.generation}
-                                    options={(modelTest.row.capabilities.length ? modelTest.row.capabilities : (["image"] as ModelCapability[])).map((value) => ({
-                                        label: capabilityOptions.find((item) => item.value === value)?.label || value,
-                                        value,
-                                    }))}
-                                    className="w-full"
-                                    onChange={(value) =>
-                                        setModelTest((current) =>
-                                            current ? { ...current, generation: value as ModelCapability, prompt: defaultTestPrompts[value as ModelCapability] } : current,
-                                        )
-                                    }
-                                />
-                            </label>
-                            <div className="space-y-1.5">
-                                <span className="text-xs text-stone-500 dark:text-stone-400">将测试的接口路由</span>
-                                <div className="rounded-lg border border-stone-200 px-3 py-2 font-mono text-xs dark:border-stone-700">
-                                    {modelTestRouteLabel(modelTest.row, modelTest.generation)}
-                                </div>
-                            </div>
-                        </div>
-                        <label className="block space-y-1.5">
-                            <span className="text-xs text-stone-500 dark:text-stone-400">测试提示词</span>
-                            <Input.TextArea
-                                rows={3}
-                                value={modelTest.prompt}
-                                onChange={(event) => setModelTest((current) => (current ? { ...current, prompt: event.target.value } : current))}
-                            />
-                        </label>
-                        {modelTestResult ? (
-                            <Card
-                                size="small"
-                                title={
-                                    <Space>
-                                        <Tag color={modelTestResult.success ? "green" : "red"}>{modelTestResult.success ? "成功" : "失败"}</Tag>
-                                        <span>{modelTestResult.method} {modelTestResult.path}</span>
-                                    </Space>
-                                }
-                            >
-                                <div className="mb-3 grid gap-3 text-sm md:grid-cols-3">
-                                    <div>
-                                        <div className="text-xs text-stone-500">HTTP 状态</div>
-                                        <div className="font-medium">{modelTestResult.status_code || "本地错误"}</div>
-                                    </div>
-                                    <div>
-                                        <div className="text-xs text-stone-500">耗时</div>
-                                        <div className="font-medium">{modelTestResult.response_time_ms} ms</div>
-                                    </div>
-                                    <div>
-                                        <div className="text-xs text-stone-500">路由</div>
-                                        <div className="font-medium">{modelTestResult.route || "auto"}</div>
-                                    </div>
-                                </div>
-                                {modelTestResult.error_message ? (
-                                    <Alert className="mb-3" type="error" showIcon message={modelTestResult.error_message} />
-                                ) : null}
-                                <Typography.Paragraph className="!mb-0 max-h-72 overflow-auto rounded-lg bg-stone-950 p-3 !font-mono !text-xs !text-stone-100">
-                                    {modelTestResult.response_body || "无响应内容"}
-                                </Typography.Paragraph>
-                            </Card>
-                        ) : null}
-                    </div>
-                ) : null}
-            </Modal>
-        </div>
-    );
-}
-
-function buildRows(config: ApiConfigInfo, pricing: PricingItem[]): ModelRow[] {
-    const orderedModels = Array.from(new Set([...(config.models || []), ...pricing.map((item) => item.model)]));
-    const pricingMap = new Map(pricing.map((item) => [item.model, item]));
-    return orderedModels.map((model, index) => {
-        const pricingItem = pricingMap.get(model);
-        const pricingRule = parseVideoPricingRule(pricingItem?.pricing_rule);
-        return {
-            key: `${model}-${index}`,
-            model,
-            enabled: pricingItem ? pricingItemHasValidPricing(pricingItem) : false,
-            capabilities: collectCapabilities(model, config),
-            credits_per_unit: pricingItem?.credits_per_unit,
-            unit_type: pricingItem?.unit_type || inferUnitType(model, config),
-            pricing_mode: pricingItem?.pricing_mode || "per_unit",
-            ...pricingRule,
-            image_generate_route: config.model_routes?.[`image_generate:${model}`] || "auto",
-            image_edit_route: config.model_routes?.[`image_edit:${model}`] || config.model_routes?.[`image:${model}`] || "auto",
-            video_route: config.model_routes?.[`video:${model}`] || config.model_routes?.[model] || "auto",
-            video_durations: formatDurationInput(config.model_video_durations?.[model]),
-            video_customizable: Boolean(config.model_video_customizable?.[model]),
-            pricing_id: pricingItem?.id,
-        };
-    });
-}
-
-function collectCapabilities(model: string, config: ApiConfigInfo): ModelCapability[] {
-    const capabilities: ModelCapability[] = [];
-    if ((config.image_models || []).includes(model)) capabilities.push("image");
-    if ((config.video_models || []).includes(model)) capabilities.push("video");
-    if ((config.text_models || []).includes(model)) capabilities.push("text");
-    if ((config.audio_models || []).includes(model)) capabilities.push("audio");
-    return capabilities.length ? capabilities : ["image"];
-}
-
-function inferUnitType(model: string, config: ApiConfigInfo): string {
-    if ((config.video_models || []).includes(model)) return "per_video";
-    if ((config.text_models || []).includes(model) || (config.audio_models || []).includes(model)) return "per_token";
-    return "per_image";
-}
-
-function normalizeRows(rows: ModelRow[]) {
-    return rows
-        .map((item) => ({
-            ...item,
-            model: item.model.trim(),
-            enabled: item.enabled !== false,
-            capabilities: Array.from(new Set(item.capabilities)),
-            pricing_mode: item.pricing_mode === "video_dynamic" ? "video_dynamic" : "per_unit",
-            unit_type: item.pricing_mode === "video_dynamic" ? "per_video_second" : item.unit_type,
-            image_generate_route: item.capabilities.includes("image") ? item.image_generate_route || "auto" : "auto",
-            image_edit_route: item.capabilities.includes("image") ? item.image_edit_route || "auto" : "auto",
-            video_route: item.capabilities.includes("video") ? item.video_route || "auto" : "auto",
-            video_durations: item.capabilities.includes("video") ? formatDurationInput(parseDurationInput(item.video_durations)) : "",
-            video_customizable: item.capabilities.includes("video") ? item.video_customizable === true : false,
-        }))
-        .filter((item) => item.model);
-}
-
-function findDuplicateModels(rows: Array<{ model: string }>) {
-    const seen = new Set<string>();
-    const duplicates = new Set<string>();
-    for (const row of rows) {
-        if (seen.has(row.model)) duplicates.add(row.model);
-        seen.add(row.model);
-    }
-    return Array.from(duplicates);
-}
-
 function parseDurationInput(value: string) {
     return Array.from(
         new Set(
@@ -834,77 +46,831 @@ function formatDurationInput(values?: number[]) {
     return (values || []).join(",");
 }
 
-function parseVideoPricingRule(value?: string): Partial<ModelRow> {
-    if (!value) return {};
-    try {
-        const parsed = JSON.parse(value) as {
-            base_credits?: number;
-            resolution_second_rates?: Record<string, number>;
-        };
-        const rates = parsed.resolution_second_rates || {};
-        return {
-            video_base_credits: Number(parsed.base_credits || 0),
-            video_rate_480p: Number(rates["480p"] || 0),
-            video_rate_720p: Number(rates["720p"] || 0),
-            video_rate_1080p: Number(rates["1080p"] || 0),
-            video_rate_2k: Number(rates["2K"] || rates["2k"] || 0),
-            video_rate_4k: Number(rates["4K"] || rates["4k"] || 0),
-        };
-    } catch {
-        return {};
-    }
-}
+export default function AdminApiConfigPage() {
+    const { message } = App.useApp();
+    const user = useUserStore((s) => s.user);
+    const isSuperAdmin = user?.role === "super_admin";
 
-function buildVideoPricingRule(row: ModelRow) {
-    const rates: Record<string, number> = {};
-    [
-        ["480p", row.video_rate_480p],
-        ["720p", row.video_rate_720p],
-        ["1080p", row.video_rate_1080p],
-        ["2K", row.video_rate_2k],
-        ["4K", row.video_rate_4k],
-    ].forEach(([label, value]) => {
-        const rate = Number(value || 0);
-        if (rate > 0) rates[String(label)] = rate;
+    const [channels, setChannels] = useState<ChannelAdminInfo[]>([]);
+    const [loadingChannels, setLoadingChannels] = useState(false);
+    const [syncingChannelId, setSyncingChannelId] = useState<number | null>(null);
+
+    // Channel creation/edit modals
+    const [isChannelModalOpen, setIsChannelModalOpen] = useState(false);
+    const [editingChannel, setEditingChannel] = useState<ChannelAdminInfo | null>(null);
+    const [channelForm] = Form.useForm();
+
+    // Models Panel
+    const [selectedChannel, setSelectedChannel] = useState<ChannelAdminInfo | null>(null);
+    const [models, setModels] = useState<ChannelModelInfo[]>([]);
+    const [loadingModels, setLoadingModels] = useState(false);
+
+    // Model configuration modal
+    const [editingModel, setEditingModel] = useState<ChannelModelInfo | null>(null);
+    const [isModelModalOpen, setIsModelModalOpen] = useState(false);
+    const [modelForm] = Form.useForm();
+
+    // Metrics Config state
+    const [metricsConfig, setMetricsConfig] = useState<MetricsConfig | null>(null);
+    const [savingMetrics, setSavingMetrics] = useState(false);
+    const [metricsForm] = Form.useForm();
+
+    // Capability editing state
+    const [modelCapabilities, setModelCapabilities] = useState<Record<number, string[]>>({});
+    const [savingCapabilities, setSavingCapabilities] = useState<Record<number, boolean>>({});
+
+    // Pricing editing state
+    const [modelPricing, setModelPricing] = useState<Record<number, { unit_type: string; pricing_mode: string; credits_per_unit: number; pricing_rule: string }>>({});
+    const [savingPricing, setSavingPricing] = useState<Record<number, boolean>>({});
+    const [pricingData, setPricingData] = useState<PricingItem[]>([]);
+
+    // Load initial data
+    const fetchChannels = async () => {
+        setLoadingChannels(true);
+        try {
+            const data = await listAllChannels();
+            setChannels(data || []);
+            // Update selectedChannel info if it is open to keep sync status current
+            if (selectedChannel) {
+                const updated = data.find((c) => c.id === selectedChannel.id);
+                if (updated) {
+                    setSelectedChannel(updated);
+                }
+            }
+        } catch (err: any) {
+            message.error(err?.message || "获取渠道列表失败");
+        } finally {
+            setLoadingChannels(false);
+        }
+    };
+
+    const fetchModels = async (channelId: number) => {
+        setLoadingModels(true);
+        try {
+            const data = await listChannelModelsAdmin(channelId);
+            setModels(data || []);
+            // Initialize local capability editing state from fetched data
+            const init: Record<number, string[]> = {};
+            for (const m of data || []) {
+                init[m.id] = [...m.capabilities];
+            }
+            setModelCapabilities(init);
+        } catch (err: any) {
+            message.error(err?.message || "获取渠道模型失败");
+        } finally {
+            setLoadingModels(false);
+        }
+    };
+
+    const fetchMetrics = async () => {
+        try {
+            const cfg = await getMetricsConfig();
+            setMetricsConfig(cfg);
+            metricsForm.setFieldsValue({
+                metrics_base_url: cfg.metrics_base_url || "",
+            });
+        } catch (err: any) {
+            // advisory
+        }
+    };
+
+    const fetchPricing = async () => {
+        try {
+            const data = await listPricing();
+            setPricingData(data || []);
+        } catch {
+            // pricing fetch advisory; silently continue
+        }
+    };
+
+    useEffect(() => {
+        void fetchChannels();
+        void fetchMetrics();
+    }, []);
+
+    // Handles synchronization
+    const handleSync = async (channelId: number) => {
+        setSyncingChannelId(channelId);
+        try {
+            const res = await syncChannelModels(channelId);
+            if (res.synced) {
+                message.success("同步渠道模型成功");
+            } else {
+                message.warning("同步完成，没有模型更新");
+            }
+            await fetchChannels();
+            if (selectedChannel && selectedChannel.id === channelId) {
+                await fetchModels(channelId);
+            }
+        } catch (err: any) {
+            message.error(err?.message || "同步失败");
+            // Keep the existing models listed, but refresh status to expose the failure error.
+            await fetchChannels();
+            if (selectedChannel && selectedChannel.id === channelId) {
+                await fetchModels(channelId);
+            }
+        } finally {
+            setSyncingChannelId(null);
+        }
+    };
+
+    // Toggles channel enablement
+    const handleToggleChannel = async (record: ChannelAdminInfo, checked: boolean) => {
+        try {
+            if (checked) {
+                await updateChannel(record.id, { enabled: true });
+                message.success(`已启用渠道 "${record.name}"`);
+            } else {
+                await disableChannel(record.id);
+                message.success(`已禁用渠道 "${record.name}"`);
+            }
+            await fetchChannels();
+        } catch (err: any) {
+            message.error(err?.message || "操作失败");
+        }
+    };
+
+    // Toggles model enablement
+    const handleToggleModel = async (model: ChannelModelInfo, checked: boolean) => {
+        if (!selectedChannel) return;
+        try {
+            if (checked) {
+                await enableChannelModel(selectedChannel.id, model.id);
+                message.success(`已启用模型 "${model.model_name}"`);
+            } else {
+                await disableChannelModel(selectedChannel.id, model.id);
+                message.success(`已禁用模型 "${model.model_name}"`);
+            }
+            await fetchModels(selectedChannel.id);
+        } catch (err: any) {
+            message.error(err?.message || "操作失败");
+        }
+    };
+
+    // Open create/edit modal
+    const openChannelModal = (channel?: ChannelAdminInfo) => {
+        setEditingChannel(channel || null);
+        if (channel) {
+            channelForm.setFieldsValue({
+                name: channel.name,
+                base_url: channel.base_url,
+                api_key: "", // Write-only: blank initially
+                new_api_channel_id: channel.new_api_channel_id || undefined,
+                enabled: channel.enabled,
+            });
+        } else {
+            channelForm.resetFields();
+            channelForm.setFieldsValue({ enabled: true });
+        }
+        setIsChannelModalOpen(true);
+    };
+
+    // Save channel (create or update)
+    const handleSaveChannel = async (values: any) => {
+        try {
+            if (editingChannel) {
+                const payload: UpdateChannelInput = {
+                    name: values.name,
+                    base_url: values.base_url,
+                    new_api_channel_id: values.new_api_channel_id ? Number(values.new_api_channel_id) : null,
+                    enabled: values.enabled,
+                };
+                if (values.api_key) {
+                    payload.api_key = values.api_key;
+                }
+                await updateChannel(editingChannel.id, payload);
+                message.success("修改渠道成功");
+            } else {
+                const payload: SaveChannelInput = {
+                    name: values.name,
+                    base_url: values.base_url,
+                    api_key: values.api_key || "",
+                    enabled: values.enabled,
+                    new_api_channel_id: values.new_api_channel_id ? Number(values.new_api_channel_id) : null,
+                };
+                await createChannel(payload);
+                message.success("创建渠道成功");
+            }
+            setIsChannelModalOpen(false);
+            void fetchChannels();
+        } catch (err: any) {
+            message.error(err?.message || "保存渠道失败");
+        }
+    };
+
+    // Open model manage panel
+    const openModelsPanel = (channel: ChannelAdminInfo) => {
+        setSelectedChannel(channel);
+        setPricingData([]);
+        void fetchModels(channel.id);
+        void fetchPricing();
+    };
+
+    const closePanel = () => {
+        setSelectedChannel(null);
+    };
+
+    // -- Capability editing handlers --
+
+    const toggleCap = (model: ChannelModelInfo, cap: string) => {
+        setModelCapabilities((prev) => {
+            const current = prev[model.id] || [...model.capabilities];
+            const next = current.includes(cap) ? current.filter((c) => c !== cap) : [...current, cap];
+            return { ...prev, [model.id]: next };
+        });
+    };
+
+    const handleSaveCapabilities = async (model: ChannelModelInfo) => {
+        if (!selectedChannel) return;
+        const caps = modelCapabilities[model.id];
+        if (!caps || caps.length === 0) {
+            message.warning("至少选择一个能力");
+            return;
+        }
+        setSavingCapabilities((prev) => ({ ...prev, [model.id]: true }));
+        try {
+            await updateChannelModel(selectedChannel.id, model.id, { capabilities: caps });
+            message.success("保存能力成功");
+            await fetchModels(selectedChannel.id);
+        } catch (err: any) {
+            message.error(err?.message || "保存能力失败");
+        } finally {
+            setSavingCapabilities((prev) => ({ ...prev, [model.id]: false }));
+        }
+    };
+
+    // -- Pricing editing helpers and handlers --
+
+    const getPricingDefaults = () => ({
+        unit_type: "per_image",
+        pricing_mode: "per_unit",
+        credits_per_unit: 0,
+        pricing_rule: "",
     });
-    return JSON.stringify({
-        base_credits: Number(row.video_base_credits || 0),
-        resolution_second_rates: rates,
-    });
-}
 
-function hasVideoRate(row: ModelRow) {
-    return [row.video_rate_480p, row.video_rate_720p, row.video_rate_1080p, row.video_rate_2k, row.video_rate_4k].some((value) => Number(value || 0) > 0);
-}
+    const getPricingForModel = (modelId: number, modelName: string) => {
+        if (modelPricing[modelId]) return modelPricing[modelId];
+        const existing = pricingData.find((p) => p.model === modelName);
+        if (existing) {
+            return {
+                unit_type: existing.unit_type || "per_image",
+                pricing_mode: existing.pricing_mode || "per_unit",
+                credits_per_unit: existing.credits_per_unit || 0,
+                pricing_rule: existing.pricing_rule || "",
+            };
+        }
+        return getPricingDefaults();
+    };
 
-function rowHasValidPricing(row: ModelRow) {
-    if (!row.enabled) return false;
-    if (row.pricing_mode === "video_dynamic") return hasVideoRate(row);
-    return Number(row.credits_per_unit || 0) > 0;
-}
+    const parsePricingRule = (ruleStr?: string) => {
+        if (!ruleStr) return { base_credits: 0, resolution_second_rates: {} as Record<string, number> };
+        try {
+            return JSON.parse(ruleStr);
+        } catch {
+            return { base_credits: 0, resolution_second_rates: {} };
+        }
+    };
 
-function pricingItemHasValidPricing(item: PricingItem) {
-    if (item.pricing_mode === "video_dynamic" || item.unit_type === "per_video_second") {
-        return hasVideoRate(parseVideoPricingRule(item.pricing_rule) as ModelRow);
-    }
-    return Number(item.credits_per_unit || 0) > 0;
-}
+    const handlePricingChange = (modelId: number, field: string, value: string | number) => {
+        setModelPricing((prev) => {
+            const current = prev[modelId] || getPricingDefaults();
+            const next = { ...current, [field]: value };
+            if (field === "unit_type" && value === "per_video_second") {
+                next.pricing_mode = "video_dynamic";
+            }
+            return { ...prev, [modelId]: next };
+        });
+    };
 
-function modelTestRoute(row: ModelRow, generation: ModelCapability) {
-    if (generation === "image") return row.image_generate_route || "auto";
-    if (generation === "video") return row.video_route || "auto";
-    return "";
-}
+    const handlePricingRuleChange = (modelId: number, field: string, value: number) => {
+        setModelPricing((prev) => {
+            const current = prev[modelId] || getPricingDefaults();
+            const rule = parsePricingRule(current.pricing_rule);
+            if (field === "base_credits") {
+                rule.base_credits = value;
+            } else {
+                rule.resolution_second_rates[field] = value;
+            }
+            return { ...prev, [modelId]: { ...current, pricing_rule: JSON.stringify(rule) } };
+        });
+    };
 
-function modelTestRouteLabel(row: ModelRow, generation: ModelCapability) {
-    if (generation === "image") {
-        const route = row.image_generate_route || "auto";
-        return imageRouteOptions.find((item) => item.value === route)?.label || route;
-    }
-    if (generation === "video") {
-        const route = row.video_route || "auto";
-        return videoRouteOptions.find((item) => item.value === route)?.label || route;
-    }
-    if (generation === "audio") return "/v1/audio/speech";
-    return "/v1/chat/completions";
+    const handleSavePricing = async (model: ChannelModelInfo) => {
+        if (!selectedChannel) return;
+        const pricing = modelPricing[model.id];
+        if (!pricing) return;
+        setSavingPricing((prev) => ({ ...prev, [model.id]: true }));
+        try {
+            await savePricing({
+                model: model.model_name,
+                credits_per_unit: pricing.credits_per_unit || 0,
+                unit_type: pricing.unit_type || "per_image",
+                pricing_mode: pricing.pricing_mode || "per_unit",
+                pricing_rule: pricing.pricing_rule || "",
+            });
+            message.success("保存计费成功");
+            await fetchPricing();
+            // Reset local pricing edits so getPricingForModel reads fresh data
+            setModelPricing((prev) => {
+                const next = { ...prev };
+                delete next[model.id];
+                return next;
+            });
+        } catch (err: any) {
+            message.error(err?.message || "保存计费失败");
+        } finally {
+            setSavingPricing((prev) => ({ ...prev, [model.id]: false }));
+        }
+    };
+
+    // Open model edit modal
+    const openModelModal = (model: ChannelModelInfo) => {
+        setEditingModel(model);
+        modelForm.setFieldsValue({
+            sort_order: model.sort_order,
+            image_generate_route: model.image_generate_route || "auto",
+            image_edit_route: model.image_edit_route || "auto",
+            video_route: model.video_route || "auto",
+            video_durations: formatDurationInput(model.video_durations),
+            video_customizable: model.video_customizable,
+        });
+        setIsModelModalOpen(true);
+    };
+
+    // Save model metadata
+    const handleSaveModel = async (values: any) => {
+        if (!selectedChannel || !editingModel) return;
+        try {
+            const durations = parseDurationInput(values.video_durations);
+            await updateChannelModel(selectedChannel.id, editingModel.id, {
+                sort_order: values.sort_order,
+                image_generate_route: values.image_generate_route,
+                image_edit_route: values.image_edit_route,
+                video_route: values.video_route,
+                video_durations: durations,
+                video_customizable: values.video_customizable,
+            });
+            message.success("修改模型配置成功");
+            setIsModelModalOpen(false);
+            void fetchModels(selectedChannel.id);
+        } catch (err: any) {
+            message.error(err?.message || "保存模型配置失败");
+        }
+    };
+
+    // Save metrics config
+    const handleSaveMetrics = async (values: any) => {
+        setSavingMetrics(true);
+        try {
+            await updateMetricsConfig({ metrics_base_url: values.metrics_base_url });
+            message.success("指标服务配置已更新");
+            void fetchMetrics();
+        } catch (err: any) {
+            message.error(err?.message || "更新失败");
+        } finally {
+            setSavingMetrics(false);
+        }
+    };
+
+    // Channel table columns
+    const channelColumns: ColumnsType<ChannelAdminInfo> = [
+        { title: "ID", dataIndex: "id", key: "id", width: 70 },
+        { title: "渠道名称", dataIndex: "name", key: "name", width: 150 },
+        { title: "接口地址", dataIndex: "base_url", key: "base_url", width: 250, ellipsis: true },
+        {
+            title: "API Key",
+            dataIndex: "has_key",
+            key: "has_key",
+            width: 100,
+            render: (hasKey: boolean) => (hasKey ? <Tag color="green">已配置</Tag> : <Tag color="gold">未配置</Tag>),
+        },
+        {
+            title: "New-API ID",
+            dataIndex: "new_api_channel_id",
+            key: "new_api_channel_id",
+            width: 120,
+            render: (val: any) => val ?? "-",
+        },
+        {
+            title: "同步状态",
+            key: "sync_status",
+            width: 180,
+            render: (_, record) => {
+                const isSyncing = syncingChannelId === record.id;
+                if (isSyncing) {
+                    return (
+                        <Tag color="blue" icon={<RefreshCw className="animate-spin size-3 mr-1" />}>
+                            同步中
+                        </Tag>
+                    );
+                }
+                switch (record.sync_status) {
+                    case "success":
+                        return (
+                            <Space direction="vertical" size={0}>
+                                <Tag color="green">同步成功</Tag>
+                                {record.synced_at && <span className="text-xs text-stone-400">{new Date(record.synced_at).toLocaleString("zh-CN")}</span>}
+                            </Space>
+                        );
+                    case "failed":
+                        return (
+                            <Space direction="vertical" size={0}>
+                                <Popover title="同步失败原因" content={<div className="max-w-xs text-xs text-rose-600 font-mono whitespace-pre-wrap break-all">{record.sync_error || "未知错误"}</div>} trigger="hover">
+                                    <Tag color="red" className="cursor-pointer">
+                                        同步失败
+                                    </Tag>
+                                </Popover>
+                                {record.synced_at && <span className="text-xs text-stone-400">上次: {new Date(record.synced_at).toLocaleString("zh-CN")}</span>}
+                            </Space>
+                        );
+                    default:
+                        return <Tag>未同步</Tag>;
+                }
+            },
+        },
+        {
+            title: "状态",
+            dataIndex: "enabled",
+            key: "enabled",
+            width: 100,
+            render: (enabled: boolean, record) => <Switch checked={enabled} disabled={!isSuperAdmin} onChange={(checked) => handleToggleChannel(record, checked)} />,
+        },
+        {
+            title: "操作",
+            key: "actions",
+            width: 250,
+            render: (_, record) => (
+                <Space size="middle">
+                    <Button size="small" onClick={() => openChannelModal(record)} disabled={!isSuperAdmin && !record.enabled}>
+                        编辑
+                    </Button>
+                    <Button size="small" type="primary" onClick={() => openModelsPanel(record)}>
+                        模型管理
+                    </Button>
+                    <Button size="small" onClick={() => handleSync(record.id)} loading={syncingChannelId === record.id} disabled={!isSuperAdmin}>
+                        同步模型
+                    </Button>
+                </Space>
+            ),
+        },
+    ];
+
+    // Model table columns inside panel
+    const modelColumns: ColumnsType<ChannelModelInfo> = [
+        { title: "模型名称", dataIndex: "model_name", key: "model_name", width: 200, ellipsis: true },
+        {
+            title: "能力",
+            dataIndex: "capabilities",
+            key: "capabilities",
+            width: 220,
+            render: (caps: string[], record) => {
+                const current = modelCapabilities[record.id] || caps || [];
+                return (
+                    <Space size={4} wrap>
+                        {(["image", "video", "text", "audio"] as const).map((cap) => {
+                            const labels: Record<string, string> = { image: "图片", video: "视频", text: "文本", audio: "音频" };
+                            return (
+                                <Checkbox
+                                    key={cap}
+                                    checked={current.includes(cap)}
+                                    disabled={!isSuperAdmin}
+                                    onChange={() => toggleCap(record, cap)}
+                                >
+                                    {labels[cap]}
+                                </Checkbox>
+                            );
+                        })}
+                    </Space>
+                );
+            },
+        },
+        { title: "权重", dataIndex: "sort_order", key: "sort_order", width: 80 },
+        {
+            title: "计费方式",
+            key: "pricing_mode",
+            width: 200,
+            render: (_, record) => {
+                const pricing = getPricingForModel(record.id, record.model_name);
+                const rule = parsePricingRule(pricing.pricing_rule);
+                const isDynamic = pricing.pricing_mode === "video_dynamic";
+                return (
+                    <Space direction="vertical" size={4} style={{ width: "100%" }}>
+                        <Select
+                            value={pricing.pricing_mode}
+                            onChange={(v) => handlePricingChange(record.id, "pricing_mode", v)}
+                            style={{ width: "100%" }}
+                            size="small"
+                            disabled={!isSuperAdmin}
+                            options={[
+                                { label: "按次计费", value: "per_unit" },
+                                { label: "视频动态计费", value: "video_dynamic" },
+                            ]}
+                        />
+                        {isDynamic && (
+                            <div className="border-t pt-1 space-y-1 w-full">
+                                <div className="text-xs text-stone-500">基础积分:</div>
+                                <InputNumber
+                                    size="small"
+                                    min={0}
+                                    value={rule.base_credits}
+                                    onChange={(v) => handlePricingRuleChange(record.id, "base_credits", v ?? 0)}
+                                    disabled={!isSuperAdmin}
+                                    style={{ width: "100%" }}
+                                />
+                                <div className="text-xs text-stone-500 mt-1">分辨率速率:</div>
+                                {["720p", "1080p"].map((res) => (
+                                    <div key={res} className="flex items-center gap-1">
+                                        <span className="text-xs text-stone-500 w-10">{res}:</span>
+                                        <InputNumber
+                                            size="small"
+                                            min={0}
+                                            value={rule.resolution_second_rates[res] || 0}
+                                            onChange={(v) => handlePricingRuleChange(record.id, res, v ?? 0)}
+                                            disabled={!isSuperAdmin}
+                                            style={{ width: "70%" }}
+                                        />
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </Space>
+                );
+            },
+        },
+        {
+            title: "计费单位",
+            key: "unit_type",
+            width: 150,
+            render: (_, record) => {
+                const pricing = getPricingForModel(record.id, record.model_name);
+                return (
+                    <Select
+                        value={pricing.unit_type}
+                        onChange={(v) => handlePricingChange(record.id, "unit_type", v)}
+                        style={{ width: "100%" }}
+                        size="small"
+                        disabled={!isSuperAdmin}
+                        options={[
+                            { label: "每次图片", value: "per_image" },
+                            { label: "每次视频", value: "per_video" },
+                            { label: "每秒视频", value: "per_video_second" },
+                            { label: "每Token", value: "per_token" },
+                        ]}
+                    />
+                );
+            },
+        },
+        {
+            title: "积分",
+            key: "credits_per_unit",
+            width: 100,
+            render: (_, record) => {
+                const pricing = getPricingForModel(record.id, record.model_name);
+                return (
+                    <InputNumber
+                        size="small"
+                        min={0}
+                        value={pricing.credits_per_unit}
+                        onChange={(v) => handlePricingChange(record.id, "credits_per_unit", v ?? 0)}
+                        disabled={!isSuperAdmin}
+                        style={{ width: "100%" }}
+                    />
+                );
+            },
+        },
+        {
+            title: "路由与定制配置",
+            key: "route_config",
+            width: 250,
+            render: (_, record) => {
+                const configItems = [];
+                if (record.capabilities.includes("image")) {
+                    configItems.push(`生图: ${record.image_generate_route || "auto"}`);
+                    configItems.push(`修图: ${record.image_edit_route || "auto"}`);
+                }
+                if (record.capabilities.includes("video")) {
+                    configItems.push(`视频: ${record.video_route || "auto"}`);
+                    if (record.video_durations?.length) {
+                        configItems.push(`时长: [${record.video_durations.join(",")}]`);
+                    }
+                    if (record.video_customizable) {
+                        configItems.push("允许自定义");
+                    }
+                }
+                return (
+                    <div className="text-xs text-stone-500 space-y-0.5">
+                        {configItems.map((item, idx) => (
+                            <div key={idx}>{item}</div>
+                        ))}
+                    </div>
+                );
+            },
+        },
+        {
+            title: "状态",
+            dataIndex: "enabled",
+            key: "enabled",
+            width: 100,
+            render: (enabled: boolean, record) => <Switch checked={enabled} disabled={!isSuperAdmin} onChange={(checked) => handleToggleModel(record, checked)} />,
+        },
+        {
+            title: "操作",
+            key: "actions",
+            width: 260,
+            render: (_, record) => {
+                const caps = modelCapabilities[record.id] || record.capabilities || [];
+                return (
+                    <Space size="small" wrap>
+                        <Button size="small" onClick={() => openModelModal(record)} disabled={!isSuperAdmin}>
+                            配置
+                        </Button>
+                        <Button
+                            size="small"
+                            onClick={() => handleSaveCapabilities(record)}
+                            disabled={!isSuperAdmin || caps.length === 0}
+                            loading={savingCapabilities[record.id]}
+                        >
+                            保存能力
+                        </Button>
+                        <Button
+                            size="small"
+                            onClick={() => handleSavePricing(record)}
+                            disabled={!isSuperAdmin}
+                            loading={savingPricing[record.id]}
+                        >
+                            保存计费
+                        </Button>
+                    </Space>
+                );
+            },
+        },
+    ];
+
+    return (
+        <div>
+            <h2 className="mb-4 text-xl font-semibold text-stone-950 dark:text-stone-100">
+                <Settings className="mr-2 inline size-5" />
+                API 与模型配置
+            </h2>
+            <Alert
+                className="mb-6"
+                type="info"
+                showIcon
+                message="这里统一管理上游全局渠道、模型目录和指标服务配置"
+                description="超级管理员(SuperAdmin)可创建与编辑渠道，并同步渠道模型。同步失败时，已有模型仍会保留在列表中，并显示同步失败原因。非超级管理员仅可查看，无修改权限。"
+            />
+
+            {!isSuperAdmin && <Alert className="mb-4" type="warning" showIcon icon={<Lock className="size-4 text-amber-500" />} message="只读模式" description="您当前的权限为非超级管理员，无法进行任何配置修改、同步模型或启用/禁用操作。" />}
+
+            <Tabs defaultActiveKey="channels">
+                <Tabs.TabPane tab="渠道与模型管理" key="channels">
+                    <Card
+                        title="全局渠道列表"
+                        extra={
+                            <Button type="primary" icon={<Plus className="size-4" />} onClick={() => openChannelModal()} disabled={!isSuperAdmin}>
+                                新增渠道
+                            </Button>
+                        }
+                    >
+                        <Table rowKey="id" columns={channelColumns} dataSource={channels} loading={loadingChannels} pagination={false} scroll={{ x: 1000 }} />
+                    </Card>
+                </Tabs.TabPane>
+                <Tabs.TabPane tab="指标服务配置" key="metrics">
+                    <Card title="接口性能指标服务">
+                        <Form form={metricsForm} layout="vertical" onFinish={handleSaveMetrics}>
+                            <Form.Item name="metrics_base_url" label="性能指标服务 Base URL" rules={[{ required: true, message: "请输入性能指标服务地址" }]} extra="配置 New-API 性能指标适配器的接口地址，例如: http://localhost:8000/api">
+                                <Input placeholder="http://localhost:8000/api" disabled={!isSuperAdmin} />
+                            </Form.Item>
+                            <Button type="primary" htmlType="submit" loading={savingMetrics} disabled={!isSuperAdmin}>
+                                保存配置
+                            </Button>
+                        </Form>
+                    </Card>
+                </Tabs.TabPane>
+            </Tabs>
+
+            {/* Channel Create/Edit Modal */}
+            <Modal
+                title={editingChannel ? "编辑渠道" : "新增渠道"}
+                open={isChannelModalOpen}
+                onCancel={() => setIsChannelModalOpen(false)}
+                footer={[
+                    <Button key="cancel" onClick={() => setIsChannelModalOpen(false)}>
+                        取消
+                    </Button>,
+                    <Button key="submit" type="primary" disabled={!isSuperAdmin} onClick={() => channelForm.submit()}>
+                        保存
+                    </Button>,
+                ]}
+            >
+                <Form form={channelForm} layout="vertical" onFinish={handleSaveChannel}>
+                    <Form.Item name="name" label="渠道名称" rules={[{ required: true, message: "请输入渠道名称" }]}>
+                        <Input placeholder="例如: 官方 OpenAI 渠道" disabled={!isSuperAdmin} />
+                    </Form.Item>
+                    <Form.Item name="base_url" label="接口地址 (Base URL)" rules={[{ required: true, message: "请输入接口 Base URL" }]}>
+                        <Input placeholder="https://api.openai.com" disabled={!isSuperAdmin} />
+                    </Form.Item>
+                    <Form.Item
+                        name="api_key"
+                        label="API Key"
+                        extra={editingChannel && editingChannel.has_key ? "已设置 API Key；留空表示使用现有 Key，输入则覆盖" : "配置需要输入 API Key"}
+                        rules={[{ required: !editingChannel, message: "请输入 API Key" }]}
+                    >
+                        <Input.Password placeholder="sk-..." disabled={!isSuperAdmin} />
+                    </Form.Item>
+                    <Form.Item name="new_api_channel_id" label="New-API 渠道映射 ID (可选)" extra="对应 New-API 系统中该渠道 of ID，用于拉取指标数据">
+                        <InputNumber min={1} className="w-full" placeholder="例如: 5" disabled={!isSuperAdmin} />
+                    </Form.Item>
+                    <Form.Item name="enabled" valuePropName="checked" label="启用渠道">
+                        <Switch disabled={!isSuperAdmin} />
+                    </Form.Item>
+                </Form>
+            </Modal>
+
+            {/* Model Management Panel (inline) */}
+            {selectedChannel && (
+                <Card
+                    className="mt-4"
+                    title={`模型管理 - ${selectedChannel.name}`}
+                    extra={
+                        <Space>
+                            <Button
+                                icon={<RefreshCw className="size-4" />}
+                                onClick={() => handleSync(selectedChannel.id)}
+                                loading={syncingChannelId === selectedChannel.id}
+                                disabled={!isSuperAdmin}
+                            >
+                                同步模型
+                            </Button>
+                            <Button icon={<X className="size-4" />} onClick={closePanel}>
+                                关闭
+                            </Button>
+                        </Space>
+                    }
+                >
+                    {selectedChannel.sync_status === "failed" && (
+                        <Alert
+                            type="error"
+                            showIcon
+                            message="模型同步失败"
+                            description={selectedChannel.sync_error || "同步失败，请检查渠道接口地址和 API Key 是否正确。"}
+                            action={
+                                <Button size="small" danger onClick={() => handleSync(selectedChannel.id)} loading={syncingChannelId === selectedChannel.id} disabled={!isSuperAdmin}>
+                                    立即重试
+                                </Button>
+                            }
+                            className="mb-4"
+                        />
+                    )}
+                    <Table rowKey="id" columns={modelColumns} dataSource={models} loading={loadingModels} pagination={false} scroll={{ x: 1400 }} />
+                </Card>
+            )}
+
+            {/* Model Metadata Edit Modal */}
+            <Modal
+                title={`编辑模型配置：${editingModel?.model_name || ""}`}
+                open={isModelModalOpen}
+                onCancel={() => setIsModelModalOpen(false)}
+                footer={[
+                    <Button key="cancel" onClick={() => setIsModelModalOpen(false)}>
+                        取消
+                    </Button>,
+                    <Button key="submit" type="primary" disabled={!isSuperAdmin} onClick={() => modelForm.submit()}>
+                        保存
+                    </Button>,
+                ]}
+            >
+                <Form form={modelForm} layout="vertical" onFinish={handleSaveModel}>
+                    <Form.Item name="sort_order" label="排序权重" rules={[{ required: true, message: "请输入排序权重" }]}>
+                        <InputNumber min={0} className="w-full" disabled={!isSuperAdmin} />
+                    </Form.Item>
+
+                    {editingModel?.capabilities.includes("image") && (
+                        <>
+                            <Form.Item name="image_generate_route" label="文生图接口路由">
+                                <Select options={imageRouteOptions} disabled={!isSuperAdmin} />
+                            </Form.Item>
+                            <Form.Item name="image_edit_route" label="图生图接口路由">
+                                <Select options={imageRouteOptions} disabled={!isSuperAdmin} />
+                            </Form.Item>
+                        </>
+                    )}
+
+                    {editingModel?.capabilities.includes("video") && (
+                        <>
+                            <Form.Item name="video_route" label="视频生成接口路由">
+                                <Select options={videoRouteOptions} disabled={!isSuperAdmin} />
+                            </Form.Item>
+                            <Form.Item name="video_durations" label="可选视频时长 (逗号分隔)" help="多个时长用半角逗号分隔，例如: 5,10">
+                                <Input placeholder="如: 5,10" disabled={!isSuperAdmin} />
+                            </Form.Item>
+                            <Form.Item name="video_customizable" valuePropName="checked" label="允许用户自定义视频时长">
+                                <Switch disabled={!isSuperAdmin} />
+                            </Form.Item>
+                        </>
+                    )}
+                </Form>
+            </Modal>
+        </div>
+    );
 }

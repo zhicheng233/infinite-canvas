@@ -10,7 +10,16 @@ export function middleware(request: NextRequest) {
         return NextResponse.next();
     }
 
-    if (pathname.startsWith("/_next") || pathname.startsWith("/api") || pathname.startsWith("/favicon") || pathname.startsWith("/icons") || pathname === "/icon.png" || pathname === "/logo.svg" || pathname === "/logo.png" || pathname === "/logo-dark.svg") {
+    if (
+        pathname.startsWith("/_next") ||
+        pathname.startsWith("/api") ||
+        pathname.startsWith("/favicon") ||
+        pathname.startsWith("/icons") ||
+        pathname === "/icon.png" ||
+        pathname === "/logo.svg" ||
+        pathname === "/logo.png" ||
+        pathname === "/logo-dark.svg"
+    ) {
         return NextResponse.next();
     }
 

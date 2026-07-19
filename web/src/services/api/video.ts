@@ -8,7 +8,7 @@ import { getMediaBlob, uploadMediaFile, type UploadedFile } from "@/services/fil
 import { getImageBlob, imageToDataUrl } from "@/services/image-storage";
 import { uploadTempImage } from "@/services/api/temp-media";
 import { boolConfig, buildSeedancePromptText, isSeedanceVideoConfig, normalizeSeedanceDuration, normalizeSeedanceRatio, normalizeSeedanceResolution, seedanceVideoReferenceError, SEEDANCE_REFERENCE_LIMITS } from "@/lib/seedance-video";
-import { buildApiUrl, modelOptionName, normalizeVideoDurationForModel, resolveModelRequestConfig, videoRouteForModel, type AiConfig } from "@/stores/use-config-store";
+import { buildApiUrl, buildProxyApiUrl, modelOptionName, normalizeVideoDurationForModel, readLocalAiCredentials, resolveModelRequestConfig, videoRouteForModel, type AiConfig } from "@/stores/use-config-store";
 import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
 
@@ -57,12 +57,14 @@ type ApiEnvelope<T> = T | { code?: number; data?: T | null; msg?: string };
 type RequestOptions = { signal?: AbortSignal };
 
 export type VideoGenerationResult = { blob?: Blob; url?: string; mimeType?: string };
-export type VideoGenerationTask = { id: string; provider: "openai" | "seedance" | "xai" | "newapi" | "yijia"; model: string };
+export type VideoGenerationTask = { id: string; provider: "openai" | "seedance" | "xai" | "newapi" | "yijia"; model: string; channelId?: number; channelModelId?: number };
 export type VideoGenerationTaskState = { status: "pending" } | { status: "completed"; result: VideoGenerationResult } | { status: "failed"; error: string };
 
 function aiApiUrl(config: AiConfig, path: string) {
-    if (isLoggedIn()) return API_BASE + "/proxy?path=" + encodeURIComponent(path);
-    return buildApiUrl(config.baseUrl, path);
+    if (isLoggedIn()) {
+        return buildProxyApiUrl(API_BASE, config, config.model || config.videoModel, path);
+    }
+    return buildApiUrl(readLocalAiCredentials().baseUrl, path);
 }
 
 function aiHeaders(config: AiConfig, contentType?: string) {
@@ -71,7 +73,7 @@ function aiHeaders(config: AiConfig, contentType?: string) {
         const token = typeof window !== "undefined" ? localStorage.getItem("infinite-canvas:auth_token") : null;
         if (token) headers["Authorization"] = "Bearer " + token;
     } else {
-        headers["Authorization"] = "Bearer " + config.apiKey;
+        headers["Authorization"] = "Bearer " + readLocalAiCredentials().apiKey;
     }
     if (contentType) headers["Content-Type"] = contentType;
     return headers;
@@ -95,6 +97,7 @@ export async function requestVideoGeneration(config: AiConfig, prompt: string, r
 export async function createVideoGenerationTask(config: AiConfig, prompt: string, references: ReferenceImage[] = [], videoReferences: ReferenceVideo[] = [], audioReferences: ReferenceAudio[] = [], options?: RequestOptions): Promise<VideoGenerationTask> {
     const selectedModel = (config.model || config.videoModel).trim();
     const requestConfig = resolveModelRequestConfig(config, selectedModel);
+    const localBaseUrl = isLoggedIn() ? "" : readLocalAiCredentials().baseUrl;
     assertVideoConfig(requestConfig, requestConfig.model);
     const configuredRoute = videoRouteForModel(requestConfig, selectedModel);
     if (configuredRoute !== "auto") {
@@ -112,13 +115,13 @@ export async function createVideoGenerationTask(config: AiConfig, prompt: string
     if (isSeedanceVideoConfig(requestConfig)) {
         return createSeedanceTask(requestConfig, selectedModel, prompt, references, videoReferences, audioReferences, options);
     }
-    if (isXAIVideoModel(selectedModel, requestConfig.baseUrl)) {
+    if (isXAIVideoModel(selectedModel, localBaseUrl)) {
         if (videoReferences.length || audioReferences.length) {
             throw new Error("当前视频模型暂不支持参考视频或参考音频，请仅保留参考图片");
         }
         return createXAIVideoTask(requestConfig, selectedModel, prompt, references, options);
     }
-    if (isNewApiVideoGenerationModel(selectedModel, requestConfig.baseUrl)) {
+    if (isNewApiVideoGenerationModel(selectedModel, localBaseUrl)) {
         if (videoReferences.length || audioReferences.length) {
             throw new Error("当前视频模型暂不支持参考视频或参考音频，请仅保留参考图片");
         }
@@ -208,9 +211,7 @@ async function createVeoJsonVideoTask(config: AiConfig, model: string, prompt: s
     };
     const aspectRatio = normalizeVideoAspectRatio(config.size);
     if (aspectRatio) payload.aspect_ratio = aspectRatio;
-    const imageUrls = await Promise.all(
-        references.slice(0, 7).map((image) => resolveVeoIngredientImage(image)),
-    ).then((items) => items.filter(Boolean) as string[]);
+    const imageUrls = await Promise.all(references.slice(0, 7).map((image) => resolveVeoIngredientImage(image))).then((items) => items.filter(Boolean) as string[]);
     if (imageUrls.length) payload.Ingredients_images = imageUrls;
     try {
         const created = unwrapVideoResponse((await axios.post<ApiVideoResponse>(aiApiUrl(config, "/videos"), payload, { headers: aiHeaders(config, "application/json"), signal: options?.signal })).data);
@@ -530,8 +531,9 @@ function requiresAuthenticatedVideoContent(url: string) {
 function assertVideoConfig(config: AiConfig, model: string) {
     if (!model) throw new Error("请先配置视频模型");
     if (isLoggedIn()) return;
-    if (!config.baseUrl.trim()) throw new Error("请先配置 Base URL");
-    if (!config.apiKey.trim()) throw new Error("请先配置 API Key");
+    const local = readLocalAiCredentials();
+    if (!local.baseUrl.trim()) throw new Error("请先配置 Base URL");
+    if (!local.apiKey.trim()) throw new Error("请先配置 API Key");
 }
 
 function normalizeVideoSecondsForModel(config: AiConfig, model: string, value: string) {
