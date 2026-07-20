@@ -12,6 +12,8 @@ import { getMetricsConfig, updateMetricsConfig, type MetricsConfig } from "@/ser
 import { type ChannelModelInfo } from "@/services/api/channel";
 import { listPricing, savePricing, comparePricing, type PricingItem } from "@/services/api/pricing";
 import { testApiModel, type ApiModelTestResult } from "@/services/api/api-config";
+import { listWebhookConfigs, saveWebhookConfig, testWebhookSend, startPoller, stopPoller, getPollerStatus, listWebhookLogs } from "@/services/api/webhook";
+import type { WebhookConfig, WebhookLogItem, PollerStatus, TestSendResult } from "@/services/api/webhook";
 
 const imageRouteOptions = [
     { label: "自动判断", value: "auto" },
@@ -31,6 +33,14 @@ const videoRouteOptions = [
     { label: "/v1/video/generations", value: "newapi" },
     { label: "Seedance /contents/generations/tasks", value: "seedance" },
 ];
+
+const WEBHOOK_PLATFORMS = ["feishu", "dtalk", "wecom", "telegram"];
+const PLATFORM_LABELS: Record<string, string> = {
+  feishu: "飞书",
+  dtalk: "钉钉",
+    wecom: "企业微信",
+    telegram: "Telegram",
+};
 
 function parseDurationInput(value: string) {
     return Array.from(
@@ -143,6 +153,26 @@ export default function AdminApiConfigPage() {
     const [testResult, setTestResult] = useState<ApiModelTestResult | null>(null);
     const [testGeneration, setTestGeneration] = useState("text");
 
+    // Webhook tab state
+    const [webhookConfigs, setWebhookConfigs] = useState<WebhookConfig[]>([]);
+    const [localConfigs, setLocalConfigs] = useState<Record<string, Partial<WebhookConfig>>>({});
+    const [loadingConfigs, setLoadingConfigs] = useState(false);
+    const [savingConfigPlatform, setSavingConfigPlatform] = useState<string | null>(null);
+    const [pollerStatus, setPollerStatus] = useState<PollerStatus | null>(null);
+    const [startingPoller, setStartingPoller] = useState(false);
+    const [stoppingPoller, setStoppingPoller] = useState(false);
+    const [pollerInterval, setPollerInterval] = useState(30);
+    const [savingInterval, setSavingInterval] = useState(false);
+    const [cooldownMinutes, setCooldownMinutes] = useState(10);
+    const [savingCooldown, setSavingCooldown] = useState(false);
+    const [webhookLogs, setWebhookLogs] = useState<WebhookLogItem[]>([]);
+    const [loadingLogs, setLoadingLogs] = useState(false);
+    const [webhookTestModalOpen, setWebhookTestModalOpen] = useState(false);
+    const [webhookTestPlatform, setWebhookTestPlatform] = useState("");
+    const [webhookTestMessage, setWebhookTestMessage] = useState("");
+    const [webhookTestSending, setWebhookTestSending] = useState(false);
+    const [webhookTestSendResult, setWebhookTestSendResult] = useState<TestSendResult | null>(null);
+
     // Load initial data
     const fetchChannels = async () => {
         setLoadingChannels(true);
@@ -202,9 +232,55 @@ export default function AdminApiConfigPage() {
         }
     };
 
+    const fetchWebhookConfigs = async () => {
+        setLoadingConfigs(true);
+        try {
+            const data = await listWebhookConfigs();
+            setWebhookConfigs(data || []);
+            const init: Record<string, Partial<WebhookConfig>> = {};
+            for (const c of data || []) {
+                init[c.platform] = { ...c };
+            }
+            setLocalConfigs(init);
+            // Read cooldown from first feishu config (all platforms share the same cooldown)
+            const feishuCfg = (data || []).find(c => c.platform === "feishu");
+            if (feishuCfg?.cooldown_minutes != null) {
+                setCooldownMinutes(feishuCfg.cooldown_minutes);
+            }
+        } catch (err: any) {
+            message.error(err?.message || "获取推送配置失败");
+        } finally {
+            setLoadingConfigs(false);
+        }
+    };
+
+    const fetchPollerStatus = async () => {
+        try {
+            const status = await getPollerStatus();
+            setPollerStatus(status);
+            setPollerInterval(status.interval_seconds || 30);
+        } catch {
+            // advisory
+        }
+    };
+
+    const fetchWebhookLogs = async () => {
+        setLoadingLogs(true);
+        try {
+            const data = await listWebhookLogs(50);
+            setWebhookLogs(data || []);
+        } catch (err: any) {
+            message.error(err?.message || "获取推送日志失败");
+        } finally {
+            setLoadingLogs(false);
+        }
+    };
+
     useEffect(() => {
         void fetchChannels();
         void fetchMetrics();
+        void fetchWebhookConfigs();
+        void fetchPollerStatus();
     }, []);
 
     // Handles synchronization
@@ -508,6 +584,55 @@ export default function AdminApiConfigPage() {
             message.error(err?.message || "模型测试失败");
         } finally {
             setTestLoading(false);
+        }
+    };
+
+    // Webhook handlers
+    const handleConfigChange = (platform: string, field: string, value: any) => {
+        setLocalConfigs((prev) => ({
+            ...prev,
+            [platform]: { ...(prev[platform] || { platform, webhook_url: "", enabled: false }), [field]: value },
+        }));
+    };
+
+    const handleSaveConfig = async (platform: string) => {
+        const config = localConfigs[platform];
+        if (!config || !config.webhook_url) {
+            message.warning("请输入 Webhook URL");
+            return;
+        }
+        setSavingConfigPlatform(platform);
+        try {
+            await saveWebhookConfig({
+                platform,
+                webhook_url: config.webhook_url,
+                enabled: config.enabled ?? false,
+                template_down: config.template_down || "",
+                template_up: config.template_up || "",
+            });
+            message.success("保存成功");
+            await fetchWebhookConfigs();
+        } catch (err: any) {
+            message.error(err?.message || "保存失败");
+        } finally {
+            setSavingConfigPlatform(null);
+        }
+    };
+
+    const handleTestSend = async () => {
+        if (!webhookTestMessage.trim()) {
+            message.warning("请输入测试消息");
+            return;
+        }
+        setWebhookTestSending(true);
+        setWebhookTestSendResult(null);
+        try {
+            const result = await testWebhookSend({ platform: webhookTestPlatform, message: webhookTestMessage });
+            setWebhookTestSendResult(result);
+        } catch (err: any) {
+            message.error(err?.message || "发送测试失败");
+        } finally {
+            setWebhookTestSending(false);
         }
     };
 
@@ -876,6 +1001,222 @@ export default function AdminApiConfigPage() {
                         </Form>
                     </Card>
                 </Tabs.TabPane>
+                <Tabs.TabPane tab="消息推送" key="webhook">
+                    {/* Card 1: 平台配置 */}
+                    <Card title="平台配置" className="mb-4">
+                        <Table
+                            rowKey="platform"
+                            dataSource={WEBHOOK_PLATFORMS.map((p) => localConfigs[p] || { platform: p, webhook_url: "", enabled: false, template_down: "", template_up: "" })}
+                            columns={[
+                                {
+                                    title: "平台",
+                                    dataIndex: "platform",
+                                    key: "platform",
+                                    width: 100,
+                                    render: (p: string) => <span className="font-medium text-stone-700 dark:text-stone-300">{PLATFORM_LABELS[p] || p}</span>,
+                                },
+                                {
+                                    title: "Webhook URL",
+                                    dataIndex: "webhook_url",
+                                    key: "webhook_url",
+                                    width: 250,
+                                    render: (_, record) => {
+                                        const val = localConfigs[record.platform]?.webhook_url ?? "";
+                                        return <Input size="small" value={val} onChange={(e) => handleConfigChange(record.platform, "webhook_url", e.target.value)} />;
+                                    },
+                                },
+                                {
+                                    title: "启用",
+                                    dataIndex: "enabled",
+                                    key: "enabled",
+                                    width: 70,
+                                    render: (_, record) => {
+                                        const checked = localConfigs[record.platform]?.enabled ?? false;
+                                        return <Switch checked={checked} onChange={(v) => handleConfigChange(record.platform, "enabled", v)} />;
+                                    },
+                                },
+                                {
+                                    title: "Down 模板",
+                                    key: "template_down",
+                                    width: 200,
+                                    render: (_, record) => {
+                                        const val = localConfigs[record.platform]?.template_down ?? "";
+                                        return (
+                                            <Input.TextArea
+                                                rows={2}
+                                                size="small"
+                                                value={val}
+                                                placeholder="模型 {{model}} 在所有渠道均不可用，时间: {{time}}"
+                                                onChange={(e) => handleConfigChange(record.platform, "template_down", e.target.value)}
+                                            />
+                                        );
+                                    },
+                                },
+                                {
+                                    title: "Up 模板",
+                                    key: "template_up",
+                                    width: 200,
+                                    render: (_, record) => {
+                                        const val = localConfigs[record.platform]?.template_up ?? "";
+                                        return (
+                                            <Input.TextArea
+                                                rows={2}
+                                                size="small"
+                                                value={val}
+                                                placeholder="模型 {{model}} 已恢复可用，时间: {{time}}"
+                                                onChange={(e) => handleConfigChange(record.platform, "template_up", e.target.value)}
+                                            />
+                                        );
+                                    },
+                                },
+                                {
+                                    title: "操作",
+                                    key: "actions",
+                                    width: 150,
+                                    render: (_, record) => (
+                                        <Space>
+                                            <Button size="small" type="primary" loading={savingConfigPlatform === record.platform} onClick={() => handleSaveConfig(record.platform)}>
+                                                保存
+                                            </Button>
+                                            <Button
+                                                size="small"
+                                                onClick={() => {
+                                                    setWebhookTestPlatform(record.platform);
+                                                    setWebhookTestMessage("");
+                                                    setWebhookTestSendResult(null);
+                                                    setWebhookTestModalOpen(true);
+                                                }}
+                                            >
+                                                测试
+                                            </Button>
+                                        </Space>
+                                    ),
+                                },
+                            ]}
+                            loading={loadingConfigs}
+                            pagination={false}
+                            scroll={{ x: 1000 }}
+                        />
+                    </Card>
+                    {/* Card 2: 轮询控制 */}
+                    <Card title="轮询控制" className="mb-4">
+                        <div className="space-y-4">
+                            <div className="flex items-center gap-4">
+                                <span className="text-sm text-stone-500">轮询状态:</span>
+                                <Tag color={pollerStatus?.running ? "green" : "red"}>
+                                    {pollerStatus ? (pollerStatus.running ? "运行中" : "已停止") : "加载中"}
+                                </Tag>
+                                <Button
+                                    type={pollerStatus?.running ? "default" : "primary"}
+                                    loading={startingPoller || stoppingPoller}
+                                    onClick={async () => {
+                                        if (pollerStatus?.running) {
+                                            setStoppingPoller(true);
+                                            try {
+                                                await stopPoller();
+                                                message.success("轮询已停止");
+                                                void fetchPollerStatus();
+                                            } catch (err: any) {
+                                                message.error(err?.message || "停止轮询失败");
+                                            } finally {
+                                                setStoppingPoller(false);
+                                            }
+                                        } else {
+                                            setStartingPoller(true);
+                                            try {
+                                                await startPoller();
+                                                message.success("轮询已启动");
+                                                void fetchPollerStatus();
+                                            } catch (err: any) {
+                                                message.error(err?.message || "启动轮询失败");
+                                            } finally {
+                                                setStartingPoller(false);
+                                            }
+                                        }
+                                    }}
+                                >
+                                    {pollerStatus?.running ? "停止" : "启动"}
+                                </Button>
+                            </div>
+                            <div className="flex items-center gap-4">
+                                <span className="text-sm text-stone-500">轮询间隔(秒):</span>
+                                <InputNumber min={1} value={pollerInterval} onChange={(v) => setPollerInterval(v ?? 30)} disabled={savingInterval} />
+                                <Button loading={savingInterval} onClick={async () => {
+                                    setSavingInterval(true);
+                                    try {
+                                        await saveWebhookConfig({ interval_seconds: pollerInterval });
+                                        message.success("间隔已保存");
+                                    } catch (err: any) {
+                                        message.error(err?.message || "保存间隔失败");
+                                    } finally {
+                                        setSavingInterval(false);
+                                    }
+                                }}>
+                                    保存间隔
+                                </Button>
+                            </div>
+                            <div className="flex items-center gap-4">
+                                <span className="text-sm text-stone-500">冷却时间(分钟):</span>
+                                <InputNumber min={0} value={cooldownMinutes} onChange={(v) => setCooldownMinutes(v ?? 10)} disabled={savingCooldown} />
+                                <Button loading={savingCooldown} onClick={async () => {
+                                    setSavingCooldown(true);
+                                    try {
+                                        // Save cooldown to each platform's config
+                                        for (const platform of WEBHOOK_PLATFORMS) {
+                                            await saveWebhookConfig({ platform, cooldown_minutes: cooldownMinutes });
+                                        }
+                                        message.success("冷却时间已保存");
+                                    } catch (err: any) {
+                                        message.error(err?.message || "保存冷却时间失败");
+                                    } finally {
+                                        setSavingCooldown(false);
+                                    }
+                                }}>
+                                    保存冷却
+                                </Button>
+                            </div>
+                        </div>
+                    </Card>
+                    {/* Card 3: 推送日志 */}
+                    <Card
+                        title="推送日志"
+                        extra={
+                            <Button icon={<RefreshCw className="size-4" />} onClick={fetchWebhookLogs} loading={loadingLogs}>
+                                刷新
+                            </Button>
+                        }
+                    >
+                        <Table
+                            rowKey="id"
+                            dataSource={webhookLogs}
+                            columns={[
+                                { title: "时间", dataIndex: "created_at", key: "created_at", width: 170, render: (val: string) => val ? new Date(val).toLocaleString("zh-CN") : "-" },
+                                { title: "平台", dataIndex: "platform", key: "platform", width: 100, render: (p: string) => PLATFORM_LABELS[p] || p },
+                                { title: "模型", dataIndex: "model_name", key: "model_name", width: 150, ellipsis: true },
+                                {
+                                    title: "状态",
+                                    dataIndex: "status",
+                                    key: "status",
+                                    width: 80,
+                                    render: (status: string) => {
+                                        const labels: Record<string, string> = { down: "宕机", up: "恢复" };
+                                        return <Tag color={status === "down" ? "red" : "green"}>{labels[status] || status}</Tag>;
+                                    },
+                                },
+                                { title: "消息内容", dataIndex: "message", key: "message", width: 300, ellipsis: true },
+                                {
+                                    title: "推送结果",
+                                    key: "success",
+                                    width: 100,
+                                    render: (_, record) => <Tag color={record.success ? "green" : "red"}>{record.success ? "成功" : "失败"}</Tag>,
+                                },
+                            ]}
+                            loading={loadingLogs}
+                            pagination={false}
+                            scroll={{ x: 1000 }}
+                        />
+                    </Card>
+                </Tabs.TabPane>
             </Tabs>
 
             {/* Channel Create/Edit Modal */}
@@ -1064,6 +1405,45 @@ export default function AdminApiConfigPage() {
                                     <span className="text-stone-500 font-medium">响应: </span>
                                     <pre className="mt-1 whitespace-pre-wrap text-xs font-mono bg-stone-100 dark:bg-stone-800 p-2 rounded max-h-60 overflow-auto">{testResult.response_body}</pre>
                                 </div>
+                            )}
+                        </div>
+                    )}
+                </div>
+            </Modal>
+
+            {/* Webhook Test Modal */}
+            <Modal
+                title={`测试推送 - ${PLATFORM_LABELS[webhookTestPlatform] || webhookTestPlatform}`}
+                open={webhookTestModalOpen}
+                onCancel={() => setWebhookTestModalOpen(false)}
+                footer={
+                    <Space>
+                        <Button onClick={() => setWebhookTestModalOpen(false)}>关闭</Button>
+                        <Button type="primary" loading={webhookTestSending} onClick={handleTestSend}>
+                            发送测试
+                        </Button>
+                    </Space>
+                }
+            >
+                <div className="space-y-4">
+                    <div>
+                        <label className="text-sm text-stone-500 mb-1 block">测试消息</label>
+                        <Input.TextArea
+                            rows={4}
+                            value={webhookTestMessage}
+                            onChange={(e) => setWebhookTestMessage(e.target.value)}
+                            placeholder="输入要发送的测试消息内容"
+                        />
+                    </div>
+                    {webhookTestSendResult && (
+                        <div className={`rounded-lg border p-3 text-sm ${webhookTestSendResult.success ? "border-green-200 bg-green-50 dark:border-green-800 dark:bg-green-950" : "border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-950"}`}>
+                            <Tag color={webhookTestSendResult.success ? "green" : "red"}>
+                                {webhookTestSendResult.success ? "发送成功" : "发送失败"}
+                            </Tag>
+                            {webhookTestSendResult.error && (
+                                <pre className="mt-2 whitespace-pre-wrap text-xs font-mono bg-stone-100 dark:bg-stone-800 p-2 rounded max-h-40 overflow-auto">
+                                    {webhookTestSendResult.error}
+                                </pre>
                             )}
                         </div>
                     )}

@@ -8,7 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func Setup(r *gin.Engine, authService *service.AuthService, authHandler *handler.AuthHandler, adminHandler *handler.AdminHandler, userHandler *handler.UserHandler, creditHandler *handler.CreditHandler, generateHandler *handler.GenerateHandler, apiConfigHandler *handler.ApiConfigHandler, proxyHandler *handler.ProxyHandler, canvasHandler *handler.CanvasHandler, generationRecordHandler *handler.GenerationRecordHandler, rechargeHandler *handler.RechargeHandler, captchaHandler *handler.CaptchaHandler, tempMediaHandler *handler.TempMediaHandler, channelStatusHandler *handler.ChannelStatusHandler, channelHandler *handler.ChannelHandler, channelModelHandler *handler.ChannelModelHandler, metricsHandler *handler.MetricsHandler) {
+func Setup(r *gin.Engine, authService *service.AuthService, authHandler *handler.AuthHandler, adminHandler *handler.AdminHandler, userHandler *handler.UserHandler, creditHandler *handler.CreditHandler, generateHandler *handler.GenerateHandler, apiConfigHandler *handler.ApiConfigHandler, proxyHandler *handler.ProxyHandler, canvasHandler *handler.CanvasHandler, generationRecordHandler *handler.GenerationRecordHandler, rechargeHandler *handler.RechargeHandler, captchaHandler *handler.CaptchaHandler, tempMediaHandler *handler.TempMediaHandler, channelStatusHandler *handler.ChannelStatusHandler, channelHandler *handler.ChannelHandler, channelModelHandler *handler.ChannelModelHandler, metricsHandler *handler.MetricsHandler, webhookHandler *handler.WebhookHandler) {
 	r.Use(middleware.Cors())
 
 	api := r.Group("/backend-api")
@@ -95,6 +95,14 @@ func Setup(r *gin.Engine, authService *service.AuthService, authHandler *handler
 			superAdmin.PUT("/admin/channels/:id/models/:modelId", channelModelHandler.Update)
 			superAdmin.GET("/admin/metrics-config", metricsHandler.GetConfig)
 			superAdmin.POST("/admin/metrics-config", metricsHandler.SaveConfig)
+
+			superAdmin.GET("/admin/webhook/config", webhookHandler.ListConfig)
+			superAdmin.PUT("/admin/webhook/config", webhookHandler.SaveConfig)
+			superAdmin.POST("/admin/webhook/test", webhookHandler.TestSend)
+			superAdmin.GET("/admin/webhook/logs", webhookHandler.ListLogs)
+			superAdmin.POST("/admin/webhook/poller/start", webhookHandler.StartPoller)
+			superAdmin.POST("/admin/webhook/poller/stop", webhookHandler.StopPoller)
+			superAdmin.GET("/admin/webhook/poller/status", webhookHandler.PollerStatus)
 		}
 	}
 }

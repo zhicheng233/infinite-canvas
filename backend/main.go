@@ -37,6 +37,8 @@ func main() {
 		&model.RechargeOrder{},
 		&model.CanvasProject{},
 		&model.ModelCallLog{},
+		&model.WebhookConfig{},
+		&model.WebhookLog{},
 	); err != nil {
 		log.Fatalf("failed to migrate: %v", err)
 	}
@@ -52,6 +54,7 @@ func main() {
 	channelRepo := repository.NewChannelRepo(db)
 	channelModelRepo := repository.NewChannelModelRepo(db)
 	metricsConfigRepo := repository.NewMetricsConfigRepo(db)
+	webhookRepo := repository.NewWebhookRepo(db)
 
 	captchaService := service.NewCaptchaService()
 
@@ -69,6 +72,7 @@ func main() {
 	generateService := service.NewGenerateService(apiConfigRepo, creditService, creditRepo, modelCallLogService, cfg.ApiKeyEncryptKey, onDemandRepairService, channelService, channelRepo, channelModelRepo)
 	tempMediaService := service.NewTempMediaService(cfg)
 	channelStatusService := service.NewChannelStatusService(modelCallLogRepo, apiConfigRepo)
+	webhookPoller := service.NewWebhookPoller(webhookRepo, channelRepo, channelModelRepo, db, nil)
 	paymentGateway := service.NewMockPaymentGateway(rechargeRepo, creditService)
 
 	authHandler := handler.NewAuthHandler(authService, userService)
@@ -87,9 +91,10 @@ func main() {
 	channelHandler := handler.NewChannelHandler(channelService)
 	channelModelHandler := handler.NewChannelModelHandler(channelModelService)
 	metricsHandler := handler.NewMetricsHandler(metricsService)
+	webhookHandler := handler.NewWebhookHandler(webhookRepo, webhookPoller, nil)
 
 	r := gin.Default()
-	router.Setup(r, authService, authHandler, adminHandler, userHandler, creditHandler, generateHandler, apiConfigHandler, proxyHandler, canvasHandler, generationRecordHandler, rechargeHandler, captchaHandler, tempMediaHandler, channelStatusHandler, channelHandler, channelModelHandler, metricsHandler)
+	router.Setup(r, authService, authHandler, adminHandler, userHandler, creditHandler, generateHandler, apiConfigHandler, proxyHandler, canvasHandler, generationRecordHandler, rechargeHandler, captchaHandler, tempMediaHandler, channelStatusHandler, channelHandler, channelModelHandler, metricsHandler, webhookHandler)
 
 	log.Printf("Server starting on port %s", cfg.Port)
 	if err := r.Run(":" + cfg.Port); err != nil {

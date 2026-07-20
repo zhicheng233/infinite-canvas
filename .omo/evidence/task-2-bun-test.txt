@@ -1,0 +1,21 @@
+bun test v1.3.13 (bf2e2cec)
+
+src\stores\use-config-store.test.ts:
+(pass) canonical identity keeps same raw model names distinct
+(pass) four capability selections remain independent
+(pass) rates sort descending with numeric zero before unavailable metrics
+(pass) persisted state excludes catalogs, identity, and API keys
+[zustand persist middleware] Unable to update item 'infinite-canvas:ai_config_store', the given storage is currently unavailable.
+(pass) authenticated stale identity fails closed and valid request includes both IDs
+(pass) buildChannelModelOptions pricing-gated filter > excludes models without pricing records
+(pass) buildChannelModelOptions pricing-gated filter > includes model after pricing record is added
+(pass) buildChannelModelOptions pricing-gated filter > excludes model after pricing record is removed
+
+src\services\api\webhook.test.ts:
+(pass) webhook > test framework works
+(pass) webhook > apiClient is defined
+
+ 10 pass
+ 0 fail
+ 29 expect() calls
+Ran 10 tests across 2 files. [144.00ms]
