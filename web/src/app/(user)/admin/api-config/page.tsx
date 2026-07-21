@@ -351,7 +351,7 @@ export default function AdminApiConfigPage() {
                 const payload: UpdateChannelInput = {
                     name: values.name,
                     base_url: values.base_url,
-                    new_api_channel_id: values.new_api_channel_id ? Number(values.new_api_channel_id) : null,
+                    new_api_channel_id: values.new_api_channel_id != null ? Number(values.new_api_channel_id) : null,
                     metrics_base_url: values.metrics_base_url || undefined,
                     enabled: values.enabled,
                 };
@@ -366,7 +366,7 @@ export default function AdminApiConfigPage() {
                     base_url: values.base_url,
                     api_key: values.api_key || "",
                     enabled: values.enabled,
-                    new_api_channel_id: values.new_api_channel_id ? Number(values.new_api_channel_id) : null,
+                    new_api_channel_id: values.new_api_channel_id != null ? Number(values.new_api_channel_id) : null,
                     metrics_base_url: values.metrics_base_url || undefined,
                 };
                 await createChannel(payload);
