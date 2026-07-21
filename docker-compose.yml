@@ -5,42 +5,48 @@ services:
       dockerfile: Dockerfile
       args:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-/backend-api}
-    image: infinite-canvas-app:latest
-    container_name: infinite-canvas
+    container_name: infinite-canvas-next
     environment:
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-/backend-api}
     ports:
-      - "3001:3000"
+      - "2001:3000"
     restart: unless-stopped
+    networks:
+      - ic-next-network
 
   mysql:
     image: mysql:8.4
-    container_name: ic-mysql
+    container_name: ic-mysql-next
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
       MYSQL_DATABASE: ${MYSQL_DATABASE:-infinite_canvas}
     volumes:
-      - mysql_data:/var/lib/mysql
+      - mysql_data_next:/var/lib/mysql
+    networks:
+      - ic-next-network
     restart: unless-stopped
 
   redis:
     image: redis:7-alpine
-    container_name: ic-redis
+    container_name: ic-redis-next
     restart: unless-stopped
-
+    networks:
+      - ic-next-network
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: ic-backend
+    container_name: ic-backend-next
     ports:
-      - "127.0.0.1:18080:18080"
+      - "28080:18080"
     depends_on:
       - mysql
       - redis
     restart: unless-stopped
     volumes:
-      - backend_tmp_media:/app/tmp-media
+      - backend_tmp_media_next:/app/tmp-media
+    networks:
+      - ic-next-network
     environment:
       PORT: "18080"
       DB_DSN: root:${MYSQL_ROOT_PASSWORD}@tcp(mysql:3306)/${MYSQL_DATABASE:-infinite_canvas}?charset=utf8mb4&parseTime=True&loc=Local
@@ -59,5 +65,9 @@ services:
       ON_DEMAND_REPAIR_TIMEOUT_SECONDS: ${ON_DEMAND_REPAIR_TIMEOUT_SECONDS:-420}
 
 volumes:
-  mysql_data:
-  backend_tmp_media:
+  mysql_data_next:
+  backend_tmp_media_next:
+
+networks:
+  ic-next-network:
+    driver: bridge
