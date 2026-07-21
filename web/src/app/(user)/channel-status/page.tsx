@@ -251,7 +251,12 @@ function CountSummary({ requestCount, successCount }: { requestCount: number; su
 
 function RateValue({ rate, status, prominent = false }: { rate: number | null; status: string; prominent?: boolean }) {
     return (
-        <span className={`${prominent ? "text-lg" : "text-sm"} whitespace-nowrap font-semibold ${rate === null ? "text-stone-400 dark:text-stone-500" : "text-stone-950 dark:text-stone-100"}`}>
+        <span
+            className={`${prominent ? "text-lg" : "text-sm"} whitespace-nowrap font-semibold ${
+                rate === null ? "text-stone-400 dark:text-stone-500" : ""
+            }`}
+            style={rate !== null ? { color: `hsl(${rate * 1.2}, 75%, 40%)` } : undefined}
+        >
             {rate === null ? unavailableRateText(status) : `${rate}%`}
         </span>
     );

@@ -50,7 +50,7 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
             <SelectTrigger
                 className={cn(
                     "canvas-composer-model-picker h-8 w-fit max-w-full gap-2 rounded-full border border-input bg-transparent px-3 text-sm font-normal shadow-sm transition-colors",
-                    fullWidth ? "w-full min-w-0 justify-start" : "min-w-[9rem] justify-start",
+                    fullWidth ? "w-full min-w-0 justify-start" : "min-w-[11rem] justify-start",
                     "data-[state=open]:border-ring data-[state=open]:ring-2 data-[state=open]:ring-ring/20",
                     className,
                 )}
@@ -125,7 +125,13 @@ function ModelLabel({ config, model, capability }: { config: AiConfig; model: st
         <span className="flex min-w-0 items-center gap-2" data-channel-model-id={option?.channelModelId}>
             <ModelIcon model={model} />
             <span className="min-w-0 flex-1 truncate">{modelOptionLabel(config, model)}</span>
-            {option ? <span className="shrink-0 text-xs opacity-55">{option.successRate === null ? rateUnavailableLabel(option.metricsStatus) : `${option.successRate}%`}</span> : null}
+            {option && option.successRate !== null ? (
+                <span className="shrink-0 text-xs font-medium" style={{ color: `hsl(${option.successRate * 1.2}, 80%, 45%)` }}>
+                    {option.successRate}%
+                </span>
+            ) : option ? (
+                <span className="shrink-0 text-xs opacity-55">{rateUnavailableLabel(option.metricsStatus)}</span>
+            ) : null}
         </span>
     );
 }
