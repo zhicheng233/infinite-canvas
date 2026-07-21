@@ -1,8 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Alert, App, Button, Card, Checkbox, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Switch, Tabs, Popover } from "antd";
-import { Settings, Plus, RefreshCw, Lock, X, Play } from "lucide-react";
+import { Alert, App, Button, Card, Checkbox, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Switch, Tabs, Popover, Tooltip } from "antd";
+import { Settings, Plus, RefreshCw, Lock, X, Play, Save } from "lucide-react";
 import type { ColumnsType } from "antd/es/table";
 
 import { useUserStore } from "@/stores/use-user-store";
@@ -135,6 +135,7 @@ export default function AdminApiConfigPage() {
     // Capability editing state
     const [modelCapabilities, setModelCapabilities] = useState<Record<number, string[]>>({});
     const [savingCapabilities, setSavingCapabilities] = useState<Record<number, boolean>>({});
+    const [savingAll, setSavingAll] = useState(false);
 
     // Pricing editing state
     const [modelPricing, setModelPricing] = useState<Record<number, { unit_type: string; pricing_mode: string; credits_per_unit: number; pricing_rule: string }>>({});
@@ -432,6 +433,49 @@ export default function AdminApiConfigPage() {
         } finally {
             setSavingCapabilities((prev) => ({ ...prev, [model.id]: false }));
         }
+    };
+
+    const handleAutoDetect = () => {
+        setModelCapabilities((prev) => {
+            const next: Record<number, string[]> = {};
+            for (const model of models) {
+                const name = model.model_name.toLowerCase();
+                const existing = prev[model.id] || [...model.capabilities];
+                const existingText = existing.filter((c) => c === "text");
+
+                if (name.includes("video") || name.includes("sora") || name.includes("omni")) {
+                    // Video model: video + audio + preserve existing text
+                    next[model.id] = ["video", "audio", ...existingText];
+                } else if (name.includes("image") || name.includes("seedance")) {
+                    // Image model: image + preserve existing text
+                    next[model.id] = ["image", ...existingText];
+                } else {
+                    // No match: keep existing
+                    next[model.id] = existing;
+                }
+            }
+            return next;
+        });
+    };
+
+    const handleSaveAll = async () => {
+        if (!selectedChannel || models.length === 0) return;
+        setSavingAll(true);
+        const results = await Promise.allSettled(
+            models.map((model) => {
+                const caps = modelCapabilities[model.id] || model.capabilities;
+                return updateChannelModel(selectedChannel.id, model.id, { capabilities: caps });
+            })
+        );
+        const succeeded = results.filter((r) => r.status === "fulfilled").length;
+        const failed = results.filter((r) => r.status === "rejected").length;
+        if (failed === 0) {
+            message.success(`已保存全部 ${succeeded} 个模型`);
+        } else {
+            message.warning(`成功保存 ${succeeded}/${models.length} 个模型，${failed} 个失败`);
+        }
+        await fetchModels(selectedChannel.id);
+        setSavingAll(false);
     };
 
     // -- Pricing editing helpers and handlers --
@@ -1271,6 +1315,22 @@ export default function AdminApiConfigPage() {
                                 disabled={!isSuperAdmin}
                             >
                                 同步模型
+                            </Button>
+                            <Tooltip title="根据模型名称自动推断能力（匹配 video/sora/omni → 视频+音频，image/seedance → 图片）">
+                                <Button
+                                    onClick={handleAutoDetect}
+                                    disabled={!isSuperAdmin || models.length === 0}
+                                >
+                                    自动检测
+                                </Button>
+                            </Tooltip>
+                            <Button
+                                icon={<Save className="size-4" />}
+                                onClick={handleSaveAll}
+                                disabled={!isSuperAdmin || models.length === 0}
+                                loading={savingAll}
+                            >
+                                保存全部
                             </Button>
                             <Button icon={<X className="size-4" />} onClick={closePanel}>
                                 关闭
