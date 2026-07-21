@@ -185,7 +185,7 @@ function ChannelCard({ channel }: { channel: ChannelMetrics }) {
                     ) : (
                         <div className="grid gap-2 md:grid-cols-2">
                             {channel.models.map((model) => (
-                                <ModelRow key={model.channel_model_id} model={model} />
+                                <ModelRow key={model.channel_model_id} model={model} newApiChannelId={channel.new_api_channel_id} />
                             ))}
                         </div>
                     )}
@@ -195,7 +195,7 @@ function ChannelCard({ channel }: { channel: ChannelMetrics }) {
     );
 }
 
-function ModelRow({ model }: { model: ModelMetrics }) {
+function ModelRow({ model, newApiChannelId }: { model: ModelMetrics; newApiChannelId?: number | null }) {
     return (
         <div className="flex items-center justify-between gap-3 rounded-xl border border-stone-200 px-3 py-3 dark:border-stone-800">
             <div className="min-w-0">
@@ -205,15 +205,19 @@ function ModelRow({ model }: { model: ModelMetrics }) {
                     <span>
                         请求 {model.request_count} · 成功 {model.success_count}
                     </span>
-                    <span>
-                        平均延迟：{model.avg_latency_ms != null ? `${(model.avg_latency_ms / 1000).toFixed(1)}s` : "—"}
-                    </span>
-                    <span>
-                        TPS：{model.avg_tps != null ? model.avg_tps.toFixed(1) : "—"}
-                    </span>
-                    <span>
-                        近期成功率：{(model.recent_success_rates?.length ?? 0) > 0 ? model.recent_success_rates!.join(", ") : "—"}
-                    </span>
+                    {newApiChannelId === 0 && (
+                        <>
+                            <span>
+                                平均延迟：{model.avg_latency_ms != null ? `${(model.avg_latency_ms / 1000).toFixed(1)}s` : "—"}
+                            </span>
+                            <span>
+                                TPS：{model.avg_tps != null ? model.avg_tps.toFixed(1) : "—"}
+                            </span>
+                            <span>
+                                近期成功率：{(model.recent_success_rates?.length ?? 0) > 0 ? model.recent_success_rates!.join(", ") : "—"}
+                            </span>
+                        </>
+                    )}
                 </div>
             </div>
             <RateValue rate={model.success_rate} status={model.status} />
