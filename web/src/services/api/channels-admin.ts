@@ -71,3 +71,10 @@ export async function updateChannel(channelId: number, input: UpdateChannelInput
 export async function disableChannel(channelId: number): Promise<void> {
     await apiClient.post(`/admin/channels/${channelId}/disable`);
 }
+
+/**
+ * SuperAdmin: Enable a disabled channel.
+ */
+export async function enableChannel(channelId: number): Promise<void> {
+    await apiClient.post(`/admin/channels/${channelId}/enable`);
+}

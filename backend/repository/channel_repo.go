@@ -41,3 +41,7 @@ func (r *ChannelRepo) ListEnabled() ([]model.Channel, error) {
 func (r *ChannelRepo) Disable(id uint) error {
 	return r.db.Model(&model.Channel{}).Where("id = ?", id).Update("enabled", false).Error
 }
+
+func (r *ChannelRepo) Enable(id uint) error {
+	return r.db.Model(&model.Channel{}).Where("id = ?", id).Update("enabled", true).Error
+}

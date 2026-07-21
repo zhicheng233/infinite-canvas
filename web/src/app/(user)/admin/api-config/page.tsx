@@ -6,7 +6,7 @@ import { Settings, Plus, RefreshCw, Lock, X, Play, Save } from "lucide-react";
 import type { ColumnsType } from "antd/es/table";
 
 import { useUserStore } from "@/stores/use-user-store";
-import { listAllChannels, createChannel, updateChannel, disableChannel, type ChannelAdminInfo, type SaveChannelInput, type UpdateChannelInput } from "@/services/api/channels-admin";
+import { listAllChannels, createChannel, updateChannel, disableChannel, enableChannel, type ChannelAdminInfo, type SaveChannelInput, type UpdateChannelInput } from "@/services/api/channels-admin";
 import { listChannelModelsAdmin, syncChannelModels, updateChannelModel, enableChannelModel, disableChannelModel } from "@/services/api/channel-models-admin";
 
 import { type ChannelModelInfo } from "@/services/api/channel";
@@ -296,7 +296,7 @@ export default function AdminApiConfigPage() {
     const handleToggleChannel = async (record: ChannelAdminInfo, checked: boolean) => {
         try {
             if (checked) {
-                await updateChannel(record.id, { enabled: true });
+                await enableChannel(record.id);
                 message.success(`已启用渠道 "${record.name}"`);
             } else {
                 await disableChannel(record.id);

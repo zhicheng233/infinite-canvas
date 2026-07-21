@@ -90,6 +90,7 @@ func Setup(r *gin.Engine, authService *service.AuthService, authHandler *handler
 			superAdmin.POST("/admin/channels", channelHandler.Create)
 			superAdmin.PUT("/admin/channels/:id", channelHandler.Update)
 			superAdmin.POST("/admin/channels/:id/disable", channelHandler.Disable)
+			superAdmin.POST("/admin/channels/:id/enable", channelHandler.Enable)
 			superAdmin.GET("/admin/channels/:id/models", channelModelHandler.ListAdmin)
 			superAdmin.POST("/admin/channels/:id/models/sync", channelModelHandler.Sync)
 			superAdmin.PUT("/admin/channels/:id/models/:modelId", channelModelHandler.Update)

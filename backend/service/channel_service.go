@@ -94,6 +94,10 @@ func (s *ChannelService) Disable(id uint) error {
 	return s.repo.Disable(id)
 }
 
+func (s *ChannelService) Enable(id uint) error {
+	return s.repo.Enable(id)
+}
+
 func (s *ChannelService) ListAll() ([]model.ChannelAdminInfo, error) {
 	channels, err := s.repo.ListAll()
 	if err != nil {
