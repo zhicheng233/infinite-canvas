@@ -14,6 +14,9 @@ export type ModelMetrics = {
     success_count: number;
     success_rate: number | null;
     status: string;
+    avg_latency_ms?: number | null;
+    avg_tps?: number | null;
+    recent_success_rates?: number[];
 };
 
 /**

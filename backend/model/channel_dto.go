@@ -8,6 +8,7 @@ type ChannelInfo struct {
 	Name            string     `json:"name"`
 	Enabled         bool       `json:"enabled"`
 	NewApiChannelID *int       `json:"new_api_channel_id,omitempty"`
+	MetricsBaseUrl  *string    `json:"metrics_base_url,omitempty"`
 	SyncStatus      string     `json:"sync_status"`
 	SyncError       string     `json:"sync_error,omitempty"`
 	SyncedAt        *time.Time `json:"synced_at,omitempty"`
@@ -27,6 +28,7 @@ type SaveChannelInput struct {
 	ApiKey          string `json:"api_key"` // empty means "keep existing"
 	Enabled         *bool  `json:"enabled,omitempty"`
 	NewApiChannelID *int   `json:"new_api_channel_id,omitempty"`
+	MetricsBaseUrl  *string `json:"metrics_base_url,omitempty"`
 }
 
 // ChannelModelInfo is a single model row (no key, no BaseUrl).
@@ -73,7 +75,10 @@ type MetricsModelRate struct {
 	RequestCount   int      `json:"request_count"`
 	SuccessCount   int      `json:"success_count"`
 	SuccessRate    *float64 `json:"success_rate"` // nil = unavailable, 0.0 = real zero
-	Status         string   `json:"status"`
+	Status             string   `json:"status"`
+	AvgLatencyMs       *float64 `json:"avg_latency_ms,omitempty"`
+	AvgTps             *float64 `json:"avg_tps,omitempty"`
+	RecentSuccessRates []int    `json:"recent_success_rates,omitempty"`
 }
 
 // MetricsChannelRate is one channel's aggregated metrics with nested models.
@@ -121,6 +126,26 @@ type NewApiModelMetrics struct {
 	RequestCount int     `json:"request_count"`
 	SuccessCount int     `json:"success_count"`
 	SuccessRate  float64 `json:"success_rate"`
+}
+
+// NewApiSummaryPayload wraps the summary (old New-API) metrics response.
+type NewApiSummaryPayload struct {
+	Success bool              `json:"success"`
+	Data    NewApiSummaryData `json:"data"`
+}
+
+// NewApiSummaryData holds the flat model list from the summary endpoint.
+type NewApiSummaryData struct {
+	Models []NewApiSummaryModelMetrics `json:"models"`
+}
+
+// NewApiSummaryModelMetrics represents per-model global metrics from summary.
+type NewApiSummaryModelMetrics struct {
+	ModelName          string  `json:"model_name"`
+	AvgLatencyMs       float64 `json:"avg_latency_ms"`
+	SuccessRate        float64 `json:"success_rate"`
+	AvgTps             float64 `json:"avg_tps"`
+	RecentSuccessRates []int   `json:"recent_success_rates"`
 }
 
 // MetricsURLConfig is the SuperAdmin-managed new-api metrics configuration.

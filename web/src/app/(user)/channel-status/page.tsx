@@ -205,6 +205,15 @@ function ModelRow({ model }: { model: ModelMetrics }) {
                     <span>
                         请求 {model.request_count} · 成功 {model.success_count}
                     </span>
+                    <span>
+                        平均延迟：{model.avg_latency_ms != null ? `${(model.avg_latency_ms / 1000).toFixed(1)}s` : "—"}
+                    </span>
+                    <span>
+                        TPS：{model.avg_tps != null ? model.avg_tps.toFixed(1) : "—"}
+                    </span>
+                    <span>
+                        近期成功率：{(model.recent_success_rates?.length ?? 0) > 0 ? model.recent_success_rates!.join(", ") : "—"}
+                    </span>
                 </div>
             </div>
             <RateValue rate={model.success_rate} status={model.status} />

@@ -9,6 +9,7 @@ export type ChannelInfo = {
     name: string;
     enabled: boolean;
     new_api_channel_id?: number | null;
+    metrics_base_url?: string | null;
     sync_status: string;
     sync_error?: string;
     synced_at?: string | null;

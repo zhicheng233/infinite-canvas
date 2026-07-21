@@ -88,29 +88,72 @@ func (s *MetricsService) Read(hoursInput int) (*model.MetricsResponse, error) {
 		UpdatedAt: time.Now(),
 	}
 
-	cfg, err := s.configRepo.Get()
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			response.Error = "metrics base url is not configured"
-			return &response, nil
+	// Separate channels by type
+	var idZeroChannels, idOtherChannels []model.Channel
+	for _, ch := range channels {
+		if ch.NewApiChannelID != nil && *ch.NewApiChannelID == 0 {
+			idZeroChannels = append(idZeroChannels, ch)
+		} else {
+			idOtherChannels = append(idOtherChannels, ch)
 		}
-		return nil, err
-	}
-	requestURL, err := buildMetricsRequestURL(cfg.MetricsBaseURL, hours)
-	if err != nil {
-		response.Status = MetricsStatusError
-		response.Error = err.Error()
-		return &response, nil
 	}
 
-	payload, err := s.fetchMetrics(requestURL)
-	if err != nil {
-		response.Status = MetricsStatusError
-		response.Error = err.Error()
-		return &response, nil
+	var channelRates []model.MetricsChannelRate
+
+	// Process ID≠0 channels (use channels endpoint)
+	if len(idOtherChannels) > 0 {
+		// Group by metrics base URL for efficient requests
+		urlGroups := make(map[string][]model.Channel)
+		for _, ch := range idOtherChannels {
+			baseURL := resolveMetricsBaseURL(ch)
+			urlGroups[baseURL] = append(urlGroups[baseURL], ch)
+		}
+		for baseURL, group := range urlGroups {
+			requestURL, err := buildMetricsRequestURL(baseURL, hours, "/api/perf-metrics/channels")
+			if err != nil {
+				for _, ch := range group {
+					channelRates = append(channelRates, model.MetricsChannelRate{
+						ChannelID: ch.ID, ChannelName: ch.Name,
+						NewApiChannelID: ch.NewApiChannelID, Status: MetricsStatusError,
+						Models: s.mapModelMetrics(ch.ID, nil, MetricsStatusError),
+					})
+				}
+				continue
+			}
+			payload, err := s.fetchMetrics(requestURL)
+			if err != nil {
+				for _, ch := range group {
+					channelRates = append(channelRates, model.MetricsChannelRate{
+						ChannelID: ch.ID, ChannelName: ch.Name,
+						NewApiChannelID: ch.NewApiChannelID, Status: MetricsStatusError,
+						Models: s.mapModelMetrics(ch.ID, nil, MetricsStatusError),
+					})
+				}
+				continue
+			}
+			channelRates = append(channelRates, s.mapMetrics(group, payload)...)
+		}
 	}
-	response.Channels = s.mapMetrics(channels, payload)
-	response.Status = MetricsStatusOK
+
+	// Process ID=0 channels (use summary endpoint)
+	for _, ch := range idZeroChannels {
+		baseURL := resolveMetricsBaseURL(ch)
+		payload, err := s.fetchSummaryMetrics(baseURL, hours)
+		if err != nil {
+			channelRates = append(channelRates, model.MetricsChannelRate{
+				ChannelID: ch.ID, ChannelName: ch.Name,
+				NewApiChannelID: ch.NewApiChannelID, Status: MetricsStatusError,
+				Models: s.mapModelMetrics(ch.ID, nil, MetricsStatusError),
+			})
+			continue
+		}
+		channelRates = append(channelRates, s.mapSummaryMetrics(ch, payload))
+	}
+
+	if len(channelRates) > 0 {
+		response.Channels = channelRates
+		response.Status = MetricsStatusOK
+	}
 	return &response, nil
 }
 
@@ -134,6 +177,34 @@ func (s *MetricsService) fetchMetrics(requestURL string) (*model.NewApiMetricsPa
 	}
 	if !payload.Success {
 		return nil, errors.New("metrics upstream returned unsuccessful payload")
+	}
+	return &payload, nil
+}
+
+func (s *MetricsService) fetchSummaryMetrics(baseURL string, hours int) (*model.NewApiSummaryPayload, error) {
+	requestURL, err := buildMetricsRequestURL(baseURL, hours, "/api/perf-metrics/summary")
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequest(http.MethodGet, requestURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("metrics upstream returned HTTP %d", resp.StatusCode)
+	}
+	var payload model.NewApiSummaryPayload
+	decoder := json.NewDecoder(resp.Body)
+	if err := decoder.Decode(&payload); err != nil {
+		return nil, err
+	}
+	if !payload.Success {
+		return nil, errors.New("summary metrics upstream returned unsuccessful payload")
 	}
 	return &payload, nil
 }
@@ -207,6 +278,52 @@ func (s *MetricsService) mapModelMetrics(channelID uint, source *model.NewApiCha
 	return items
 }
 
+func (s *MetricsService) mapSummaryMetrics(channel model.Channel, source *model.NewApiSummaryPayload) model.MetricsChannelRate {
+	status := MetricsStatusOK
+	rate := model.MetricsChannelRate{
+		ChannelID:       channel.ID,
+		ChannelName:     channel.Name,
+		NewApiChannelID: channel.NewApiChannelID,
+		Status:          status,
+	}
+
+	models, err := s.modelRepo.ListByChannel(channel.ID, true)
+	if err != nil {
+		return rate
+	}
+
+	byName := map[string]model.NewApiSummaryModelMetrics{}
+	for _, m := range source.Data.Models {
+		byName[m.ModelName] = m
+	}
+
+	var sumSuccessRate float64
+	count := 0
+	items := make([]model.MetricsModelRate, 0, len(models))
+	for _, channelModel := range models {
+		item := model.MetricsModelRate{
+			ChannelModelID: channelModel.ID, ChannelID: channel.ID,
+			ModelName: channelModel.ModelName, Status: MetricsStatusStale,
+		}
+		if sm, ok := byName[channelModel.ModelName]; ok {
+			item.Status = MetricsStatusOK
+			item.SuccessRate = float64Ptr(sm.SuccessRate)
+			item.AvgLatencyMs = &sm.AvgLatencyMs
+			item.AvgTps = &sm.AvgTps
+			item.RecentSuccessRates = sm.RecentSuccessRates
+			sumSuccessRate += sm.SuccessRate
+			count++
+		}
+		items = append(items, item)
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].ModelName < items[j].ModelName })
+	rate.Models = items
+	if count > 0 {
+		rate.SuccessRate = float64Ptr(sumSuccessRate / float64(count))
+	}
+	return rate
+}
+
 func (s *MetricsService) unavailableChannels(channels []model.Channel, status string) []model.MetricsChannelRate {
 	items := make([]model.MetricsChannelRate, 0, len(channels))
 	for i := range channels {
@@ -245,7 +362,14 @@ func normalizeMetricsBaseURL(raw string) (string, error) {
 	return base, nil
 }
 
-func buildMetricsRequestURL(baseURL string, hours int) (string, error) {
+func resolveMetricsBaseURL(channel model.Channel) string {
+	if channel.MetricsBaseUrl != nil && *channel.MetricsBaseUrl != "" {
+		return *channel.MetricsBaseUrl
+	}
+	return strings.TrimRight(channel.BaseUrl, "/") + "/api"
+}
+
+func buildMetricsRequestURL(baseURL string, hours int, endpointPath string) (string, error) {
 	base, err := normalizeMetricsBaseURL(baseURL)
 	if err != nil {
 		return "", err
@@ -256,7 +380,7 @@ func buildMetricsRequestURL(baseURL string, hours int) (string, error) {
 	if strings.HasSuffix(strings.ToLower(base), "/api") {
 		base = strings.TrimSuffix(base, "/api")
 	}
-	endpoint := base + "/api/perf-metrics/channels"
+	endpoint := base + endpointPath
 	parsed, err := url.Parse(endpoint)
 	if err != nil {
 		return "", err

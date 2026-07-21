@@ -44,6 +44,7 @@ func (s *ChannelService) Create(input model.SaveChannelInput) (*model.ChannelAdm
 		ApiKey:          encryptedKey,
 		Enabled:         enabled,
 		NewApiChannelID: input.NewApiChannelID,
+		MetricsBaseUrl:  input.MetricsBaseUrl,
 	}
 	if err := s.repo.Create(channel); err != nil {
 		return nil, err
@@ -70,6 +71,7 @@ func (s *ChannelService) Update(id uint, input model.SaveChannelInput) (*model.C
 		channel.Enabled = *input.Enabled
 	}
 	channel.NewApiChannelID = input.NewApiChannelID
+	channel.MetricsBaseUrl = input.MetricsBaseUrl
 
 	apiKey := strings.TrimSpace(input.ApiKey)
 	if apiKey != "" {
@@ -168,6 +170,7 @@ func channelToInfo(channel *model.Channel) model.ChannelInfo {
 		Name:            channel.Name,
 		Enabled:         channel.Enabled,
 		NewApiChannelID: channel.NewApiChannelID,
+		MetricsBaseUrl:  channel.MetricsBaseUrl,
 		SyncStatus:      channel.SyncStatus,
 		SyncError:       channel.SyncError,
 		SyncedAt:        channel.SyncedAt,

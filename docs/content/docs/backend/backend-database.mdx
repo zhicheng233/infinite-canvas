@@ -78,6 +78,7 @@ description: 当前后端数据库表结构说明
 | enabled | bool | 渠道是否启用，默认 true，带索引 |
 | new_api_channel_id | int | 可为空，对应 new-api 的 channel_id |
 | new_api_channel_id_val | string(100) | new-api 渠道人类可读映射名称 |
+| metrics_base_url | VARCHAR(512) | NULL | 指标服务地址（为空则使用 base_url + /api） |
 | sync_status | string(20) | 模型同步状态：pending/syncing/success/failed |
 | sync_error | string(500) | 最近一次同步错误信息 |
 | synced_at | datetime | 可为空，最近一次成功同步时间 |

@@ -8,7 +8,7 @@ import type { ColumnsType } from "antd/es/table";
 import { useUserStore } from "@/stores/use-user-store";
 import { listAllChannels, createChannel, updateChannel, disableChannel, type ChannelAdminInfo, type SaveChannelInput, type UpdateChannelInput } from "@/services/api/channels-admin";
 import { listChannelModelsAdmin, syncChannelModels, updateChannelModel, enableChannelModel, disableChannelModel } from "@/services/api/channel-models-admin";
-import { getMetricsConfig, updateMetricsConfig, type MetricsConfig } from "@/services/api/metrics-config-admin";
+
 import { type ChannelModelInfo } from "@/services/api/channel";
 import { listPricing, savePricing, comparePricing, type PricingItem } from "@/services/api/pricing";
 import { testApiModel, type ApiModelTestResult } from "@/services/api/api-config";
@@ -127,11 +127,6 @@ export default function AdminApiConfigPage() {
     const [isModelModalOpen, setIsModelModalOpen] = useState(false);
     const [modelForm] = Form.useForm();
 
-    // Metrics Config state
-    const [metricsConfig, setMetricsConfig] = useState<MetricsConfig | null>(null);
-    const [savingMetrics, setSavingMetrics] = useState(false);
-    const [metricsForm] = Form.useForm();
-
     // Capability editing state
     const [modelCapabilities, setModelCapabilities] = useState<Record<number, string[]>>({});
     const [savingCapabilities, setSavingCapabilities] = useState<Record<number, boolean>>({});
@@ -212,18 +207,6 @@ export default function AdminApiConfigPage() {
         }
     };
 
-    const fetchMetrics = async () => {
-        try {
-            const cfg = await getMetricsConfig();
-            setMetricsConfig(cfg);
-            metricsForm.setFieldsValue({
-                metrics_base_url: cfg.metrics_base_url || "",
-            });
-        } catch (err: any) {
-            // advisory
-        }
-    };
-
     const fetchPricing = async () => {
         try {
             const data = await listPricing();
@@ -279,7 +262,6 @@ export default function AdminApiConfigPage() {
 
     useEffect(() => {
         void fetchChannels();
-        void fetchMetrics();
         void fetchWebhookConfigs();
         void fetchPollerStatus();
     }, []);
@@ -352,6 +334,7 @@ export default function AdminApiConfigPage() {
                 base_url: channel.base_url,
                 api_key: "", // Write-only: blank initially
                 new_api_channel_id: channel.new_api_channel_id || undefined,
+                metrics_base_url: channel.metrics_base_url || undefined,
                 enabled: channel.enabled,
             });
         } else {
@@ -369,6 +352,7 @@ export default function AdminApiConfigPage() {
                     name: values.name,
                     base_url: values.base_url,
                     new_api_channel_id: values.new_api_channel_id ? Number(values.new_api_channel_id) : null,
+                    metrics_base_url: values.metrics_base_url || undefined,
                     enabled: values.enabled,
                 };
                 if (values.api_key) {
@@ -383,6 +367,7 @@ export default function AdminApiConfigPage() {
                     api_key: values.api_key || "",
                     enabled: values.enabled,
                     new_api_channel_id: values.new_api_channel_id ? Number(values.new_api_channel_id) : null,
+                    metrics_base_url: values.metrics_base_url || undefined,
                 };
                 await createChannel(payload);
                 message.success("创建渠道成功");
@@ -715,20 +700,6 @@ export default function AdminApiConfigPage() {
         }
     };
 
-    // Save metrics config
-    const handleSaveMetrics = async (values: any) => {
-        setSavingMetrics(true);
-        try {
-            await updateMetricsConfig({ metrics_base_url: values.metrics_base_url });
-            message.success("指标服务配置已更新");
-            void fetchMetrics();
-        } catch (err: any) {
-            message.error(err?.message || "更新失败");
-        } finally {
-            setSavingMetrics(false);
-        }
-    };
-
     // Channel table columns
     const channelColumns: ColumnsType<ChannelAdminInfo> = [
         { title: "ID", dataIndex: "id", key: "id", width: 70 },
@@ -1033,18 +1004,7 @@ export default function AdminApiConfigPage() {
                         <Table rowKey="id" columns={channelColumns} dataSource={channels} loading={loadingChannels} pagination={false} scroll={{ x: 1000 }} />
                     </Card>
                 </Tabs.TabPane>
-                <Tabs.TabPane tab="指标服务配置" key="metrics">
-                    <Card title="接口性能指标服务">
-                        <Form form={metricsForm} layout="vertical" onFinish={handleSaveMetrics}>
-                            <Form.Item name="metrics_base_url" label="性能指标服务 Base URL" rules={[{ required: true, message: "请输入性能指标服务地址" }]} extra="配置 New-API 性能指标适配器的接口地址，例如: http://localhost:8000/api">
-                                <Input placeholder="http://localhost:8000/api" disabled={!isSuperAdmin} />
-                            </Form.Item>
-                            <Button type="primary" htmlType="submit" loading={savingMetrics} disabled={!isSuperAdmin}>
-                                保存配置
-                            </Button>
-                        </Form>
-                    </Card>
-                </Tabs.TabPane>
+
                 <Tabs.TabPane tab="消息推送" key="webhook">
                     {/* Card 1: 平台配置 */}
                     <Card title="平台配置" className="mb-4">
@@ -1293,7 +1253,10 @@ export default function AdminApiConfigPage() {
                         <Input.Password placeholder="sk-..." disabled={!isSuperAdmin} />
                     </Form.Item>
                     <Form.Item name="new_api_channel_id" label="New-API 渠道映射 ID (可选)" extra="对应 New-API 系统中该渠道 of ID，用于拉取指标数据">
-                        <InputNumber min={1} className="w-full" placeholder="例如: 5" disabled={!isSuperAdmin} />
+                        <InputNumber min={0} className="w-full" placeholder="例如: 5" disabled={!isSuperAdmin} />
+                    </Form.Item>
+                    <Form.Item name="metrics_base_url" label="指标服务地址 (可选)" extra="为空则使用渠道 BaseUrl + /api。配置旧版 New-API 时可留空。">
+                        <Input placeholder="https://old-api.example.com" disabled={!isSuperAdmin} />
                     </Form.Item>
                     <Form.Item name="enabled" valuePropName="checked" label="启用渠道">
                         <Switch disabled={!isSuperAdmin} />

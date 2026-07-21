@@ -20,6 +20,7 @@ export type SaveChannelInput = {
     api_key: string;
     enabled?: boolean;
     new_api_channel_id?: number | null;
+    metrics_base_url?: string | null;
 };
 
 /**
