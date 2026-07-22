@@ -72,3 +72,11 @@ func (r *ChannelModelRepo) FindByModelName(modelName string) ([]model.ChannelMod
 	err := r.db.Where("model_name = ?", modelName).Order("channel_id ASC").Find(&items).Error
 	return items, err
 }
+
+// DeleteStaleModels removes channel_models for the given channel that are NOT in keepNames.
+func (r *ChannelModelRepo) DeleteStaleModels(channelID uint, keepNames []string) error {
+	if len(keepNames) == 0 {
+		return nil
+	}
+	return r.db.Where("channel_id = ? AND model_name NOT IN ?", channelID, keepNames).Delete(&model.ChannelModel{}).Error
+}

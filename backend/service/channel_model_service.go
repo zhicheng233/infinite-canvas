@@ -31,6 +31,7 @@ type channelModelRepo interface {
 	ListByChannel(channelID uint, enabledOnly bool) ([]model.ChannelModel, error)
 	Save(item *model.ChannelModel) error
 	Upsert(item *model.ChannelModel) error
+	DeleteStaleModels(channelID uint, keepNames []string) error
 }
 
 type pricingMapReader interface {
@@ -217,6 +218,17 @@ func (s *ChannelModelService) Sync(channelID uint) error {
 			return s.markSyncFailure(channel, err)
 		}
 	}
+
+	discoveredNames := make([]string, 0, len(payload.Data))
+	for _, d := range payload.Data {
+		if name := strings.TrimSpace(d.ID); name != "" {
+			discoveredNames = append(discoveredNames, name)
+		}
+	}
+	if err := s.modelRepo.DeleteStaleModels(channelID, discoveredNames); err != nil {
+		return s.markSyncFailure(channel, err)
+	}
+
 	now := time.Now()
 	channel.SyncStatus = "success"
 	channel.SyncError = ""
