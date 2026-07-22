@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useId, useMemo, useState } from "react";
+import { SwapOutlined } from "@ant-design/icons";
 import { Cpu } from "lucide-react";
 
 import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import { channelModelOptionsByCapability, modelOptionLabel, modelOptionName, selectableModelsByCapability, selectedChannelId, useConfigStore, type AiConfig, type ModelCapability } from "@/stores/use-config-store";
+import { channelModelOptionsByCapability, isMergeModelValue, modelOptionLabel, modelOptionName, selectableModelsByCapability, selectedChannelId, useConfigStore, type AiConfig, type ModelCapability } from "@/stores/use-config-store";
 
 type ModelPickerProps = {
     config: AiConfig;
@@ -90,17 +91,25 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
     const channelId = selectedChannelId(config, capability);
     return (
         <div className={cn("flex min-w-0 gap-2", fullWidth && "w-full")}>
-            <Select value={channelId ? String(channelId) : ""} onValueChange={(value) => selectCapabilityChannel(capability, Number(value) || null)}>
-                <SelectTrigger className="h-8 min-w-[7rem] max-w-[10rem] justify-start rounded-full border border-input bg-transparent px-3 text-sm shadow-sm" title={channels.find((channel) => channel.id === channelId)?.name || "选择渠道"}>
-                    <span className="truncate">{channels.find((channel) => channel.id === channelId)?.name || "选择渠道"}</span>
+            <Select value={channelId != null ? String(channelId) : ""} onValueChange={(value) => selectCapabilityChannel(capability, Number(value) || null)}>
+                <SelectTrigger className="h-8 min-w-[7rem] max-w-[10rem] justify-start rounded-full border border-input bg-transparent px-3 text-sm shadow-sm" title={channelId === 0 ? "Auto（自动路由）" : channels.find((channel) => channel.id === channelId)?.name || "选择渠道"}>
+                    <span className="truncate">{channelId === 0 ? "Auto（自动路由）" : channels.find((channel) => channel.id === channelId)?.name || "选择渠道"}</span>
                 </SelectTrigger>
                 <SelectContent className="z-[1200] max-w-[calc(100vw-24px)]" position="popper" align="start" side="bottom" sideOffset={6}>
                     {channels.length ? (
-                        channels.map((channel) => (
-                            <SelectItem key={channel.id} value={String(channel.id)}>
-                                {channel.name}
+                        <>
+                            <SelectItem key="auto" value="0">
+                                <span className="flex items-center gap-2">
+                                    <SwapOutlined style={{ color: "#1677ff" }} />
+                                    <span>Auto（自动路由）</span>
+                                </span>
                             </SelectItem>
-                        ))
+                            {channels.map((channel) => (
+                                <SelectItem key={channel.id} value={String(channel.id)}>
+                                    {channel.name}
+                                </SelectItem>
+                            ))}
+                        </>
                     ) : (
                         <SelectItem value="__empty_channel__" disabled>
                             暂无可用渠道
@@ -120,12 +129,15 @@ function emptyModelLabel(config: AiConfig, capability?: ModelCapability) {
 }
 
 function ModelLabel({ config, model, capability }: { config: AiConfig; model: string; capability?: ModelCapability }) {
-    const option = capability ? channelModelOptionsByCapability(capability).find((item) => item.value === model) : null;
+    const isMerge = isMergeModelValue(model);
+    const option = capability && !isMerge ? channelModelOptionsByCapability(capability).find((item) => item.value === model) : null;
     return (
         <span className="flex min-w-0 items-center gap-2" data-channel-model-id={option?.channelModelId}>
             <ModelIcon model={model} />
             <span className="min-w-0 flex-1 truncate">{modelOptionLabel(config, model)}</span>
-            {option && option.successRate !== null ? (
+            {isMerge ? (
+                <span className="shrink-0 rounded border border-border/50 px-1.5 py-0.5 text-[10px] font-medium leading-none text-muted-foreground">合并</span>
+            ) : option && option.successRate !== null ? (
                 <span className="shrink-0 text-xs font-medium" style={{ color: `hsl(${option.successRate * 1.2}, 80%, 45%)` }}>
                     {option.successRate}%
                 </span>

@@ -4,6 +4,7 @@ import { useMemo } from "react";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { AutoChannelModelInfo, ChannelInfo, ChannelModelInfo } from "@/services/api/channel";
+import type { MergeGroup } from "@/services/api/merge-groups-admin";
 import type { MetricsResponse, ModelMetrics } from "@/services/api/metrics";
 import type { PricingItem } from "@/services/api/pricing";
 
@@ -151,6 +152,7 @@ type ConfigStore = {
     serverCatalogLoading: boolean;
     serverCatalogError: string | null;
     autoChannelModels: AutoChannelModelInfo[];
+    serverMergeGroups: Record<number, MergeGroup[]>;
     isConfigOpen: boolean;
     shouldPromptContinue: boolean;
     updateConfig: <K extends keyof AiConfig>(key: K, value: AiConfig[K]) => void;
@@ -173,6 +175,7 @@ type ConfigStore = {
     }) => void;
     applyServerChannelCatalog: (channels: ChannelInfo[], channelModels: Record<number, ChannelModelInfo[]>) => void;
     applyAutoChannelModels: (models: AutoChannelModelInfo[]) => void;
+    applyServerMergeGroups: (channelId: number, groups: MergeGroup[]) => void;
     selectCapabilityChannel: (capability: ModelCapability, channelId: number | null) => void;
     openConfigDialog: (shouldPromptContinue?: boolean) => void;
     setConfigDialogOpen: (isOpen: boolean) => void;
@@ -250,9 +253,13 @@ export function selectedChannelId(config: AiConfig, capability: ModelCapability)
 }
 
 export function selectedChannelIdentityForModel(config: AiConfig, value: string): { channelId: number; channelModelId: number } | null {
+    const mergeParsed = parseMergeModelValue(value);
+    if (mergeParsed) return { channelId: mergeParsed.channelId, channelModelId: 0 };
+    const decoded = decodeChannelModel(value);
+    if (decoded && decoded.channelId === "0") return { channelId: 0, channelModelId: 0 };
     const selectedModel: ServerChannelModel | null = config.channelModelId ? findChannelModelById(config.channelModelId) : null;
     if (selectedModel && selectedModel.model_name === modelOptionName(value)) return { channelId: selectedModel.channel_id, channelModelId: selectedModel.id };
-    const decodedChannelId = toNullableChannelId(decodeChannelModel(value)?.channelId);
+    const decodedChannelId = toNullableChannelId(decoded?.channelId);
     const channelModelId = selectedChannelModelId(config, value);
     if (decodedChannelId && channelModelId) return { channelId: decodedChannelId, channelModelId };
     const channelId = selectedChannelId(config, capabilityForModel(config, value));
@@ -260,6 +267,10 @@ export function selectedChannelIdentityForModel(config: AiConfig, value: string)
 }
 
 export function buildProxyApiUrl(apiBase: string, config: AiConfig, value: string, path: string) {
+    const mergeParsed = parseMergeModelValue(value);
+    if (mergeParsed) {
+        return `${apiBase}/proxy?${new URLSearchParams({ path, channel_id: String(mergeParsed.channelId), fuzzy_group_name: mergeParsed.groupName }).toString()}`;
+    }
     const identity = selectedChannelIdentityForModel(config, value);
     if (!identity) throw new Error("所选模型已失效，请刷新后重新选择");
     const query = new URLSearchParams({ path, channel_id: String(identity.channelId), channel_model_id: String(identity.channelModelId) });
@@ -316,6 +327,7 @@ export const useConfigStore = create<ConfigStore>()(
             serverCatalogLoading: false,
             serverCatalogError: null,
             autoChannelModels: [] as AutoChannelModelInfo[],
+            serverMergeGroups: {} as Record<number, MergeGroup[]>,
             isConfigOpen: false,
             shouldPromptContinue: false,
             updateConfig: (key, value) =>
@@ -397,6 +409,10 @@ export const useConfigStore = create<ConfigStore>()(
                     };
                 }),
             applyAutoChannelModels: (autoChannelModels) => set({ autoChannelModels }),
+            applyServerMergeGroups: (channelId, groups) =>
+                set((state) => ({
+                    serverMergeGroups: { ...state.serverMergeGroups, [channelId]: groups },
+                })),
             selectCapabilityChannel: (capability, channelId) =>
                 set((state) => {
                     const next = { ...state.config, [channelIdKey(capability)]: channelId };
@@ -406,7 +422,8 @@ export const useConfigStore = create<ConfigStore>()(
                         next[modelListKey(capability)] = options;
                         next[`${capability}Model`] = options.includes(next[`${capability}Model`]) ? next[`${capability}Model`] : options[0] || "";
                     } else if (selectedChannelId && state.serverChannelModels[selectedChannelId]) {
-                        const options = buildChannelModelOptions(state.serverChannels, state.serverChannelModels, state.serverPricing, state.serverMetrics, capability, selectedChannelId, state.autoChannelModels).map((o) => o.value);
+                        const mergeGroups = state.serverMergeGroups[selectedChannelId];
+                        const options = buildChannelModelOptions(state.serverChannels, state.serverChannelModels, state.serverPricing, state.serverMetrics, capability, selectedChannelId, state.autoChannelModels, mergeGroups).map((o) => o.value);
                         next[modelListKey(capability)] = options;
                         const currentModel = next[`${capability}Model`];
                         next[`${capability}Model`] = options.includes(currentModel) ? currentModel : options[0] || "";
@@ -509,7 +526,21 @@ export function decodeChannelModel(value: string) {
     return { channelId: value.slice(0, index), channelModelId: toNullableChannelId(rest.slice(0, modelIndex)), model: rest.slice(modelIndex + CHANNEL_MODEL_SEPARATOR.length) };
 }
 
+export function isMergeModelValue(value: string): boolean {
+    return value.startsWith("merge://");
+}
+
+export function parseMergeModelValue(value: string): { channelId: number; groupName: string } | null {
+    if (!value.startsWith("merge://")) return null;
+    const parts = value.replace("merge://", "").split("::");
+    if (parts.length !== 2) return null;
+    const channelId = parseInt(parts[0], 10);
+    if (!channelId || Number.isNaN(channelId)) return null;
+    return { channelId, groupName: parts[1] };
+}
+
 export function modelOptionName(value: string) {
+    if (isMergeModelValue(value)) return parseMergeModelValue(value)?.groupName || value;
     return decodeChannelModel(value)?.model || value;
 }
 
@@ -581,6 +612,11 @@ export function videoRouteForModel(config: Pick<AiConfig, "modelRoutes">, value:
 }
 
 export function modelOptionLabel(config: AiConfig, value: string) {
+    const mergeParsed = parseMergeModelValue(value);
+    if (mergeParsed) {
+        const channel = latestServerChannels.find((item) => item.id === mergeParsed.channelId);
+        return channel ? `${mergeParsed.groupName}（${channel.name}）` : mergeParsed.groupName;
+    }
     const decoded = decodeChannelModel(value);
     if (!decoded) return value;
     const channelId = toNullableChannelId(decoded.channelId);
@@ -590,7 +626,9 @@ export function modelOptionLabel(config: AiConfig, value: string) {
 
 export function channelModelOptionsByCapability(capability: ModelCapability, channelId?: number | null) {
     const state = useConfigStore.getState();
-    return buildChannelModelOptions(state.serverChannels, state.serverChannelModels, state.serverPricing, state.serverMetrics, capability, channelId ?? selectedChannelId(state.config, capability), state.autoChannelModels);
+    const resolvedChannelId = channelId ?? selectedChannelId(state.config, capability);
+    const mergeGroups = resolvedChannelId ? state.serverMergeGroups[resolvedChannelId] : undefined;
+    return buildChannelModelOptions(state.serverChannels, state.serverChannelModels, state.serverPricing, state.serverMetrics, capability, resolvedChannelId, state.autoChannelModels, mergeGroups);
 }
 
 export function buildChannelModelOptions(
@@ -601,6 +639,7 @@ export function buildChannelModelOptions(
     capability: ModelCapability,
     channelId?: number | null,
     autoChannelModels?: AutoChannelModelInfo[],
+    mergeGroups?: MergeGroup[],
 ): ChannelModelOption[] {
     if (channelId === 0 && autoChannelModels?.length) {
         const prices = new Map(pricing.map((item) => [item.model, item]));
@@ -668,6 +707,57 @@ export function buildChannelModelOptions(
             sortOrder: model.sort_order,
         });
     }
+    if (mergeGroups?.length && channelId && channelId > 0) {
+        // Track which rawModel names are consumed by merge groups
+        const consumedModelNames = new Set<string>();
+        const mergedOptions: ChannelModelOption[] = [];
+
+        for (const group of mergeGroups) {
+            if (!group.enabled) continue;
+            // Find models whose model_name starts with the group pattern
+            const matchingModels = options.filter((opt) => opt.channelId === channelId && opt.rawModel.startsWith(group.pattern));
+            if (!matchingModels.length) continue;
+
+            for (const m of matchingModels) consumedModelNames.add(m.rawModel);
+
+            const avgSuccessRate = matchingModels.some((m) => m.successRate !== null)
+                ? Math.round(matchingModels.reduce((sum, m) => sum + (m.successRate ?? 0), 0) / matchingModels.length)
+                : null;
+
+            const bestMetricsStatus = matchingModels.some((m) => m.metricsStatus === "ok") ? "ok" : "unavailable";
+
+            const channelName = channels.find((c) => c.id === channelId)?.name || "";
+            mergedOptions.push({
+                value: `merge://${channelId}::${group.group_name}`,
+                channelId,
+                channelModelId: 0,
+                channelName,
+                rawModel: group.group_name,
+                capability,
+                price: matchingModels[0]?.price || null,
+                successRate: avgSuccessRate,
+                metricsStatus: bestMetricsStatus,
+                imageGenerateRoute: "auto",
+                imageEditRoute: "auto",
+                videoRoute: "auto",
+                videoDurations: [],
+                videoCustomizable: false,
+                sortOrder: -1,
+            });
+        }
+
+        if (mergedOptions.length) {
+            // Filter out individual models consumed by merge groups
+            const remaining = options.filter((opt) => !consumedModelNames.has(opt.rawModel));
+            // Sort merged options first (sortOrder -1), then remaining by normal criteria
+            return [...mergedOptions.sort((a, b) => a.rawModel.localeCompare(b.rawModel)), ...remaining.sort((left, right) => {
+                if (left.successRate === null && right.successRate !== null) return 1;
+                if (left.successRate !== null && right.successRate === null) return -1;
+                if (left.successRate !== null && right.successRate !== null && left.successRate !== right.successRate) return right.successRate - left.successRate;
+                return left.sortOrder - right.sortOrder || left.rawModel.localeCompare(right.rawModel) || left.channelModelId - right.channelModelId;
+            })];
+        }
+    }
     return options.sort((left, right) => {
         if (left.successRate === null && right.successRate !== null) return 1;
         if (left.successRate !== null && right.successRate === null) return -1;
@@ -695,6 +785,14 @@ export function resolveModelChannel(config: AiConfig, value: string) {
 
 export function resolveModelRequestConfig(config: AiConfig, value: string): AiConfig {
     const selectedValue = value || config.model;
+    const mergeParsed = parseMergeModelValue(selectedValue);
+    if (mergeParsed) {
+        const capability = capabilityForModel(config, mergeParsed.groupName);
+        const next = { ...config, model: mergeParsed.groupName };
+        next[channelIdKey(capability)] = mergeParsed.channelId;
+        next.channelModelId = null;
+        return next;
+    }
     const decoded = decodeChannelModel(selectedValue);
     const rawModel = modelOptionName(selectedValue);
     const decodedChannelId = toNullableChannelId(decoded?.channelId);

@@ -14,6 +14,7 @@ import { listPricing, savePricing, comparePricing, type PricingItem } from "@/se
 import { testApiModel, type ApiModelTestResult } from "@/services/api/api-config";
 import { listWebhookConfigs, saveWebhookConfig, testWebhookSend, startPoller, stopPoller, getPollerStatus, listWebhookLogs } from "@/services/api/webhook";
 import type { WebhookConfig, WebhookLogItem, PollerStatus, TestSendResult } from "@/services/api/webhook";
+import { listMergeGroups, deleteMergeGroup, autoCreateMergeGroups, type MergeGroup } from "@/services/api/merge-groups-admin";
 
 const imageRouteOptions = [
     { label: "自动判断", value: "auto" },
@@ -169,6 +170,10 @@ export default function AdminApiConfigPage() {
     const [webhookTestSending, setWebhookTestSending] = useState(false);
     const [webhookTestSendResult, setWebhookTestSendResult] = useState<TestSendResult | null>(null);
 
+    // Merge group state
+    const [mergeGroups, setMergeGroups] = useState<MergeGroup[]>([]);
+    const [loadingMergeGroups, setLoadingMergeGroups] = useState(false);
+
     // Load initial data
     const fetchChannels = async () => {
         setLoadingChannels(true);
@@ -205,6 +210,15 @@ export default function AdminApiConfigPage() {
         } finally {
             setLoadingModels(false);
         }
+    };
+
+    const fetchMergeGroups = async (channelId: number) => {
+        setLoadingMergeGroups(true);
+        try {
+            const groups = await listMergeGroups(channelId);
+            setMergeGroups(groups || []);
+        } catch { setMergeGroups([]); }
+        finally { setLoadingMergeGroups(false); }
     };
 
     const fetchPricing = async () => {
@@ -402,6 +416,7 @@ export default function AdminApiConfigPage() {
         setPricingData([]);
         void fetchModels(channel.id);
         void fetchPricing();
+        void fetchMergeGroups(channel.id);
     };
 
     const closePanel = () => {
@@ -478,6 +493,28 @@ export default function AdminApiConfigPage() {
         }
         await fetchModels(selectedChannel.id);
         setSavingAll(false);
+    };
+
+    // -- Merge group handlers --
+
+    const handleAutoMerge = async (channelId: number) => {
+        try {
+            const groups = await autoCreateMergeGroups(channelId);
+            message.success(`已自动创建 ${groups.length} 个合并组`);
+            await fetchMergeGroups(channelId);
+        } catch (err: any) {
+            message.error(err?.response?.data?.msg || "自动合并失败");
+        }
+    };
+
+    const handleDeleteMergeGroup = async (channelId: number, groupId: number) => {
+        try {
+            await deleteMergeGroup(channelId, groupId);
+            message.success("已删除合并组");
+            await fetchMergeGroups(channelId);
+        } catch (err: any) {
+            message.error(err?.response?.data?.msg || "删除失败");
+        }
     };
 
     // -- Pricing editing helpers and handlers --
@@ -1343,6 +1380,22 @@ export default function AdminApiConfigPage() {
                             className="mb-4"
                         />
                     )}
+                    <div style={{ marginBottom: 16 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+                            <Button onClick={() => handleAutoMerge(selectedChannel.id)} loading={loadingMergeGroups} disabled={!isSuperAdmin}>
+                                模糊合并
+                            </Button>
+                            <span style={{ fontSize: 12, color: "#888" }}>
+                                {mergeGroups.length > 0 ? `${mergeGroups.length} 个合并组` : "点击按钮自动识别相似模型并合并"}
+                            </span>
+                        </div>
+                        {mergeGroups.map(g => (
+                            <Tag key={g.id} closable onClose={() => handleDeleteMergeGroup(selectedChannel.id, g.id)} 
+                                style={{ marginBottom: 4 }}>
+                                {g.group_name} ({g.pattern})
+                            </Tag>
+                        ))}
+                    </div>
                     <Table rowKey="id" columns={modelColumns} dataSource={models} loading={loadingModels} pagination={false} scroll={{ x: 1400 }} />
                 </Card>
             )}
