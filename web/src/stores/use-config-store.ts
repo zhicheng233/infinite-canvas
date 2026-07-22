@@ -833,7 +833,7 @@ function uniqueRawModels(models: string[]) {
 function toNullableChannelId(value: unknown): number | null {
     if (value === null || value === undefined || value === "") return null;
     const id = Number(value);
-    return Number.isInteger(id) && id > 0 ? id : null;
+    return Number.isInteger(id) && id >= 0 ? id : null;
 }
 
 function normalizeServerChannels(channels?: ModelChannel[]) {
@@ -907,7 +907,8 @@ function applyChannelScopedSelections(config: AiConfig, channels: ModelChannel[]
 
 function normalizeSelectedChannelId(value: unknown, channels: ModelChannel[]) {
     const id = toNullableChannelId(value);
-    if (!id) return null;
+    if (id === 0) return 0;
+    if (id === null) return null;
     return channels.length && !channels.some((channel) => channel.id === id) ? null : id;
 }
 
