@@ -65,6 +65,16 @@ func (r *CreditRepo) FindPricing(tenantID uint, modelName string, channelID uint
 			return nil, err
 		}
 	}
+	// When channelID=0, fallback to any channel-scoped pricing
+	if channelID == 0 {
+		err = r.db.Where("tenant_id = ? AND model = ?", tenantID, modelName).First(&pricing).Error
+		if err == nil {
+			return &pricing, nil
+		}
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, err
+		}
+	}
 	// No pricing found at all
 	return nil, nil
 }

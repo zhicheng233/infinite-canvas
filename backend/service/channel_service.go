@@ -98,6 +98,10 @@ func (s *ChannelService) Enable(id uint) error {
 	return s.repo.Enable(id)
 }
 
+func (s *ChannelService) Delete(id uint) error {
+	return s.repo.Delete(id)
+}
+
 func (s *ChannelService) ListAll() ([]model.ChannelAdminInfo, error) {
 	channels, err := s.repo.ListAll()
 	if err != nil {

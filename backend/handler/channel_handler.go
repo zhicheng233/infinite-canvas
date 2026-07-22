@@ -105,6 +105,22 @@ func (h *ChannelHandler) Enable(c *gin.Context) {
 	model.OK(c, gin.H{"enabled": true})
 }
 
+func (h *ChannelHandler) Delete(c *gin.Context) {
+	id, ok := parseChannelID(c)
+	if !ok {
+		return
+	}
+	if err := h.channelService.Delete(id); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			model.Fail(c, http.StatusNotFound, "渠道不存在")
+			return
+		}
+		model.Fail(c, http.StatusConflict, err.Error())
+		return
+	}
+	model.OK(c, gin.H{"deleted": true})
+}
+
 func parseChannelID(c *gin.Context) (uint, bool) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil || id == 0 {

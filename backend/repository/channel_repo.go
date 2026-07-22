@@ -1,6 +1,8 @@
 package repository
 
 import (
+	"errors"
+
 	"gorm.io/gorm"
 	"infinite-canvas-server/model"
 )
@@ -44,4 +46,19 @@ func (r *ChannelRepo) Disable(id uint) error {
 
 func (r *ChannelRepo) Enable(id uint) error {
 	return r.db.Model(&model.Channel{}).Where("id = ?", id).Update("enabled", true).Error
+}
+
+func (r *ChannelRepo) Delete(id uint) error {
+	var channel model.Channel
+	if err := r.db.First(&channel, id).Error; err != nil {
+		return err
+	}
+
+	var count int64
+	r.db.Model(&model.ChannelModel{}).Where("channel_id = ?", id).Count(&count)
+	if count > 0 {
+		return errors.New("请先删除该渠道下的所有模型")
+	}
+
+	return r.db.Delete(&channel).Error
 }

@@ -8,7 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func Setup(r *gin.Engine, authService *service.AuthService, authHandler *handler.AuthHandler, adminHandler *handler.AdminHandler, userHandler *handler.UserHandler, creditHandler *handler.CreditHandler, generateHandler *handler.GenerateHandler, apiConfigHandler *handler.ApiConfigHandler, proxyHandler *handler.ProxyHandler, canvasHandler *handler.CanvasHandler, generationRecordHandler *handler.GenerationRecordHandler, rechargeHandler *handler.RechargeHandler, captchaHandler *handler.CaptchaHandler, tempMediaHandler *handler.TempMediaHandler, channelStatusHandler *handler.ChannelStatusHandler, channelHandler *handler.ChannelHandler, channelModelHandler *handler.ChannelModelHandler, metricsHandler *handler.MetricsHandler, webhookHandler *handler.WebhookHandler) {
+func Setup(r *gin.Engine, authService *service.AuthService, authHandler *handler.AuthHandler, adminHandler *handler.AdminHandler, userHandler *handler.UserHandler, creditHandler *handler.CreditHandler, generateHandler *handler.GenerateHandler, apiConfigHandler *handler.ApiConfigHandler, proxyHandler *handler.ProxyHandler, canvasHandler *handler.CanvasHandler, generationRecordHandler *handler.GenerationRecordHandler, rechargeHandler *handler.RechargeHandler, captchaHandler *handler.CaptchaHandler, tempMediaHandler *handler.TempMediaHandler, channelStatusHandler *handler.ChannelStatusHandler, channelHandler *handler.ChannelHandler, channelModelHandler *handler.ChannelModelHandler, metricsHandler *handler.MetricsHandler, webhookHandler *handler.WebhookHandler, mergeGroupHandler *handler.MergeGroupHandler) {
 	r.Use(middleware.Cors())
 
 	api := r.Group("/backend-api")
@@ -91,9 +91,14 @@ func Setup(r *gin.Engine, authService *service.AuthService, authHandler *handler
 			superAdmin.PUT("/admin/channels/:id", channelHandler.Update)
 			superAdmin.POST("/admin/channels/:id/disable", channelHandler.Disable)
 			superAdmin.POST("/admin/channels/:id/enable", channelHandler.Enable)
+			superAdmin.DELETE("/admin/channels/:id", channelHandler.Delete)
 			superAdmin.GET("/admin/channels/:id/models", channelModelHandler.ListAdmin)
 			superAdmin.POST("/admin/channels/:id/models/sync", channelModelHandler.Sync)
 			superAdmin.PUT("/admin/channels/:id/models/:modelId", channelModelHandler.Update)
+			superAdmin.GET("/admin/channels/:id/merge-groups", mergeGroupHandler.List)
+			superAdmin.POST("/admin/channels/:id/merge-groups", mergeGroupHandler.Create)
+			superAdmin.DELETE("/admin/channels/:id/merge-groups/:groupId", mergeGroupHandler.Delete)
+			superAdmin.POST("/admin/channels/:id/merge-groups/auto", mergeGroupHandler.AutoCreate)
 			superAdmin.GET("/admin/metrics-config", metricsHandler.GetConfig)
 			superAdmin.POST("/admin/metrics-config", metricsHandler.SaveConfig)
 

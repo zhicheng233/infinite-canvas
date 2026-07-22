@@ -37,6 +37,7 @@ func main() {
 		&model.RechargeOrder{},
 		&model.CanvasProject{},
 		&model.ModelCallLog{},
+		&model.ModelMergeGroup{},
 		&model.WebhookConfig{},
 		&model.WebhookLog{},
 	); err != nil {
@@ -55,6 +56,7 @@ func main() {
 	channelModelRepo := repository.NewChannelModelRepo(db)
 	metricsConfigRepo := repository.NewMetricsConfigRepo(db)
 	webhookRepo := repository.NewWebhookRepo(db)
+	mergeGroupRepo := repository.NewMergeGroupRepo(db)
 
 	captchaService := service.NewCaptchaService()
 
@@ -74,6 +76,7 @@ func main() {
 	channelStatusService := service.NewChannelStatusService(modelCallLogRepo, apiConfigRepo)
 	webhookPoller := service.NewWebhookPoller(webhookRepo, channelRepo, channelModelRepo, db, nil)
 	paymentGateway := service.NewMockPaymentGateway(rechargeRepo, creditService)
+	mergeGroupService := service.NewMergeGroupService(mergeGroupRepo)
 
 	authHandler := handler.NewAuthHandler(authService, userService)
 	adminHandler := handler.NewAdminHandler(tenantRepo, userRepo, creditService, creditRepo, rechargeRepo, modelCallLogRepo, modelCallLogService)
@@ -92,9 +95,10 @@ func main() {
 	channelModelHandler := handler.NewChannelModelHandler(channelModelService)
 	metricsHandler := handler.NewMetricsHandler(metricsService)
 	webhookHandler := handler.NewWebhookHandler(webhookRepo, webhookPoller, nil)
+	mergeGroupHandler := handler.NewMergeGroupHandler(mergeGroupService)
 
 	r := gin.Default()
-	router.Setup(r, authService, authHandler, adminHandler, userHandler, creditHandler, generateHandler, apiConfigHandler, proxyHandler, canvasHandler, generationRecordHandler, rechargeHandler, captchaHandler, tempMediaHandler, channelStatusHandler, channelHandler, channelModelHandler, metricsHandler, webhookHandler)
+	router.Setup(r, authService, authHandler, adminHandler, userHandler, creditHandler, generateHandler, apiConfigHandler, proxyHandler, canvasHandler, generationRecordHandler, rechargeHandler, captchaHandler, tempMediaHandler, channelStatusHandler, channelHandler, channelModelHandler, metricsHandler, webhookHandler, mergeGroupHandler)
 
 	log.Printf("Server starting on port %s", cfg.Port)
 	if err := r.Run(":" + cfg.Port); err != nil {
