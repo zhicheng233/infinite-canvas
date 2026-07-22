@@ -63,3 +63,20 @@ export async function getChannelModels(channelId: number): Promise<ChannelModelI
     const res = await apiClient.get(`/channels/${channelId}/models`);
     return res.data.data.models;
 }
+
+export type AutoChannelModelRef = {
+    channel_id: number;
+    channel_model_id: number;
+    channel_name: string;
+    success_rate: number;
+};
+
+export type AutoChannelModelInfo = {
+    model: string;
+    channels: AutoChannelModelRef[];
+};
+
+export async function getAutoChannelModels(): Promise<AutoChannelModelInfo[]> {
+    const res = await apiClient.get("/channels/auto/models");
+    return res.data.data.models;
+}

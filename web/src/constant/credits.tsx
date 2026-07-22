@@ -6,7 +6,7 @@ import { Button } from "antd";
 
 import { estimateCost, getBalance } from "@/services/api/credits";
 import { getStoredToken } from "@/services/api/client";
-import { modelOptionName } from "@/stores/use-config-store";
+import { decodeChannelModel, modelOptionName } from "@/stores/use-config-store";
 
 export function CreditSymbol({ className, ...props }: ComponentProps<"span">) {
     return (
@@ -70,7 +70,9 @@ export function useUserCreditBalance() {
 }
 
 export function useEstimatedCreditCost(model: string, count?: string | number, options?: { type?: string; seconds?: string | number; resolution?: string; size?: string }) {
+    const decoded = useMemo(() => decodeChannelModel(model || ""), [model]);
     const normalizedModel = useMemo(() => modelOptionName(model || ""), [model]);
+    const channelId = decoded?.channelId;
     const normalizedCount = Math.max(1, Math.floor(Math.abs(Number(count)) || 1));
     const requestType = options?.type || "";
     const requestSeconds = options?.seconds || "";
@@ -92,6 +94,7 @@ export function useEstimatedCreditCost(model: string, count?: string | number, o
             seconds: requestSeconds || undefined,
             resolution: requestResolution || undefined,
             size: requestSize || undefined,
+            channel_id: channelId || undefined,
         })
             .then((data) => {
                 if (cancelled) return;
@@ -112,7 +115,7 @@ export function useEstimatedCreditCost(model: string, count?: string | number, o
         return () => {
             cancelled = true;
         };
-    }, [normalizedCount, normalizedModel, requestResolution, requestSeconds, requestSize, requestType]);
+    }, [normalizedCount, normalizedModel, requestResolution, requestSeconds, requestSize, requestType, channelId]);
 
     return credits;
 }

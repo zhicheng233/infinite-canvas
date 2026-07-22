@@ -47,7 +47,7 @@ export async function getTransactions(page = 1, pageSize = 20) {
     return res.data.data;
 }
 
-export async function estimateCost(model: string, params?: { type?: string; count?: string | number; seconds?: string | number; resolution?: string; size?: string }) {
+export async function estimateCost(model: string, params?: { type?: string; count?: string | number; seconds?: string | number; resolution?: string; size?: string; channel_id?: string | number }) {
     const res = await apiClient.get<ApiResult<PricingData>>("/credits/estimate", { params: { model, ...params } });
     return res.data.data;
 }

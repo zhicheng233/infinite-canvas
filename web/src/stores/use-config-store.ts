@@ -3,7 +3,7 @@
 import { useMemo } from "react";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import type { ChannelInfo, ChannelModelInfo } from "@/services/api/channel";
+import type { AutoChannelModelInfo, ChannelInfo, ChannelModelInfo } from "@/services/api/channel";
 import type { MetricsResponse, ModelMetrics } from "@/services/api/metrics";
 import type { PricingItem } from "@/services/api/pricing";
 
@@ -150,6 +150,7 @@ type ConfigStore = {
     serverMetrics: MetricsResponse | null;
     serverCatalogLoading: boolean;
     serverCatalogError: string | null;
+    autoChannelModels: AutoChannelModelInfo[];
     isConfigOpen: boolean;
     shouldPromptContinue: boolean;
     updateConfig: <K extends keyof AiConfig>(key: K, value: AiConfig[K]) => void;
@@ -171,6 +172,7 @@ type ConfigStore = {
         channels?: ModelChannel[];
     }) => void;
     applyServerChannelCatalog: (channels: ChannelInfo[], channelModels: Record<number, ChannelModelInfo[]>) => void;
+    applyAutoChannelModels: (models: AutoChannelModelInfo[]) => void;
     selectCapabilityChannel: (capability: ModelCapability, channelId: number | null) => void;
     openConfigDialog: (shouldPromptContinue?: boolean) => void;
     setConfigDialogOpen: (isOpen: boolean) => void;
@@ -313,6 +315,7 @@ export const useConfigStore = create<ConfigStore>()(
             serverMetrics: null,
             serverCatalogLoading: false,
             serverCatalogError: null,
+            autoChannelModels: [] as AutoChannelModelInfo[],
             isConfigOpen: false,
             shouldPromptContinue: false,
             updateConfig: (key, value) =>
@@ -393,12 +396,17 @@ export const useConfigStore = create<ConfigStore>()(
                         config: applyChannelScopedSelections(state.config, serverChannels, serverChannelModels, state.serverPricing, state.serverMetrics),
                     };
                 }),
+            applyAutoChannelModels: (autoChannelModels) => set({ autoChannelModels }),
             selectCapabilityChannel: (capability, channelId) =>
                 set((state) => {
                     const next = { ...state.config, [channelIdKey(capability)]: channelId };
                     const selectedChannelId = normalizeSelectedChannelId(channelId, state.serverChannels);
-                    if (selectedChannelId && state.serverChannelModels[selectedChannelId]) {
-                        const options = buildChannelModelOptions(state.serverChannels, state.serverChannelModels, state.serverPricing, state.serverMetrics, capability, selectedChannelId).map((o) => o.value);
+                    if (channelId === 0) {
+                        const options = buildChannelModelOptions(state.serverChannels, state.serverChannelModels, state.serverPricing, state.serverMetrics, capability, 0, state.autoChannelModels).map((o) => o.value);
+                        next[modelListKey(capability)] = options;
+                        next[`${capability}Model`] = options.includes(next[`${capability}Model`]) ? next[`${capability}Model`] : options[0] || "";
+                    } else if (selectedChannelId && state.serverChannelModels[selectedChannelId]) {
+                        const options = buildChannelModelOptions(state.serverChannels, state.serverChannelModels, state.serverPricing, state.serverMetrics, capability, selectedChannelId, state.autoChannelModels).map((o) => o.value);
                         next[modelListKey(capability)] = options;
                         const currentModel = next[`${capability}Model`];
                         next[`${capability}Model`] = options.includes(currentModel) ? currentModel : options[0] || "";
@@ -582,7 +590,7 @@ export function modelOptionLabel(config: AiConfig, value: string) {
 
 export function channelModelOptionsByCapability(capability: ModelCapability, channelId?: number | null) {
     const state = useConfigStore.getState();
-    return buildChannelModelOptions(state.serverChannels, state.serverChannelModels, state.serverPricing, state.serverMetrics, capability, channelId ?? selectedChannelId(state.config, capability));
+    return buildChannelModelOptions(state.serverChannels, state.serverChannelModels, state.serverPricing, state.serverMetrics, capability, channelId ?? selectedChannelId(state.config, capability), state.autoChannelModels);
 }
 
 export function buildChannelModelOptions(
@@ -592,15 +600,53 @@ export function buildChannelModelOptions(
     metrics: MetricsResponse | null,
     capability: ModelCapability,
     channelId?: number | null,
+    autoChannelModels?: AutoChannelModelInfo[],
 ): ChannelModelOption[] {
+    if (channelId === 0 && autoChannelModels?.length) {
+        const prices = new Map(pricing.map((item) => [item.model, item]));
+        return autoChannelModels
+            .filter((am) => modelMatchesCapability(am.model, capability))
+            .map((am) => {
+                const bestChannel = am.channels.reduce<AutoChannelModelRef | null>((best, curr) => (curr.success_rate > (best?.success_rate ?? -1) ? curr : best), null);
+                return {
+                    value: encodeChannelModelIdentity(0, 0, am.model),
+                    channelId: 0,
+                    channelModelId: 0,
+                    channelName: "自动",
+                    rawModel: am.model,
+                    capability,
+                    price: prices.get(am.model) || null,
+                    successRate: bestChannel?.success_rate ?? null,
+                    metricsStatus: bestChannel ? "ok" : "unavailable",
+                    imageGenerateRoute: "auto",
+                    imageEditRoute: "auto",
+                    videoRoute: "auto",
+                    videoDurations: [],
+                    videoCustomizable: false,
+                    sortOrder: 0,
+                };
+            })
+            .filter((option) => option.price !== null)
+            .sort((a, b) => {
+                if (a.successRate === null && b.successRate !== null) return 1;
+                if (a.successRate !== null && b.successRate === null) return -1;
+                if (a.successRate !== null && b.successRate !== null && a.successRate !== b.successRate) return b.successRate - a.successRate;
+                return a.rawModel.localeCompare(b.rawModel);
+            });
+    }
     const enabledChannels = new Map(channels.filter((channel) => channel.enabled).map((channel) => [channel.id, channel]));
-    const prices = new Map(pricing.map((item) => [item.model, item]));
+    const pricesByKey = new Map<string, PricingItem>();
+    for (const item of pricing) {
+        const key = item.channel_id ? `${item.model}::${item.channel_id}` : item.model;
+        pricesByKey.set(key, item);
+    }
     const metricRows = new Map<number, ModelMetrics>();
     for (const channel of metrics?.channels || []) for (const model of channel.models || []) metricRows.set(model.channel_model_id, model);
     const options: ChannelModelOption[] = [];
     for (const model of Object.values(channelModels).flat()) {
         const channel = enabledChannels.get(model.channel_id);
-        const price = prices.get(model.model_name) || null;
+        const channelKey = `${model.model_name}::${model.channel_id}`;
+        const price = pricesByKey.get(channelKey) || pricesByKey.get(model.model_name) || null;
         if (!channel || (channelId && model.channel_id !== channelId) || !model.enabled || !price || !modelSupportsCapability(model, capability)) continue;
         const metric = metricRows.get(model.id);
         const metricsStatus = metric?.status || "unavailable";
@@ -720,7 +766,7 @@ function applyChannelScopedSelections(config: AiConfig, channels: ModelChannel[]
     for (const capability of ["image", "video", "text", "audio"] as ModelCapability[]) {
         const requestedChannelId = normalizeSelectedChannelId(config[channelIdKey(capability)], channels);
         const channelId = requestedChannelId && hasCapabilityModel(models[requestedChannelId], capability) ? requestedChannelId : channels.find((channel) => hasCapabilityModel(models[channel.id], capability))?.id || null;
-        const options = channelId ? buildChannelModelOptions(channels, models, pricing, metrics, capability, channelId).map((option) => option.value) : [];
+        const options = channelId ? buildChannelModelOptions(channels, models, pricing, metrics, capability, channelId, []).map((option) => option.value) : [];
         next[channelIdKey(capability)] = channelId;
         next[modelListKey(capability)] = options;
         const current = next[`${capability}Model`];

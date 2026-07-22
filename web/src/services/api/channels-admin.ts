@@ -78,3 +78,10 @@ export async function disableChannel(channelId: number): Promise<void> {
 export async function enableChannel(channelId: number): Promise<void> {
     await apiClient.post(`/admin/channels/${channelId}/enable`);
 }
+
+/**
+ * SuperAdmin: Delete a channel and its associated channel-model mappings.
+ */
+export async function deleteChannel(channelId: number): Promise<void> {
+    await apiClient.delete(`/admin/channels/${channelId}`);
+}

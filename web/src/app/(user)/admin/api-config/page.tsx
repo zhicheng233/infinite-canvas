@@ -1,12 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Alert, App, Button, Card, Checkbox, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Switch, Tabs, Popover, Tooltip } from "antd";
+import { Alert, App, Button, Card, Checkbox, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Switch, Tabs, Popover, Popconfirm, Tooltip } from "antd";
 import { Settings, Plus, RefreshCw, Lock, X, Play, Save } from "lucide-react";
 import type { ColumnsType } from "antd/es/table";
 
 import { useUserStore } from "@/stores/use-user-store";
-import { listAllChannels, createChannel, updateChannel, disableChannel, enableChannel, type ChannelAdminInfo, type SaveChannelInput, type UpdateChannelInput } from "@/services/api/channels-admin";
+import { listAllChannels, createChannel, updateChannel, disableChannel, enableChannel, deleteChannel, type ChannelAdminInfo, type SaveChannelInput, type UpdateChannelInput } from "@/services/api/channels-admin";
 import { listChannelModelsAdmin, syncChannelModels, updateChannelModel, enableChannelModel, disableChannelModel } from "@/services/api/channel-models-admin";
 
 import { type ChannelModelInfo } from "@/services/api/channel";
@@ -278,6 +278,7 @@ export default function AdminApiConfigPage() {
             }
             await fetchChannels();
             if (selectedChannel && selectedChannel.id === channelId) {
+                setModels([]); // Force-clear to trigger React re-render
                 await fetchModels(channelId);
             }
         } catch (err: any) {
@@ -285,6 +286,7 @@ export default function AdminApiConfigPage() {
             // Keep the existing models listed, but refresh status to expose the failure error.
             await fetchChannels();
             if (selectedChannel && selectedChannel.id === channelId) {
+                setModels([]); // Force-clear to trigger React re-render
                 await fetchModels(channelId);
             }
         } finally {
@@ -305,6 +307,21 @@ export default function AdminApiConfigPage() {
             await fetchChannels();
         } catch (err: any) {
             message.error(err?.message || "操作失败");
+        }
+    };
+
+    // Deletes a channel
+    const handleDelete = async (channelId: number) => {
+        try {
+            await deleteChannel(channelId);
+            message.success("渠道已删除");
+            await fetchChannels();
+            if (selectedChannel?.id === channelId) {
+                setSelectedChannel(null);
+                setModels([]);
+            }
+        } catch (err: any) {
+            message.error(err?.response?.data?.msg || err?.message || "删除失败");
         }
     };
 
@@ -766,9 +783,9 @@ export default function AdminApiConfigPage() {
         {
             title: "操作",
             key: "actions",
-            width: 250,
+            width: 320,
             render: (_, record) => (
-                <Space size="middle">
+                <Space size="small">
                     <Button size="small" onClick={() => openChannelModal(record)} disabled={!isSuperAdmin && !record.enabled}>
                         编辑
                     </Button>
@@ -778,6 +795,17 @@ export default function AdminApiConfigPage() {
                     <Button size="small" onClick={() => handleSync(record.id)} loading={syncingChannelId === record.id} disabled={!isSuperAdmin}>
                         同步模型
                     </Button>
+                    <Popconfirm
+                        title={`确定删除渠道 "${record.name}"？如有关联模型则无法删除`}
+                        onConfirm={() => handleDelete(record.id)}
+                        okText="确定"
+                        cancelText="取消"
+                        okButtonProps={{ danger: true }}
+                    >
+                        <Button size="small" danger disabled={!isSuperAdmin}>
+                            删除
+                        </Button>
+                    </Popconfirm>
                 </Space>
             ),
         },
