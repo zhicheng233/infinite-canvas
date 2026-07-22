@@ -263,6 +263,8 @@ export function selectedChannelIdentityForModel(config: AiConfig, value: string)
     const channelModelId = selectedChannelModelId(config, value);
     if (decodedChannelId && channelModelId) return { channelId: decodedChannelId, channelModelId };
     const channelId = selectedChannelId(config, capabilityForModel(config, value));
+    // When channelId is 0 (auto routing), return identity without channel_model_id
+    if (channelId === 0) return { channelId: 0, channelModelId: 0 };
     return channelId && channelModelId ? { channelId, channelModelId } : null;
 }
 
@@ -619,6 +621,8 @@ export function modelOptionLabel(config: AiConfig, value: string) {
     }
     const decoded = decodeChannelModel(value);
     if (!decoded) return value;
+    // Auto channel: always show "自动" label regardless of latestServerChannels
+    if (decoded.channelId === "0") return `${decoded.model}（自动）`;
     const channelId = toNullableChannelId(decoded.channelId);
     const channel = latestServerChannels.find((item) => item.id === channelId);
     return channel ? `${decoded.model}（${channel.name}）` : decoded.model;
@@ -795,8 +799,17 @@ export function resolveModelRequestConfig(config: AiConfig, value: string): AiCo
     }
     const decoded = decodeChannelModel(selectedValue);
     const rawModel = modelOptionName(selectedValue);
-    const decodedChannelId = toNullableChannelId(decoded?.channelId);
     const capability = capabilityForModel(config, selectedValue);
+
+    // Auto channel: channel_id=0, no channel_model_id needed, backend handles routing
+    if (decoded?.channelId === "0") {
+        const next = { ...config, model: rawModel };
+        next[channelIdKey(capability)] = 0;
+        next.channelModelId = null;
+        return next;
+    }
+
+    const decodedChannelId = toNullableChannelId(decoded?.channelId);
     const channelId = decodedChannelId ?? selectedChannelId(config, capability);
     const channelModel = resolveChannelModel(channelId, rawModel, decoded?.channelModelId);
     const next = { ...config, model: isLoggedInInBrowser() && !channelModel ? "" : rawModel };
