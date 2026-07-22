@@ -88,7 +88,7 @@ func TestMetricsReadSendsExactHoursQueryAndNoAuth(t *testing.T) {
 	}))
 	defer server.Close()
 
-	svc := newTestMetricsService(server.URL+"/api", []model.Channel{{BaseModel: model.BaseModel{ID: 1}, Name: "Primary", Enabled: true, NewApiChannelID: &newAPIID}}, map[uint][]model.ChannelModel{
+	svc := newTestMetricsService(server.URL+"/api", []model.Channel{{BaseModel: model.BaseModel{ID: 1}, Name: "Primary", Enabled: true, NewApiChannelID: &newAPIID, BaseUrl: server.URL}}, map[uint][]model.ChannelModel{
 		1: {{BaseModel: model.BaseModel{ID: 11}, ChannelID: 1, ModelName: "gpt-5", Enabled: true}},
 	})
 	resp, err := svc.Read(48)
@@ -127,9 +127,9 @@ func TestMetricsMappingExplicitChannelAndZeroVsUnavailable(t *testing.T) {
 	defer server.Close()
 
 	svc := newTestMetricsService(server.URL, []model.Channel{
-		{BaseModel: model.BaseModel{ID: 10}, Name: "Mapped", Enabled: true, NewApiChannelID: &newAPIID},
-		{BaseModel: model.BaseModel{ID: 20}, Name: "Unmapped", Enabled: true, NewApiChannelID: &unmappedNewAPIID},
-		{BaseModel: model.BaseModel{ID: 30}, Name: "No Mapping", Enabled: true},
+		{BaseModel: model.BaseModel{ID: 10}, Name: "Mapped", Enabled: true, NewApiChannelID: &newAPIID, BaseUrl: server.URL},
+		{BaseModel: model.BaseModel{ID: 20}, Name: "Unmapped", Enabled: true, NewApiChannelID: &unmappedNewAPIID, BaseUrl: server.URL},
+		{BaseModel: model.BaseModel{ID: 30}, Name: "No Mapping", Enabled: true, BaseUrl: server.URL},
 	}, map[uint][]model.ChannelModel{
 		10: {{BaseModel: model.BaseModel{ID: 101}, ChannelID: 10, ModelName: "zero-model", Enabled: true}, {BaseModel: model.BaseModel{ID: 102}, ChannelID: 10, ModelName: "missing-model", Enabled: true}},
 		20: {{BaseModel: model.BaseModel{ID: 201}, ChannelID: 20, ModelName: "zero-model", Enabled: true}},
@@ -180,18 +180,21 @@ func TestMetricsReadMalformedAnd503AreAdvisory(t *testing.T) {
 			}))
 			defer server.Close()
 
-			svc := newTestMetricsService(server.URL, []model.Channel{{BaseModel: model.BaseModel{ID: 1}, Name: "Primary", Enabled: true, NewApiChannelID: &newAPIID}}, map[uint][]model.ChannelModel{
+			svc := newTestMetricsService(server.URL, []model.Channel{{BaseModel: model.BaseModel{ID: 1}, Name: "Primary", Enabled: true, NewApiChannelID: &newAPIID, BaseUrl: server.URL}}, map[uint][]model.ChannelModel{
 				1: {{BaseModel: model.BaseModel{ID: 11}, ChannelID: 1, ModelName: "gpt-5", Enabled: true}},
 			})
 			resp, err := svc.Read(24)
 			if err != nil {
 				t.Fatalf("Read returned hard error: %v", err)
 			}
-			if resp.Status != MetricsStatusError || resp.Error == "" {
-				t.Fatalf("expected advisory error response, got %#v", resp)
+			if resp.Status != MetricsStatusOK {
+				t.Fatalf("expected advisory ok response, got %#v", resp)
 			}
 			if len(resp.Channels) != 1 || len(resp.Channels[0].Models) != 1 {
 				t.Fatalf("catalog identity was not preserved: %#v", resp.Channels)
+			}
+			if resp.Channels[0].Status != MetricsStatusError {
+				t.Fatalf("expected per-channel error status on fetch failure, got status=%s", resp.Channels[0].Status)
 			}
 			if resp.Channels[0].SuccessRate != nil || resp.Channels[0].Models[0].SuccessRate != nil {
 				t.Fatalf("unavailable metrics should have nil rates: %#v", resp.Channels[0])

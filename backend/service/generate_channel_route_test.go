@@ -45,6 +45,8 @@ func (f fakeChannelKeyReader) DecryptedApiKey(id uint) (string, error) {
 	return key, nil
 }
 
+func (f fakeChannelKeyReader) Disable(_ uint) error { return nil }
+
 type fakePricingReader struct {
 	items map[string]*model.CreditPricing
 }
