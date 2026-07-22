@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"gorm.io/gorm"
 	"image"
 	_ "image/gif"
 	"image/jpeg"
@@ -15,6 +16,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -26,16 +28,19 @@ import (
 const maxVideoReferenceImageBase64Chars = 460 * 1024
 
 type GenerateService struct {
-	apiConfigRepo *repository.ApiConfigRepo
-	creditService *CreditService
-	creditRepo    pricingReader
-	logService    *ModelCallLogService
-	repairService *OnDemandRepairService
-	channelSvc    channelKeyReader
-	channelRepo   channelReader
-	modelRepo     channelModelReader
-	httpClient    *http.Client
-	encryptKey    string
+	apiConfigRepo      *repository.ApiConfigRepo
+	creditService      *CreditService
+	creditRepo         pricingReader
+	logService         *ModelCallLogService
+	repairService      *OnDemandRepairService
+	channelSvc         channelKeyReader
+	channelRepo        channelReader
+	modelRepo          channelModelReader
+	autoChannelService *AutoChannelService
+	mergeGroupRepo     mergeGroupRepoReader
+	db                 *gorm.DB
+	httpClient         *http.Client
+	encryptKey         string
 }
 
 type channelReader interface {
@@ -46,26 +51,34 @@ type channelModelReader interface {
 	FindByID(id uint) (*model.ChannelModel, error)
 }
 
+type mergeGroupRepoReader interface {
+	ListByChannel(channelID uint) ([]model.ModelMergeGroup, error)
+}
+
 type channelKeyReader interface {
 	DecryptedApiKey(id uint) (string, error)
+	Disable(id uint) error
 }
 
 type pricingReader interface {
 	FindPricing(tenantID uint, modelName string, channelID uint) (*model.CreditPricing, error)
 }
 
-func NewGenerateService(apiConfigRepo *repository.ApiConfigRepo, creditService *CreditService, creditRepo *repository.CreditRepo, logService *ModelCallLogService, encryptKey string, repairService *OnDemandRepairService, channelSvc *ChannelService, channelRepo *repository.ChannelRepo, modelRepo *repository.ChannelModelRepo) *GenerateService {
+func NewGenerateService(apiConfigRepo *repository.ApiConfigRepo, creditService *CreditService, creditRepo *repository.CreditRepo, logService *ModelCallLogService, encryptKey string, repairService *OnDemandRepairService, channelSvc *ChannelService, channelRepo *repository.ChannelRepo, modelRepo *repository.ChannelModelRepo, mergeGroupRepo *repository.MergeGroupRepo, db *gorm.DB, autoChannelService *AutoChannelService) *GenerateService {
 	return &GenerateService{
-		apiConfigRepo: apiConfigRepo,
-		creditService: creditService,
-		creditRepo:    creditRepo,
-		logService:    logService,
-		repairService: repairService,
-		channelSvc:    channelSvc,
-		channelRepo:   channelRepo,
-		modelRepo:     modelRepo,
-		httpClient:    &http.Client{Timeout: 10 * time.Minute},
-		encryptKey:    encryptKey,
+		apiConfigRepo:      apiConfigRepo,
+		creditService:      creditService,
+		creditRepo:         creditRepo,
+		logService:         logService,
+		repairService:      repairService,
+		channelSvc:         channelSvc,
+		channelRepo:        channelRepo,
+		modelRepo:          modelRepo,
+		mergeGroupRepo:     mergeGroupRepo,
+		db:                 db,
+		autoChannelService: autoChannelService,
+		httpClient:         &http.Client{Timeout: 10 * time.Minute},
+		encryptKey:         encryptKey,
 	}
 }
 
@@ -156,6 +169,141 @@ func (s *GenerateService) resolveChannelRoute(selection ChannelSelection, capabi
 	}, nil
 }
 
+func (s *GenerateService) resolveFuzzyMergeRoute(channelID uint, fuzzyGroupName string, capability string) (*channelRouteContext, error) {
+	groups, err := s.mergeGroupRepo.ListByChannel(channelID)
+	if err != nil {
+		return nil, err
+	}
+	var matchedGroup *model.ModelMergeGroup
+	for i := range groups {
+		if groups[i].Enabled && groups[i].GroupName == fuzzyGroupName {
+			matchedGroup = &groups[i]
+			break
+		}
+	}
+	if matchedGroup == nil {
+		return nil, fmt.Errorf("未找到合并组 %s", fuzzyGroupName)
+	}
+	var models []model.ChannelModel
+	if err := s.db.Where("channel_id = ? AND model_name LIKE ? AND enabled = ?",
+		channelID, matchedGroup.Pattern+"%", true).Find(&models).Error; err != nil {
+		return nil, err
+	}
+	if len(models) == 0 {
+		return nil, fmt.Errorf("合并组 %s 内无可用模型", fuzzyGroupName)
+	}
+	type modelWithRate struct {
+		model *model.ChannelModel
+		rate  float64
+	}
+	ranked := make([]modelWithRate, 0, len(models))
+	cutoff := time.Now().Add(-24 * time.Hour)
+	for i := range models {
+		var total, success int64
+		s.db.Model(&model.ModelCallLog{}).Where("channel_model_id = ? AND created_at > ?", models[i].ID, cutoff).Count(&total)
+		s.db.Model(&model.ModelCallLog{}).Where("channel_model_id = ? AND created_at > ? AND is_success = ?", models[i].ID, cutoff, true).Count(&success)
+		rate := float64(0)
+		if total > 0 {
+			rate = float64(success) / float64(total) * 100
+		}
+		ranked = append(ranked, modelWithRate{&models[i], rate})
+	}
+	sort.Slice(ranked, func(i, j int) bool { return ranked[i].rate > ranked[j].rate })
+	best := ranked[0].model
+	return s.resolveChannelRoute(
+		ChannelSelection{ChannelID: channelID, ChannelModelID: best.ID},
+		capability,
+		best.ModelName,
+	)
+}
+
+func (s *GenerateService) proxyWithAutoFailover(tenantID, userID uint, capability, path, contentType string, body []byte, modelName string) (*ProxyResult, error) {
+	if s.autoChannelService == nil {
+		return nil, errors.New("自动渠道服务不可用")
+	}
+
+	aggregated, err := s.autoChannelService.AggregateModels()
+	if err != nil {
+		return nil, err
+	}
+
+	var candidates []AggregatedChannelRef
+	for _, agg := range aggregated {
+		if agg.Model == modelName {
+			candidates = append(candidates, agg.Channels...)
+			break
+		}
+	}
+	if len(candidates) == 0 {
+		return nil, fmt.Errorf("Auto 渠道下未找到模型 %s", modelName)
+	}
+
+	sort.Slice(candidates, func(i, j int) bool {
+		return candidates[i].SuccessRate > candidates[j].SuccessRate
+	})
+
+	var lastErr error
+	for _, candidate := range candidates {
+		selection := ChannelSelection{ChannelID: candidate.ChannelID, ChannelModelID: candidate.ChannelModelID}
+		route, err := s.resolveChannelRoute(selection, capability, modelName)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+
+		cost, pricingResult, err := s.getRequiredPricing(tenantID, candidate.ChannelID, capability, modelName, contentType, body)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+
+		account, accErr := s.creditService.GetOrCreateAccount(tenantID, userID)
+		if accErr != nil || account.Balance < cost {
+			lastErr = fmt.Errorf("积分不足")
+			continue
+		}
+
+		upstream, err := s.doUpstreamRequest(http.MethodPost, route.Channel.BaseUrl, route.ApiKey, path, contentType, body)
+		if err != nil {
+			s.recordModelFailureWithRoute(tenantID, userID, capability, modelName, http.MethodPost, path, 0, nil, err.Error(), route)
+			lastErr = err
+			continue
+		}
+
+		if upstream.StatusCode >= 400 {
+			s.recordModelFailureWithRoute(tenantID, userID, capability, modelName, http.MethodPost, path, upstream.StatusCode, upstream.Body, "", route)
+			lastErr = fmt.Errorf("上游返回 %d", upstream.StatusCode)
+			continue
+		}
+
+		s.recordModelSuccessWithRoute(tenantID, userID, capability, modelName, http.MethodPost, path, upstream.StatusCode, upstream.ResponseTimeMs, route)
+
+		if cost > 0 {
+			metadata, note := buildCreditSpendDetail(capability, modelName, path, pricingResult)
+			_ = s.creditService.SpendWithMetadata(0, userID, cost, capability, modelName, note, metadata)
+		}
+
+		account, _ = s.creditService.GetOrCreateAccount(tenantID, userID)
+		balance := 0
+		if account != nil {
+			balance = account.Balance
+		}
+
+		return &ProxyResult{
+			StatusCode: upstream.StatusCode,
+			Body:       upstream.Body,
+			Headers:    upstream.Headers,
+			Cost:       cost,
+			Balance:    balance,
+		}, nil
+	}
+
+	if lastErr != nil {
+		return nil, fmt.Errorf("Auto 路由所有渠道均失败: %v", lastErr)
+	}
+	return nil, errors.New("Auto 路由无可用渠道")
+}
+
 func (s *GenerateService) ResolveChannelRouteForEstimate(selection ChannelSelection, capability, modelName string) error {
 	_, err := s.resolveChannelRoute(selection, capability, modelName)
 	return err
@@ -239,6 +387,14 @@ func channelSelectionFromQuery(path string) ChannelSelection {
 	}
 	values := parsed.Query()
 	return ChannelSelection{ChannelID: parseUintParam(values.Get("channel_id")), ChannelModelID: parseUintParam(values.Get("channel_model_id"))}
+}
+
+func extractFuzzyGroupName(path string) string {
+	parsed, err := url.Parse(path)
+	if err != nil {
+		return ""
+	}
+	return parsed.Query().Get("fuzzy_group_name")
 }
 
 func parseUintParam(value string) uint {
@@ -342,7 +498,32 @@ func (s *GenerateService) proxy(tenantID, userID uint, genType, path, contentTyp
 		s.recordModelFailure(tenantID, userID, genType, modelName, http.MethodPost, path, 0, nil, err.Error())
 		return nil, err
 	}
-	route, err := s.resolveChannelRoute(selection, genType, modelName)
+
+	// Auto channel routing with success-rate priority failover
+	if selection.ChannelID == 0 && s.autoChannelService != nil {
+		result, err := s.proxyWithAutoFailover(tenantID, userID, genType, path, contentType, body, modelName)
+		if err != nil {
+			s.recordModelFailure(tenantID, userID, genType, modelName, http.MethodPost, path, 0, nil, err.Error())
+			return nil, err
+		}
+		return result, nil
+	}
+
+	var route *channelRouteContext
+	var err error
+	fuzzyGroupName := extractFuzzyGroupName(path)
+	if fuzzyGroupName != "" {
+		route, err = s.resolveFuzzyMergeRoute(selection.ChannelID, fuzzyGroupName, genType)
+		if err != nil && strings.Contains(err.Error(), "未找到合并组") {
+			// Group not found, fall through to normal route
+		} else if err != nil {
+			s.recordModelFailure(tenantID, userID, genType, modelName, http.MethodPost, path, 0, nil, err.Error())
+			return nil, err
+		}
+	}
+	if route == nil {
+		route, err = s.resolveChannelRoute(selection, genType, modelName)
+	}
 	if err != nil {
 		s.recordModelFailure(tenantID, userID, genType, modelName, http.MethodPost, path, 0, nil, err.Error())
 		return nil, err
@@ -397,6 +578,9 @@ func (s *GenerateService) proxy(tenantID, userID uint, genType, path, contentTyp
 		}
 	}
 	if upstream.StatusCode >= 400 {
+		if disabled, msg := s.checkAndDisableOnBalanceError(respBytes, route); disabled {
+			return nil, errors.New(msg)
+		}
 		return &ProxyResult{
 			StatusCode: upstream.StatusCode,
 			Body:       respBytes,
@@ -507,7 +691,32 @@ func (s *GenerateService) ProxyRaw(tenantID, userID uint, method, path, contentT
 		s.recordModelFailure(tenantID, userID, chargeType, modelName, method, path, 0, nil, err.Error())
 		return nil, err
 	}
-	route, err := s.resolveChannelRoute(selection, chargeType, modelName)
+
+	// Auto channel routing with success-rate priority failover
+	if selection.ChannelID == 0 && s.autoChannelService != nil {
+		result, err := s.proxyWithAutoFailover(tenantID, userID, chargeType, path, contentType, body, modelName)
+		if err != nil {
+			s.recordModelFailure(tenantID, userID, chargeType, modelName, method, path, 0, nil, err.Error())
+			return nil, err
+		}
+		return result, nil
+	}
+
+	var route *channelRouteContext
+	var err error
+	fuzzyGroupName := extractFuzzyGroupName(path)
+	if fuzzyGroupName != "" {
+		route, err = s.resolveFuzzyMergeRoute(selection.ChannelID, fuzzyGroupName, chargeType)
+		if err != nil && strings.Contains(err.Error(), "未找到合并组") {
+			// Group not found, fall through to normal route
+		} else if err != nil {
+			s.recordModelFailure(tenantID, userID, chargeType, modelName, method, path, 0, nil, err.Error())
+			return nil, err
+		}
+	}
+	if route == nil {
+		route, err = s.resolveChannelRoute(selection, chargeType, modelName)
+	}
 	if err != nil {
 		s.recordModelFailure(tenantID, userID, chargeType, modelName, method, path, 0, nil, err.Error())
 		return nil, err
@@ -546,6 +755,11 @@ func (s *GenerateService) ProxyRaw(tenantID, userID uint, method, path, contentT
 
 	if upstream.StatusCode >= 400 && chargeType != "" {
 		s.recordModelFailureWithRoute(tenantID, userID, chargeType, modelName, method, path, upstream.StatusCode, respBytes, "", route)
+	}
+	if upstream.StatusCode >= 400 {
+		if disabled, msg := s.checkAndDisableOnBalanceError(respBytes, route); disabled {
+			return nil, errors.New(msg)
+		}
 	}
 	if upstream.StatusCode < 400 && strings.ToUpper(strings.TrimSpace(method)) == http.MethodGet {
 		if failed, responseModel, message := readFailedModelTaskResponse(respBytes); failed {
@@ -606,7 +820,32 @@ func (s *GenerateService) ProxyRawWithRepair(tenantID, userID uint, method, path
 		s.recordModelFailure(tenantID, userID, generation, modelName, method, path, 0, nil, err.Error())
 		return nil, err
 	}
-	route, err := s.resolveChannelRoute(selection, generation, modelName)
+
+	// Auto channel routing with success-rate priority failover
+	if selection.ChannelID == 0 && s.autoChannelService != nil {
+		result, err := s.proxyWithAutoFailover(tenantID, userID, generation, path, contentType, body, modelName)
+		if err != nil {
+			s.recordModelFailure(tenantID, userID, generation, modelName, method, path, 0, nil, err.Error())
+			return nil, err
+		}
+		return result, nil
+	}
+
+	var route *channelRouteContext
+	var err error
+	fuzzyGroupName := extractFuzzyGroupName(path)
+	if fuzzyGroupName != "" {
+		route, err = s.resolveFuzzyMergeRoute(selection.ChannelID, fuzzyGroupName, generation)
+		if err != nil && strings.Contains(err.Error(), "未找到合并组") {
+			// Group not found, fall through to normal route
+		} else if err != nil {
+			s.recordModelFailure(tenantID, userID, generation, modelName, method, path, 0, nil, err.Error())
+			return nil, err
+		}
+	}
+	if route == nil {
+		route, err = s.resolveChannelRoute(selection, generation, modelName)
+	}
 	if err != nil {
 		s.recordModelFailure(tenantID, userID, generation, modelName, method, path, 0, nil, err.Error())
 		return nil, err
@@ -660,6 +899,12 @@ func (s *GenerateService) ProxyRawWithRepair(tenantID, userID uint, method, path
 					respBytes = converted
 				}
 			}
+		}
+	}
+
+	if upstream.StatusCode >= 400 {
+		if disabled, msg := s.checkAndDisableOnBalanceError(respBytes, route); disabled {
+			return nil, errors.New(msg)
 		}
 	}
 
@@ -870,6 +1115,48 @@ func isCapabilityMismatchMessage(message string) bool {
 		}
 	}
 	return false
+}
+
+// isUpstreamBalanceError checks if the response indicates an upstream balance/credit issue.
+// These keywords mean the upstream API key has run out of credits — the channel should be disabled.
+func isUpstreamBalanceError(body []byte, fallbackError string) bool {
+	checkText := strings.ToLower(string(fallbackError))
+	if len(body) > 0 {
+		checkText = strings.ToLower(string(body))
+	}
+	balanceKeywords := []string{
+		"扣费额度失败",
+		"余额不足",
+		"insufficient balance",
+		"insufficient_quota",
+		"quota exceeded",
+		"billing failed",
+	}
+	for _, kw := range balanceKeywords {
+		if strings.Contains(checkText, strings.ToLower(kw)) {
+			return true
+		}
+	}
+	return false
+}
+
+// checkAndDisableOnBalanceError checks upstream response for balance-related errors
+// and disables the channel if found. Returns true + error message if disabled.
+func (s *GenerateService) checkAndDisableOnBalanceError(respBody []byte, route *channelRouteContext) (bool, string) {
+	if route == nil || route.Channel == nil {
+		return false, ""
+	}
+	if !isUpstreamBalanceError(respBody, "") {
+		return false, ""
+	}
+	channelID := route.Channel.ID
+	if err := s.channelSvc.Disable(channelID); err != nil {
+		log.Printf("Failed to auto-disable channel %d: %v", channelID, err)
+		return false, ""
+	}
+	msg := fmt.Sprintf("渠道 %s 因上游余额不足已被自动禁用", route.Channel.Name)
+	log.Printf("Auto-disabling channel %d (%s) due to upstream balance error", channelID, route.Channel.Name)
+	return true, msg
 }
 
 func buildRepairRequestContext(generation, method, path, contentType string, body []byte) *RepairRequestContext {

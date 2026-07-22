@@ -12,11 +12,12 @@ import (
 )
 
 type ChannelHandler struct {
-	channelService *service.ChannelService
+	channelService     *service.ChannelService
+	autoChannelService *service.AutoChannelService
 }
 
-func NewChannelHandler(channelService *service.ChannelService) *ChannelHandler {
-	return &ChannelHandler{channelService: channelService}
+func NewChannelHandler(channelService *service.ChannelService, autoChannelService *service.AutoChannelService) *ChannelHandler {
+	return &ChannelHandler{channelService: channelService, autoChannelService: autoChannelService}
 }
 
 func (h *ChannelHandler) List(c *gin.Context) {
@@ -119,6 +120,24 @@ func (h *ChannelHandler) Delete(c *gin.Context) {
 		return
 	}
 	model.OK(c, gin.H{"deleted": true})
+}
+
+func (h *ChannelHandler) GetAuto(c *gin.Context) {
+	model.OK(c, gin.H{
+		"id":          0,
+		"name":        "Auto（自动路由）",
+		"enabled":     true,
+		"is_virtual":  true,
+	})
+}
+
+func (h *ChannelHandler) ListAutoModels(c *gin.Context) {
+	models, err := h.autoChannelService.AggregateModels()
+	if err != nil {
+		model.Fail(c, http.StatusInternalServerError, "读取聚合模型失败")
+		return
+	}
+	model.OK(c, gin.H{"models": models})
 }
 
 func parseChannelID(c *gin.Context) (uint, bool) {

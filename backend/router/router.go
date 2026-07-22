@@ -31,6 +31,8 @@ func Setup(r *gin.Engine, authService *service.AuthService, authHandler *handler
 		auth.GET("/credits/estimate", creditHandler.EstimateCost)
 		auth.GET("/api-config/catalog", apiConfigHandler.Catalog)
 		auth.GET("/channels", channelHandler.List)
+		auth.GET("/channels/auto", channelHandler.GetAuto)
+		auth.GET("/channels/auto/models", channelHandler.ListAutoModels)
 		auth.GET("/channels/metrics", metricsHandler.Read)
 		auth.GET("/channels/:id/models", channelModelHandler.List)
 		auth.POST("/media/tmp", tempMediaHandler.UploadImage)
