@@ -123,8 +123,9 @@ func (f fakeChannelModelServiceModelRepo) ListByChannel(channelID uint, enabledO
 	return result, nil
 }
 
-func (f fakeChannelModelServiceModelRepo) Save(_ *model.ChannelModel) error   { return nil }
-func (f fakeChannelModelServiceModelRepo) Upsert(_ *model.ChannelModel) error { return nil }
+func (f fakeChannelModelServiceModelRepo) Save(_ *model.ChannelModel) error           { return nil }
+func (f fakeChannelModelServiceModelRepo) Upsert(_ *model.ChannelModel) error         { return nil }
+func (f fakeChannelModelServiceModelRepo) DeleteStaleModels(_ uint, _ []string) error { return nil }
 
 func newRouteTestGenerateService() *GenerateService {
 	return &GenerateService{
