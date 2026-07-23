@@ -31,7 +31,7 @@ export function CanvasConfigNodePanel({ node, isRunning, inputSummary, onConfigC
     const mode = node.metadata?.generationMode || "image";
     const config = buildNodeConfig(globalConfig, node, mode);
     const count = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
-    const credits = useEstimatedCreditCost(config.model, mode === "image" ? count : 1, mode === "video" ? { type: "video", seconds: config.videoSeconds, resolution: config.vquality, size: config.size } : { type: mode });
+    const creditEstimate = useEstimatedCreditCost(config.model, mode === "image" ? count : 1, mode === "video" ? { type: "video", seconds: config.videoSeconds, resolution: config.vquality, size: config.size } : { type: mode });
     const chipStyle = { background: theme.node.fill, borderColor: theme.node.stroke, color: theme.node.text };
     const hasAnyInput = Boolean(inputSummary.textCount || inputSummary.imageCount || inputSummary.videoCount || inputSummary.audioCount);
     const hasComposerContent = Boolean((node.metadata?.composerContent ?? node.metadata?.prompt ?? "").trim());
@@ -150,7 +150,7 @@ export function CanvasConfigNodePanel({ node, isRunning, inputSummary, onConfigC
                         <>
                             <span className="inline-flex items-center gap-1">
                                 <CreditSymbol />
-                                {credits.toLocaleString()}
+                                {creditEstimate.status === "ready" ? creditEstimate.credits.toLocaleString() : "—"}
                             </span>
                             <Play className="size-4" />
                             <span>开始生成</span>
@@ -159,7 +159,7 @@ export function CanvasConfigNodePanel({ node, isRunning, inputSummary, onConfigC
                 </span>
             </Button>
             <div className="mt-1 cursor-default" onMouseDown={(event) => event.stopPropagation()}>
-                <CreditCostHint credits={credits} balance={null} compact />
+                <CreditCostHint estimate={creditEstimate} balance={null} compact />
             </div>
         </div>
     );

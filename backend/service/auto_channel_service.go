@@ -73,5 +73,12 @@ func (s *AutoChannelService) computeSuccessRate(channelModelID uint, cutoff time
 		return 0
 	}
 	s.db.Model(&model.ModelCallLog{}).Where("channel_model_id = ? AND created_at > ? AND is_success = ?", channelModelID, cutoff, true).Count(&success)
-	return float64(success) / float64(total)
+	return successRatePercentage(total, success)
+}
+
+func successRatePercentage(total, success int64) float64 {
+	if total == 0 {
+		return 0
+	}
+	return float64(success) / float64(total) * 100
 }

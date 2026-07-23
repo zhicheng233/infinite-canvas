@@ -36,9 +36,7 @@ apiClient.interceptors.response.use(
     },
     (error) => {
         if (axios.isAxiosError(error) && error.response?.status === 401) {
-            if (typeof window !== "undefined") {
-                localStorage.removeItem("infinite-canvas:auth_token");
-            }
+            if (typeof window !== "undefined") clearStoredToken();
         }
         return Promise.reject(error);
     },
@@ -52,11 +50,13 @@ export function getStoredToken(): string | null {
 }
 
 export function setStoredToken(token: string): void {
+    if (typeof window === "undefined") return;
     localStorage.setItem(AUTH_TOKEN_KEY, token);
-    if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent(AUTH_TOKEN_CHANGE_EVENT, { detail: token }));
+    window.dispatchEvent(new CustomEvent(AUTH_TOKEN_CHANGE_EVENT, { detail: token }));
 }
 
 export function clearStoredToken(): void {
+    if (typeof window === "undefined") return;
     localStorage.removeItem(AUTH_TOKEN_KEY);
-    if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent(AUTH_TOKEN_CHANGE_EVENT));
+    window.dispatchEvent(new CustomEvent(AUTH_TOKEN_CHANGE_EVENT));
 }

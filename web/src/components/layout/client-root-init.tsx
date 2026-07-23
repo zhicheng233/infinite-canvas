@@ -2,7 +2,7 @@
 
 import type { ReactNode } from "react";
 import { useEffect, useRef } from "react";
-import { getChannels, getChannelModels } from "@/services/api/channel";
+import { getAutoChannelModels, getChannels, getChannelModels } from "@/services/api/channel";
 import { AUTH_TOKEN_CHANGE_EVENT, getStoredToken } from "@/services/api/client";
 import { getMetrics } from "@/services/api/metrics";
 import { listPricing } from "@/services/api/pricing";
@@ -10,10 +10,10 @@ import { useConfigStore } from "@/stores/use-config-store";
 
 export function ClientRootInit({ children }: { children: ReactNode }) {
     const handledConfigParams = useRef(false);
-    const applyServerChannelCatalog = useConfigStore((state) => state.applyServerChannelCatalog);
-    const applyServerOptionMetadata = useConfigStore((state) => state.applyServerOptionMetadata);
-    const setServerCatalogError = useConfigStore((state) => state.setServerCatalogError);
-    const setServerCatalogLoading = useConfigStore((state) => state.setServerCatalogLoading);
+    const beginServerCatalogRefresh = useConfigStore((state) => state.beginServerCatalogRefresh);
+    const invalidateServerCatalogRefresh = useConfigStore((state) => state.invalidateServerCatalogRefresh);
+    const applyServerCatalogSnapshot = useConfigStore((state) => state.applyServerCatalogSnapshot);
+    const failServerCatalogRefresh = useConfigStore((state) => state.failServerCatalogRefresh);
 
     // URL-based config import removed - API config is now admin-only via server backend
     useEffect(() => {
@@ -33,20 +33,20 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
     useEffect(() => {
         let cancelled = false;
         const syncCatalog = async () => {
-            if (!getStoredToken()) return;
-            setServerCatalogLoading(true);
-            setServerCatalogError(null);
+            const token = getStoredToken();
+            if (!token) {
+                invalidateServerCatalogRefresh();
+                return;
+            }
+            const requestId = beginServerCatalogRefresh();
             try {
-                const channels = await getChannels();
+                const [channels, autoChannelModels, pricing, metrics] = await Promise.all([getChannels(), getAutoChannelModels(), listPricing(), getMetrics(24).catch(() => null)]);
                 const entries = await Promise.all(channels.map(async (channel) => [channel.id, await getChannelModels(channel.id)] as const));
-                if (cancelled) return;
-                applyServerChannelCatalog(channels, Object.fromEntries(entries));
-                const [pricing, metrics] = await Promise.all([listPricing(), getMetrics(24).catch(() => null)]);
-                if (!cancelled) applyServerOptionMetadata(pricing, metrics);
+                if (!cancelled && token === getStoredToken()) {
+                    applyServerCatalogSnapshot(requestId, { channels, channelModels: Object.fromEntries(entries), autoChannelModels, pricing, metrics });
+                }
             } catch (reason) {
-                if (!cancelled) setServerCatalogError(reason instanceof Error ? reason.message : "加载模型列表失败");
-            } finally {
-                if (!cancelled) setServerCatalogLoading(false);
+                if (!cancelled && token === getStoredToken()) failServerCatalogRefresh(requestId, reason instanceof Error ? reason.message : "加载模型列表失败");
             }
         };
 
@@ -67,7 +67,7 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
             window.removeEventListener(AUTH_TOKEN_CHANGE_EVENT, handleTokenChange);
             window.removeEventListener("storage", handleStorage);
         };
-    }, [applyServerChannelCatalog, applyServerOptionMetadata, setServerCatalogError, setServerCatalogLoading]);
+    }, [applyServerCatalogSnapshot, beginServerCatalogRefresh, failServerCatalogRefresh, invalidateServerCatalogRefresh]);
 
     return <>{children}</>;
 }

@@ -36,11 +36,16 @@ type GenerateService struct {
 	channelSvc         channelKeyReader
 	channelRepo        channelReader
 	modelRepo          channelModelReader
-	autoChannelService *AutoChannelService
+	autoChannelService autoChannelModelAggregator
 	mergeGroupRepo     mergeGroupRepoReader
+	estimateFuzzyRoute func(channelID uint, fuzzyGroupName, capability string) (*channelRouteContext, error)
 	db                 *gorm.DB
 	httpClient         *http.Client
 	encryptKey         string
+}
+
+type autoChannelModelAggregator interface {
+	AggregateModels() ([]AggregatedModel, error)
 }
 
 type channelReader interface {
@@ -101,6 +106,13 @@ type ChannelSelection struct {
 	ChannelID      uint
 	ChannelModelID uint
 }
+
+type ResolvedEstimateRoute struct {
+	Selection    ChannelSelection
+	PricingModel string
+}
+
+var ErrAutoNoPricedCandidate = errors.New("Auto 渠道无已配置计费的可用候选")
 
 type channelRouteContext struct {
 	Channel        *model.Channel
@@ -304,9 +316,97 @@ func (s *GenerateService) proxyWithAutoFailover(tenantID, userID uint, capabilit
 	return nil, errors.New("Auto 路由无可用渠道")
 }
 
-func (s *GenerateService) ResolveChannelRouteForEstimate(selection ChannelSelection, capability, modelName string) error {
-	_, err := s.resolveChannelRoute(selection, capability, modelName)
-	return err
+func (s *GenerateService) ResolveChannelRouteForEstimate(tenantID uint, selection ChannelSelection, capability, modelName, fuzzyGroupName string) (ResolvedEstimateRoute, error) {
+	if strings.TrimSpace(fuzzyGroupName) != "" {
+		resolver := s.resolveFuzzyMergeRoute
+		if s.estimateFuzzyRoute != nil {
+			resolver = s.estimateFuzzyRoute
+		}
+		route, err := resolver(selection.ChannelID, fuzzyGroupName, capability)
+		return resolvedEstimateRoute(route, err)
+	}
+	if selection.ChannelID == 0 {
+		if s.autoChannelService == nil {
+			return ResolvedEstimateRoute{}, errors.New("自动渠道服务不可用")
+		}
+		aggregated, err := s.autoChannelService.AggregateModels()
+		if err != nil {
+			return ResolvedEstimateRoute{}, err
+		}
+		for _, item := range aggregated {
+			if item.Model != modelName {
+				continue
+			}
+			candidates := append([]AggregatedChannelRef(nil), item.Channels...)
+			sort.Slice(candidates, func(i, j int) bool { return candidates[i].SuccessRate > candidates[j].SuccessRate })
+			var lastRouteErr error
+			var pricingErr error
+			routeValid := false
+			for _, candidate := range candidates {
+				resolved := ChannelSelection{ChannelID: candidate.ChannelID, ChannelModelID: candidate.ChannelModelID}
+				route, routeErr := s.resolveChannelRoute(resolved, capability, modelName)
+				if routeErr == nil {
+					routeValid = true
+					pricingModel := route.ChannelModel.ModelName
+					pricing, err := s.creditRepo.FindPricing(tenantID, pricingModel, resolved.ChannelID)
+					if err == nil && pricing != nil {
+						return ResolvedEstimateRoute{Selection: resolved, PricingModel: pricingModel}, nil
+					}
+					if err != nil {
+						pricingErr = err
+					}
+				} else {
+					lastRouteErr = routeErr
+				}
+			}
+			if routeValid {
+				if pricingErr != nil {
+					return ResolvedEstimateRoute{}, pricingErr
+				}
+				return ResolvedEstimateRoute{}, fmt.Errorf("%w: %s", ErrAutoNoPricedCandidate, modelName)
+			}
+			if lastRouteErr != nil {
+				return ResolvedEstimateRoute{}, lastRouteErr
+			}
+		}
+		return ResolvedEstimateRoute{}, fmt.Errorf("Auto 渠道下未找到模型 %s", modelName)
+	}
+	route, err := s.resolveChannelRoute(selection, capability, modelName)
+	return resolvedEstimateRoute(route, err)
+}
+
+func resolvedEstimateRoute(route *channelRouteContext, err error) (ResolvedEstimateRoute, error) {
+	if err != nil {
+		return ResolvedEstimateRoute{}, err
+	}
+	if route == nil || route.ChannelModel == nil {
+		return ResolvedEstimateRoute{}, errors.New("未解析到具体渠道模型")
+	}
+	return ResolvedEstimateRoute{
+		Selection:    selectionFromRoute(route),
+		PricingModel: route.ChannelModel.ModelName,
+	}, nil
+}
+
+func selectionFromRoute(route *channelRouteContext) ChannelSelection {
+	if route == nil || route.ChannelID == nil || route.ChannelModelID == nil {
+		return ChannelSelection{}
+	}
+	return ChannelSelection{ChannelID: *route.ChannelID, ChannelModelID: *route.ChannelModelID}
+}
+
+func pricingIdentityFromRoute(route *channelRouteContext, fallbackChannelID uint, fallbackModel string) (uint, string) {
+	channelID := fallbackChannelID
+	modelName := fallbackModel
+	if route != nil {
+		if route.ChannelID != nil {
+			channelID = *route.ChannelID
+		}
+		if route.ChannelModel != nil && strings.TrimSpace(route.ChannelModel.ModelName) != "" {
+			modelName = route.ChannelModel.ModelName
+		}
+	}
+	return channelID, modelName
 }
 
 func uintPtr(value uint) *uint {
@@ -529,7 +629,8 @@ func (s *GenerateService) proxy(tenantID, userID uint, genType, path, contentTyp
 		return nil, err
 	}
 
-	cost, pricingResult, err := s.getRequiredPricing(tenantID, selection.ChannelID, genType, modelName, contentType, body)
+	pricingChannelID, pricingModel := pricingIdentityFromRoute(route, selection.ChannelID, modelName)
+	cost, pricingResult, err := s.getRequiredPricing(tenantID, pricingChannelID, genType, pricingModel, contentType, body)
 	if err != nil {
 		s.recordModelFailureWithRoute(tenantID, userID, genType, modelName, http.MethodPost, path, 0, nil, err.Error(), route)
 		return nil, err
@@ -591,8 +692,8 @@ func (s *GenerateService) proxy(tenantID, userID uint, genType, path, contentTyp
 	s.recordModelSuccessWithRoute(tenantID, userID, genType, modelName, http.MethodPost, path, upstream.StatusCode, upstream.ResponseTimeMs, route)
 
 	if cost > 0 {
-		metadata, note := buildCreditSpendDetail(genType, modelName, path, pricingResult)
-		if err := s.creditService.SpendWithMetadata(0, userID, cost, genType, modelName, note, metadata); err != nil {
+		metadata, note := buildCreditSpendDetail(genType, pricingModel, path, pricingResult)
+		if err := s.creditService.SpendWithMetadata(0, userID, cost, genType, pricingModel, note, metadata); err != nil {
 			return nil, err
 		}
 	}
@@ -721,7 +822,8 @@ func (s *GenerateService) ProxyRaw(tenantID, userID uint, method, path, contentT
 		s.recordModelFailure(tenantID, userID, chargeType, modelName, method, path, 0, nil, err.Error())
 		return nil, err
 	}
-	cost, _, pricingResult, err := s.getProxyCostByGeneration(tenantID, selection.ChannelID, method, chargeType, contentType, body, modelName)
+	pricingChannelID, pricingModel := pricingIdentityFromRoute(route, selection.ChannelID, modelName)
+	cost, _, pricingResult, err := s.getProxyCostByGeneration(tenantID, pricingChannelID, method, chargeType, contentType, body, pricingModel)
 	if err != nil {
 		s.recordModelFailureWithRoute(tenantID, userID, chargeType, modelName, method, path, 0, nil, err.Error(), route)
 		return nil, err
@@ -775,8 +877,8 @@ func (s *GenerateService) ProxyRaw(tenantID, userID uint, method, path, contentT
 	}
 
 	if upstream.StatusCode < 400 && cost > 0 {
-		metadata, note := buildCreditSpendDetail(chargeType, modelName, path, pricingResult)
-		if err := s.creditService.SpendWithMetadata(0, userID, cost, chargeType, modelName, note, metadata); err != nil {
+		metadata, note := buildCreditSpendDetail(chargeType, pricingModel, path, pricingResult)
+		if err := s.creditService.SpendWithMetadata(0, userID, cost, chargeType, pricingModel, note, metadata); err != nil {
 			return nil, err
 		}
 	}
@@ -850,7 +952,8 @@ func (s *GenerateService) ProxyRawWithRepair(tenantID, userID uint, method, path
 		s.recordModelFailure(tenantID, userID, generation, modelName, method, path, 0, nil, err.Error())
 		return nil, err
 	}
-	cost, chargeType, pricingResult, err := s.getProxyCostByGeneration(tenantID, selection.ChannelID, method, generation, contentType, body, modelName)
+	pricingChannelID, pricingModel := pricingIdentityFromRoute(route, selection.ChannelID, modelName)
+	cost, chargeType, pricingResult, err := s.getProxyCostByGeneration(tenantID, pricingChannelID, method, generation, contentType, body, pricingModel)
 	if err != nil {
 		s.recordModelFailureWithRoute(tenantID, userID, generation, modelName, method, path, 0, nil, err.Error(), route)
 		return nil, err
@@ -924,8 +1027,8 @@ func (s *GenerateService) ProxyRawWithRepair(tenantID, userID uint, method, path
 	}
 
 	if upstream.StatusCode < 400 && cost > 0 {
-		metadata, note := buildCreditSpendDetail(chargeType, modelName, path, pricingResult)
-		if err := s.creditService.SpendWithMetadata(0, userID, cost, chargeType, modelName, note, metadata); err != nil {
+		metadata, note := buildCreditSpendDetail(chargeType, pricingModel, path, pricingResult)
+		if err := s.creditService.SpendWithMetadata(0, userID, cost, chargeType, pricingModel, note, metadata); err != nil {
 			return nil, err
 		}
 	}

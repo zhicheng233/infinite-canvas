@@ -40,7 +40,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
     const hasImageContent = node.type === CanvasNodeType.Image && Boolean(node.metadata?.content);
     const isEditingExistingContent = hasTextContent || hasImageContent;
     const [prompt, setPrompt] = useState(isEditingExistingContent ? "" : node.metadata?.prompt || "");
-    const credits = useEstimatedCreditCost(config.model, mode === "image" ? config.count : 1, mode === "video" ? { type: "video", seconds: config.videoSeconds, resolution: config.vquality, size: config.size } : { type: mode });
+    const creditEstimate = useEstimatedCreditCost(config.model, mode === "image" ? config.count : 1, mode === "video" ? { type: "video", seconds: config.videoSeconds, resolution: config.vquality, size: config.size } : { type: mode });
 
     useEffect(() => {
         setPrompt(isEditingExistingContent ? "" : node.metadata?.prompt || "");
@@ -129,7 +129,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                             <>
                                 <span className="inline-flex items-center gap-1 text-xs font-medium tabular-nums">
                                     <CreditSymbol />
-                                    {credits.toLocaleString()}
+                                    {creditEstimate.status === "ready" ? creditEstimate.credits.toLocaleString() : "—"}
                                 </span>
                                 <ArrowUp className="size-4" />
                             </>
@@ -138,7 +138,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                 </Button>
             </div>
             <div className="mt-1">
-                <CreditCostHint credits={credits} balance={null} compact />
+                <CreditCostHint estimate={creditEstimate} balance={null} compact />
             </div>
         </div>
     );

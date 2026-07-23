@@ -1,6 +1,7 @@
 package service
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -67,6 +68,34 @@ func (f *countingPricingReader) FindPricing(_ uint, _ string, _ uint) (*model.Cr
 
 type fakePricingMapReader struct {
 	items map[string]map[uint]model.CreditPricing
+}
+
+type fakeAutoChannelModelAggregator struct {
+	items []AggregatedModel
+}
+
+type fakeChannelPricingReader struct {
+	items map[uint]*model.CreditPricing
+}
+
+type recordingPricingReader struct {
+	items     map[string]map[uint]*model.CreditPricing
+	modelName string
+	channelID uint
+}
+
+func (f fakeChannelPricingReader) FindPricing(_ uint, _ string, channelID uint) (*model.CreditPricing, error) {
+	return f.items[channelID], nil
+}
+
+func (f *recordingPricingReader) FindPricing(_ uint, modelName string, channelID uint) (*model.CreditPricing, error) {
+	f.modelName = modelName
+	f.channelID = channelID
+	return f.items[modelName][channelID], nil
+}
+
+func (f fakeAutoChannelModelAggregator) AggregateModels() ([]AggregatedModel, error) {
+	return f.items, nil
 }
 
 func (f fakePricingMapReader) FindPricingMap(_ uint) (map[string]map[uint]model.CreditPricing, error) {
@@ -169,6 +198,130 @@ func TestResolveChannelRouteSameModelDifferentChannels(t *testing.T) {
 	}
 	if second.Channel.BaseUrl != "https://b.example" || second.ApiKey != "key-b" || *second.ChannelModelID != 22 {
 		t.Fatalf("unexpected second route: %#v", second)
+	}
+}
+
+func TestResolveChannelRouteForEstimateUsesExactNormalSelection(t *testing.T) {
+	svc := newRouteTestGenerateService()
+
+	resolved, err := svc.ResolveChannelRouteForEstimate(1, ChannelSelection{ChannelID: 2, ChannelModelID: 22}, "image", "same-model", "")
+	if err != nil {
+		t.Fatalf("resolve estimate route failed: %v", err)
+	}
+	if resolved.Selection.ChannelID != 2 || resolved.Selection.ChannelModelID != 22 || resolved.PricingModel != "same-model" {
+		t.Fatalf("unexpected resolved route: %#v", resolved)
+	}
+	if _, err := svc.ResolveChannelRouteForEstimate(1, ChannelSelection{ChannelID: 2, ChannelModelID: 11}, "image", "same-model", ""); err == nil {
+		t.Fatal("expected mismatched exact selection to fail")
+	}
+}
+
+func TestResolveChannelRouteForEstimateMatchesAutoCandidatePolicy(t *testing.T) {
+	svc := newRouteTestGenerateService()
+	svc.autoChannelService = fakeAutoChannelModelAggregator{items: []AggregatedModel{{Model: "same-model", Channels: []AggregatedChannelRef{
+		{ChannelID: 1, ChannelModelID: 11, SuccessRate: 0.4},
+		{ChannelID: 2, ChannelModelID: 22, SuccessRate: 0.9},
+	}}}}
+	svc.creditRepo = fakeChannelPricingReader{items: map[uint]*model.CreditPricing{
+		2: {Model: "same-model", ChannelID: 2, CreditsPerUnit: 7, UnitType: model.UnitPerImage},
+	}}
+
+	resolved, err := svc.ResolveChannelRouteForEstimate(1, ChannelSelection{}, "image", "same-model", "")
+	if err != nil {
+		t.Fatalf("resolve Auto estimate route failed: %v", err)
+	}
+	if resolved.Selection.ChannelID != 2 || resolved.Selection.ChannelModelID != 22 || resolved.PricingModel != "same-model" {
+		t.Fatalf("expected highest-success Auto candidate, got %#v", resolved)
+	}
+}
+
+func TestResolveChannelRouteForEstimateSkipsUnpricedAutoCandidate(t *testing.T) {
+	svc := newRouteTestGenerateService()
+	svc.autoChannelService = fakeAutoChannelModelAggregator{items: []AggregatedModel{{Model: "same-model", Channels: []AggregatedChannelRef{
+		{ChannelID: 1, ChannelModelID: 11, SuccessRate: 0.4},
+		{ChannelID: 2, ChannelModelID: 22, SuccessRate: 0.9},
+	}}}}
+	svc.creditRepo = fakeChannelPricingReader{items: map[uint]*model.CreditPricing{
+		1: {Model: "same-model", ChannelID: 1, CreditsPerUnit: 3, UnitType: model.UnitPerImage},
+	}}
+
+	resolved, err := svc.ResolveChannelRouteForEstimate(1, ChannelSelection{}, "image", "same-model", "")
+	if err != nil {
+		t.Fatalf("resolve Auto estimate route failed: %v", err)
+	}
+	if resolved.Selection.ChannelID != 1 || resolved.Selection.ChannelModelID != 11 || resolved.PricingModel != "same-model" {
+		t.Fatalf("expected first priced Auto candidate, got %#v", resolved)
+	}
+}
+
+func TestResolveChannelRouteForEstimateRejectsAllUnpricedAutoCandidates(t *testing.T) {
+	svc := newRouteTestGenerateService()
+	svc.autoChannelService = fakeAutoChannelModelAggregator{items: []AggregatedModel{{Model: "same-model", Channels: []AggregatedChannelRef{
+		{ChannelID: 1, ChannelModelID: 11, SuccessRate: 40},
+		{ChannelID: 2, ChannelModelID: 22, SuccessRate: 90},
+	}}}}
+	svc.creditRepo = fakeChannelPricingReader{items: map[uint]*model.CreditPricing{}}
+
+	_, err := svc.ResolveChannelRouteForEstimate(1, ChannelSelection{}, "image", "same-model", "")
+	if err == nil || !strings.Contains(err.Error(), "无已配置计费的可用候选") {
+		t.Fatalf("expected dedicated no-priced-candidate error, got %v", err)
+	}
+}
+
+func TestResolveChannelRouteForEstimateUsesGenerationMergeResolver(t *testing.T) {
+	svc := newRouteTestGenerateService()
+	svc.estimateFuzzyRoute = func(channelID uint, fuzzyGroupName, capability string) (*channelRouteContext, error) {
+		if channelID != 1 || fuzzyGroupName != "gpt-4o" || capability != "text" {
+			t.Fatalf("unexpected merge request: channel=%d group=%s capability=%s", channelID, fuzzyGroupName, capability)
+		}
+		return &channelRouteContext{
+			ChannelModel:   &model.ChannelModel{BaseModel: model.BaseModel{ID: 44}, ChannelID: 1, ModelName: "text-model"},
+			ChannelID:      uintPtr(1),
+			ChannelModelID: uintPtr(44),
+		}, nil
+	}
+
+	resolved, err := svc.ResolveChannelRouteForEstimate(1, ChannelSelection{ChannelID: 1}, "text", "gpt-4o", "gpt-4o")
+	if err != nil {
+		t.Fatalf("resolve merge estimate route failed: %v", err)
+	}
+	if resolved.Selection.ChannelID != 1 || resolved.Selection.ChannelModelID != 44 || resolved.PricingModel != "text-model" {
+		t.Fatalf("unexpected merge route: %#v", resolved)
+	}
+}
+
+func TestMergePricingIdentityUsesResolvedConcreteModel(t *testing.T) {
+	pricing := &recordingPricingReader{items: map[string]map[uint]*model.CreditPricing{
+		"text-model": {1: {Model: "text-model", ChannelID: 1, CreditsPerUnit: 4, UnitType: model.UnitPerToken}},
+	}}
+	svc := newRouteTestGenerateService()
+	svc.creditRepo = pricing
+	route := &channelRouteContext{
+		ChannelModel: &model.ChannelModel{ChannelID: 1, ModelName: "text-model"},
+		ChannelID:    uintPtr(1),
+	}
+	channelID, pricingModel := pricingIdentityFromRoute(route, 1, "gpt-4o")
+	if _, _, err := svc.getRequiredPricing(1, channelID, "text", pricingModel, "application/json", []byte(`{"model":"gpt-4o"}`)); err != nil {
+		t.Fatalf("price concrete merge model: %v", err)
+	}
+	if pricing.modelName != "text-model" || pricing.channelID != 1 {
+		t.Fatalf("priced alias instead of concrete model: model=%q channel=%d", pricing.modelName, pricing.channelID)
+	}
+}
+
+func TestAutoSuccessRateSerializesAsFrontendPercentage(t *testing.T) {
+	payload, err := json.Marshal(AggregatedChannelRef{SuccessRate: successRatePercentage(100, 95)})
+	if err != nil {
+		t.Fatalf("marshal Auto channel: %v", err)
+	}
+	var decoded struct {
+		SuccessRate float64 `json:"success_rate"`
+	}
+	if err := json.Unmarshal(payload, &decoded); err != nil {
+		t.Fatalf("decode Auto channel: %v", err)
+	}
+	if got := decoded.SuccessRate; got != 95 {
+		t.Fatalf("serialized success_rate = %v, want 95; payload=%s", got, payload)
 	}
 }
 

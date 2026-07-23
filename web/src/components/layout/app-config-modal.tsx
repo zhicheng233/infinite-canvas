@@ -1,10 +1,9 @@
 "use client";
 
 import { App, Button, Form, Input, Modal, Tabs } from "antd";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import { ModelPicker } from "@/components/model-picker";
-import { getChannels, getChannelModels } from "@/services/api/channel";
 import { modelOptionName, useConfigStore, type ModelCapability } from "@/stores/use-config-store";
 
 type ModelGroup = {
@@ -25,32 +24,12 @@ export function AppConfigModal() {
     const [activeTab, setActiveTab] = useState("preferences");
     const config = useConfigStore((state) => state.config);
     const updateConfig = useConfigStore((state) => state.updateConfig);
-    const applyServerChannelCatalog = useConfigStore((state) => state.applyServerChannelCatalog);
     const serverCatalogLoading = useConfigStore((state) => state.serverCatalogLoading);
     const serverCatalogError = useConfigStore((state) => state.serverCatalogError);
     const isConfigOpen = useConfigStore((state) => state.isConfigOpen);
     const shouldPromptContinue = useConfigStore((state) => state.shouldPromptContinue);
     const setConfigDialogOpen = useConfigStore((state) => state.setConfigDialogOpen);
     const clearPromptContinue = useConfigStore((state) => state.clearPromptContinue);
-
-    useEffect(() => {
-        if (!isConfigOpen) return;
-        let mounted = true;
-        const fetchCatalog = async () => {
-            try {
-                const channels = await getChannels();
-                const entries = await Promise.all(channels.map(async (channel) => [channel.id, await getChannelModels(channel.id)] as const));
-                if (!mounted) return;
-                applyServerChannelCatalog(channels, Object.fromEntries(entries));
-            } catch (err: any) {
-                if (mounted) message.error(err?.message || "加载模型列表失败");
-            }
-        };
-        void fetchCatalog();
-        return () => {
-            mounted = false;
-        };
-    }, [applyServerChannelCatalog, isConfigOpen, message]);
 
     const finishConfig = () => {
         setConfigDialogOpen(false);

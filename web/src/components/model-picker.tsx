@@ -6,7 +6,7 @@ import { Cpu } from "lucide-react";
 
 import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import { channelModelOptionsByCapability, isMergeModelValue, modelOptionLabel, modelOptionName, selectableModelsByCapability, selectedChannelId, useConfigStore, type AiConfig, type ModelCapability } from "@/stores/use-config-store";
+import { channelModelOptionsByCapability, hasUsableAutoChannel, isMergeModelValue, modelOptionLabel, modelOptionName, selectableModelsByCapability, selectedChannelId, useConfigStore, type AiConfig, type ModelCapability } from "@/stores/use-config-store";
 
 type ModelPickerProps = {
     config: AiConfig;
@@ -25,6 +25,10 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
     const options = useMemo(() => Array.from(new Set([...(capability ? [] : [value]), ...selectableModelsByCapability(config, capability)].filter((model): model is string => Boolean(model)))), [capability, config, value]);
     const current = value || "";
     const channels = useConfigStore((state) => state.serverChannels);
+    const channelModels = useConfigStore((state) => state.serverChannelModels);
+    const autoChannelModels = useConfigStore((state) => state.autoChannelModels);
+    const serverPricing = useConfigStore((state) => state.serverPricing);
+    const serverMetrics = useConfigStore((state) => state.serverMetrics);
     const serverCatalogLoading = useConfigStore((state) => state.serverCatalogLoading);
     const serverCatalogError = useConfigStore((state) => state.serverCatalogError);
     const selectCapabilityChannel = useConfigStore((state) => state.selectCapabilityChannel);
@@ -89,21 +93,33 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
 
     if (!capability) return picker;
     const channelId = selectedChannelId(config, capability);
+    const hasAutoOptions = hasUsableAutoChannel(capability, { serverChannels: channels, serverChannelModels: channelModels, autoChannelModels, serverPricing, serverMetrics });
     return (
         <div className={cn("flex min-w-0 gap-2", fullWidth && "w-full")}>
-            <Select value={channelId != null ? String(channelId) : ""} onValueChange={(value) => selectCapabilityChannel(capability, Number(value) || null)}>
-                <SelectTrigger className="h-8 min-w-[7rem] max-w-[10rem] justify-start rounded-full border border-input bg-transparent px-3 text-sm shadow-sm" title={channelId === 0 ? "Auto（自动路由）" : channels.find((channel) => channel.id === channelId)?.name || "选择渠道"}>
+            <Select
+                value={channelId != null ? String(channelId) : ""}
+                onValueChange={(value) => {
+                    const parsed = Number(value);
+                    selectCapabilityChannel(capability, value.trim() && Number.isInteger(parsed) && parsed >= 0 ? parsed : null);
+                }}
+            >
+                <SelectTrigger
+                    className="h-8 min-w-[7rem] max-w-[10rem] justify-start rounded-full border border-input bg-transparent px-3 text-sm shadow-sm"
+                    title={channelId === 0 ? "Auto（自动路由）" : channels.find((channel) => channel.id === channelId)?.name || "选择渠道"}
+                >
                     <span className="truncate">{channelId === 0 ? "Auto（自动路由）" : channels.find((channel) => channel.id === channelId)?.name || "选择渠道"}</span>
                 </SelectTrigger>
                 <SelectContent className="z-[1200] max-w-[calc(100vw-24px)]" position="popper" align="start" side="bottom" sideOffset={6}>
-                    {channels.length ? (
+                    {channels.length || hasAutoOptions ? (
                         <>
-                            <SelectItem key="auto" value="0">
-                                <span className="flex items-center gap-2">
-                                    <SwapOutlined style={{ color: "#1677ff" }} />
-                                    <span>Auto（自动路由）</span>
-                                </span>
-                            </SelectItem>
+                            {hasAutoOptions ? (
+                                <SelectItem key="auto" value="0">
+                                    <span className="flex items-center gap-2">
+                                        <SwapOutlined style={{ color: "#1677ff" }} />
+                                        <span>Auto（自动路由）</span>
+                                    </span>
+                                </SelectItem>
+                            ) : null}
                             {channels.map((channel) => (
                                 <SelectItem key={channel.id} value={String(channel.id)}>
                                     {channel.name}

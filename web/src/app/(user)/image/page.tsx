@@ -9,7 +9,7 @@ import { ImageSettingsPanel } from "@/components/image-settings-panel";
 import { ModelPicker } from "@/components/model-picker";
 import { PromptSelectDialog } from "@/components/prompts/prompt-select-dialog";
 import { AssetPickerModal, type InsertAssetPayload } from "@/app/(user)/canvas/components/asset-picker-modal";
-import { CreditCostHint, CreditHelpActions, isInsufficientCreditError, useEstimatedCreditCost, useUserCreditBalance } from "@/constant/credits";
+import { creditEstimateButtonText, CreditCostHint, CreditHelpActions, isInsufficientCreditError, useEstimatedCreditCost, useUserCreditBalance } from "@/constant/credits";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { imageReferenceLabel } from "@/lib/image-reference-prompt";
 import { deleteGenerationRecords, listGenerationRecords, saveGenerationRecord } from "@/services/api/generation-records";
@@ -93,7 +93,7 @@ export default function ImagePage() {
     const model = effectiveConfig.imageModel || effectiveConfig.model;
     const canGenerate = Boolean(prompt.trim());
     const generationCount = Math.max(1, Math.min(10, Number(config.count) || 1));
-    const estimatedCredits = useEstimatedCreditCost(model, generationCount);
+    const creditEstimate = useEstimatedCreditCost(model, generationCount);
     const balance = useUserCreditBalance();
 
     useEffect(() => {
@@ -411,9 +411,9 @@ export default function ImagePage() {
 
                         <div className="mt-auto pt-6">
                             <Button type="primary" size="large" block icon={<Sparkles className="size-4" />} loading={running} disabled={!canGenerate || running} onClick={() => void generate()}>
-                                {running ? "开始生成" : `开始生成（${estimatedCredits} 积分）`}
+                                {running ? "开始生成" : `开始生成（${creditEstimateButtonText(creditEstimate)}）`}
                             </Button>
-                            <CreditCostHint credits={estimatedCredits} balance={balance} />
+                            <CreditCostHint estimate={creditEstimate} balance={balance} />
                         </div>
                     </div>
 

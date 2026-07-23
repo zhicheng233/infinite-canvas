@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"strconv"
 	"strings"
 
@@ -12,15 +13,28 @@ import (
 )
 
 type CreditHandler struct {
-	creditService    *service.CreditService
-	creditRepo       *repository.CreditRepo
-	generateSvc      *service.GenerateService
-	channelModelRepo *repository.ChannelModelRepo
-	channelRepo      *repository.ChannelRepo
+	creditService         *service.CreditService
+	creditRepo            *repository.CreditRepo
+	generateSvc           *service.GenerateService
+	channelModelRepo      *repository.ChannelModelRepo
+	channelRepo           *repository.ChannelRepo
+	estimatePricingRepo   estimatePricingReader
+	estimateRouteResolver estimateRouteResolver
+}
+
+type estimatePricingReader interface {
+	FindPricing(tenantID uint, modelName string, channelID uint) (*model.CreditPricing, error)
+}
+
+type estimateRouteResolver interface {
+	ResolveChannelRouteForEstimate(tenantID uint, selection service.ChannelSelection, capability, modelName, fuzzyGroupName string) (service.ResolvedEstimateRoute, error)
 }
 
 func NewCreditHandler(creditService *service.CreditService, creditRepo *repository.CreditRepo, generateSvc *service.GenerateService, channelModelRepo *repository.ChannelModelRepo, channelRepo *repository.ChannelRepo) *CreditHandler {
-	return &CreditHandler{creditService: creditService, creditRepo: creditRepo, generateSvc: generateSvc, channelModelRepo: channelModelRepo, channelRepo: channelRepo}
+	return &CreditHandler{
+		creditService: creditService, creditRepo: creditRepo, generateSvc: generateSvc, channelModelRepo: channelModelRepo, channelRepo: channelRepo,
+		estimatePricingRepo: creditRepo, estimateRouteResolver: generateSvc,
+	}
 }
 
 func (h *CreditHandler) GetBalance(c *gin.Context) {
@@ -184,15 +198,39 @@ func (h *CreditHandler) EstimateCost(c *gin.Context) {
 		return
 	}
 	genType := strings.TrimSpace(c.DefaultQuery("type", ""))
-	selection := service.ChannelSelection{ChannelID: parseUintQuery(c.Query("channel_id")), ChannelModelID: parseUintQuery(c.Query("channel_model_id"))}
-	if h.generateSvc != nil {
-		if err := h.generateSvc.ResolveChannelRouteForEstimate(selection, genType, modelName); err != nil {
+	fuzzyGroupName := strings.TrimSpace(c.Query("fuzzy_group_name"))
+	selection, err := parseEstimateChannelSelection(c, fuzzyGroupName)
+	if err != nil {
+		model.Fail(c, 400, err.Error())
+		return
+	}
+	resolver := h.estimateRouteResolver
+	if resolver == nil && h.generateSvc != nil {
+		resolver = h.generateSvc
+	}
+	if resolver != nil {
+		resolved, err := resolver.ResolveChannelRouteForEstimate(claims.TenantID, selection, genType, modelName, fuzzyGroupName)
+		if err != nil {
 			model.Fail(c, 400, err.Error())
 			return
 		}
+		selection = resolved.Selection
+		modelName = resolved.PricingModel
 	}
-	pricing, err := h.creditRepo.FindPricing(claims.TenantID, modelName, selection.ChannelID)
+	pricingRepo := h.estimatePricingRepo
+	if pricingRepo == nil {
+		pricingRepo = h.creditRepo
+	}
+	if pricingRepo == nil {
+		model.Fail(c, 500, "查询模型计费失败")
+		return
+	}
+	pricing, err := pricingRepo.FindPricing(claims.TenantID, modelName, selection.ChannelID)
 	if err != nil {
+		model.Fail(c, 500, "查询模型计费失败")
+		return
+	}
+	if pricing == nil {
 		model.Fail(c, 403, "该模型未配置计费，暂不可用")
 		return
 	}
@@ -242,10 +280,10 @@ func (h *CreditHandler) EstimateCost(c *gin.Context) {
 
 // ComparePricingResponse is returned by ComparePricing.
 type ComparePricingResponse struct {
-	ChannelID   uint                  `json:"channel_id"`
-	ChannelName string                `json:"channel_name"`
-	HasModel    bool                  `json:"has_model"`
-	Pricing     *model.CreditPricing  `json:"pricing,omitempty"`
+	ChannelID   uint                 `json:"channel_id"`
+	ChannelName string               `json:"channel_name"`
+	HasModel    bool                 `json:"has_model"`
+	Pricing     *model.CreditPricing `json:"pricing,omitempty"`
 }
 
 func (h *CreditHandler) ComparePricing(c *gin.Context) {
@@ -290,4 +328,39 @@ func (h *CreditHandler) ComparePricing(c *gin.Context) {
 func parseUintQuery(value string) uint {
 	parsed, _ := strconv.ParseUint(strings.TrimSpace(value), 10, 64)
 	return uint(parsed)
+}
+
+func parseEstimateChannelSelection(c *gin.Context, fuzzyGroupName string) (service.ChannelSelection, error) {
+	rawChannelID, exists := c.GetQuery("channel_id")
+	if !exists || strings.TrimSpace(rawChannelID) == "" {
+		return service.ChannelSelection{}, errors.New("请指定有效的渠道")
+	}
+	channelID, err := strconv.ParseUint(strings.TrimSpace(rawChannelID), 10, strconv.IntSize)
+	if err != nil {
+		return service.ChannelSelection{}, errors.New("渠道参数无效")
+	}
+	selection := service.ChannelSelection{ChannelID: uint(channelID)}
+	if rawChannelModelID, exists := c.GetQuery("channel_model_id"); exists && strings.TrimSpace(rawChannelModelID) != "" {
+		channelModelID, err := strconv.ParseUint(strings.TrimSpace(rawChannelModelID), 10, strconv.IntSize)
+		if err != nil {
+			return service.ChannelSelection{}, errors.New("渠道模型参数无效")
+		}
+		selection.ChannelModelID = uint(channelModelID)
+	}
+	if fuzzyGroupName != "" {
+		if selection.ChannelID == 0 || selection.ChannelModelID != 0 {
+			return service.ChannelSelection{}, errors.New("模型合并组参数无效")
+		}
+		return selection, nil
+	}
+	if selection.ChannelID == 0 {
+		if selection.ChannelModelID != 0 {
+			return service.ChannelSelection{}, errors.New("Auto 渠道参数无效")
+		}
+		return selection, nil
+	}
+	if selection.ChannelModelID == 0 {
+		return service.ChannelSelection{}, errors.New("请选择有效的渠道模型")
+	}
+	return selection, nil
 }
