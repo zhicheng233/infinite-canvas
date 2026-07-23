@@ -116,7 +116,7 @@ func (h *ChannelHandler) Delete(c *gin.Context) {
 			model.Fail(c, http.StatusNotFound, "渠道不存在")
 			return
 		}
-		model.Fail(c, http.StatusConflict, err.Error())
+		model.Fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
 	model.OK(c, gin.H{"deleted": true})

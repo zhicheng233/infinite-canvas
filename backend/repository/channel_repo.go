@@ -1,8 +1,6 @@
 package repository
 
 import (
-	"errors"
-
 	"gorm.io/gorm"
 	"infinite-canvas-server/model"
 )
@@ -54,11 +52,9 @@ func (r *ChannelRepo) Delete(id uint) error {
 		return err
 	}
 
-	var count int64
-	r.db.Model(&model.ChannelModel{}).Where("channel_id = ?", id).Count(&count)
-	if count > 0 {
-		return errors.New("请先删除该渠道下的所有模型")
-	}
+	// Cascade delete related records
+	r.db.Where("channel_id = ?", id).Delete(&model.ModelMergeGroup{})
+	r.db.Where("channel_id = ?", id).Delete(&model.ChannelModel{})
 
 	return r.db.Delete(&channel).Error
 }
