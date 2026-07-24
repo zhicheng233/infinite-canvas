@@ -165,7 +165,7 @@ function ModelLabel({ config, model, capability }: { config: AiConfig; model: st
 }
 
 function rateUnavailableLabel(status: string) {
-    if (status === "stale") return "已过期";
+    if (status === "stale") return "无数据";
     if (status === "error") return "获取失败";
     if (status === "unmapped") return "未映射";
     return "暂无数据";

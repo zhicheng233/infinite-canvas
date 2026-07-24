@@ -273,7 +273,7 @@ function StatusIcon({ status }: { status: string }) {
 }
 
 function unavailableRateText(status: string) {
-    if (status === "stale") return "已过期";
+    if (status === "stale") return "无数据";
     if (status === "unmapped") return "未映射";
     if (status === "error") return "获取失败";
     return "暂无数据";
