@@ -59,6 +59,13 @@ func (h *GenerateHandler) handleProxy(c *gin.Context, fn proxyFunc) {
 	c.Header("X-Credits-Cost", itoa(result.Cost))
 	c.Header("X-Credits-Balance", itoa(result.Balance))
 
+	if result.StatusCode >= http.StatusBadRequest {
+		bodyStr := string(result.Body)
+		if !service.IsUpstreamBalanceError(bodyStr) {
+			c.JSON(http.StatusOK, gin.H{"code": 500, "msg": "上游请求失败", "error_detail": bodyStr})
+			return
+		}
+	}
 	c.Data(result.StatusCode, result.Headers.Get("Content-Type"), result.Body)
 }
 

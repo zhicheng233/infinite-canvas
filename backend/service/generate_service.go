@@ -653,7 +653,7 @@ func (s *GenerateService) proxy(tenantID, userID uint, genType, path, contentTyp
 		if retry, ok := s.repairAndRetryUpstream(tenantID, userID, genType, modelName, http.MethodPost, path, contentType, body, 0, nil, err.Error(), route); ok {
 			upstream = retry
 		} else {
-			return nil, fmt.Errorf("涓婃父 API 璇锋眰澶辫触: %v", err)
+			return nil, fmt.Errorf("上游 API 请求失败: %v", err)
 		}
 	}
 	if upstream == nil {
@@ -1220,27 +1220,35 @@ func isCapabilityMismatchMessage(message string) bool {
 	return false
 }
 
-// isUpstreamBalanceError checks if the response indicates an upstream balance/credit issue.
-// These keywords mean the upstream API key has run out of credits — the channel should be disabled.
-func isUpstreamBalanceError(body []byte, fallbackError string) bool {
-	checkText := strings.ToLower(string(fallbackError))
-	if len(body) > 0 {
-		checkText = strings.ToLower(string(body))
-	}
-	balanceKeywords := []string{
-		"扣费额度失败",
-		"余额不足",
-		"insufficient balance",
-		"insufficient_quota",
-		"quota exceeded",
-		"billing failed",
-	}
-	for _, kw := range balanceKeywords {
-		if strings.Contains(checkText, strings.ToLower(kw)) {
+// UpstreamBalanceErrorKeywords lists keywords that indicate upstream balance/credit issues.
+var UpstreamBalanceErrorKeywords = []string{
+	"扣费额度失败",
+	"余额不足",
+	"insufficient balance",
+	"insufficient_quota",
+	"quota exceeded",
+	"billing failed",
+}
+
+// IsUpstreamBalanceError checks if the response body indicates an upstream balance/credit issue.
+func IsUpstreamBalanceError(body string) bool {
+	lower := strings.ToLower(body)
+	for _, kw := range UpstreamBalanceErrorKeywords {
+		if strings.Contains(lower, strings.ToLower(kw)) {
 			return true
 		}
 	}
 	return false
+}
+
+// isUpstreamBalanceError checks if the response indicates an upstream balance/credit issue.
+// These keywords mean the upstream API key has run out of credits — the channel should be disabled.
+func isUpstreamBalanceError(body []byte, fallbackError string) bool {
+	checkText := fallbackError
+	if len(body) > 0 {
+		checkText = string(body)
+	}
+	return IsUpstreamBalanceError(checkText)
 }
 
 // checkAndDisableOnBalanceError checks upstream response for balance-related errors

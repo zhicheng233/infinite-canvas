@@ -43,6 +43,13 @@ func (h *ProxyHandler) Proxy(c *gin.Context) {
 	c.Header("X-Credits-Cost", itoa(result.Cost))
 	c.Header("X-Credits-Balance", itoa(result.Balance))
 
+	if result.StatusCode >= http.StatusBadRequest {
+		bodyStr := string(result.Body)
+		if !service.IsUpstreamBalanceError(bodyStr) {
+			c.JSON(http.StatusOK, gin.H{"code": 500, "msg": "上游请求失败", "error_detail": bodyStr})
+			return
+		}
+	}
 	respContentType := result.Headers.Get("Content-Type")
 	if respContentType == "" {
 		respContentType = "application/octet-stream"
@@ -70,6 +77,13 @@ func (h *ProxyHandler) ProxyGet(c *gin.Context) {
 		}
 	}
 
+	if result.StatusCode >= http.StatusBadRequest {
+		bodyStr := string(result.Body)
+		if !service.IsUpstreamBalanceError(bodyStr) {
+			c.JSON(http.StatusOK, gin.H{"code": 500, "msg": "上游请求失败", "error_detail": bodyStr})
+			return
+		}
+	}
 	respContentType := result.Headers.Get("Content-Type")
 	if respContentType == "" {
 		respContentType = "application/octet-stream"
@@ -97,6 +111,13 @@ func (h *ProxyHandler) ProxyGetPath(c *gin.Context) {
 		}
 	}
 
+	if result.StatusCode >= http.StatusBadRequest {
+		bodyStr := string(result.Body)
+		if !service.IsUpstreamBalanceError(bodyStr) {
+			c.JSON(http.StatusOK, gin.H{"code": 500, "msg": "上游请求失败", "error_detail": bodyStr})
+			return
+		}
+	}
 	respContentType := result.Headers.Get("Content-Type")
 	if respContentType == "" {
 		respContentType = "application/octet-stream"
