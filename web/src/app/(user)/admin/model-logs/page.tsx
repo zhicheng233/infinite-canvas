@@ -119,6 +119,14 @@ export default function AdminModelLogsPage() {
             render: (value: string) => value || "-",
         },
         {
+            title: "渠道",
+            dataIndex: "channel_name",
+            key: "channel_name",
+            width: 160,
+            ellipsis: true,
+            render: (value: string) => value || "—",
+        },
+        {
             title: "接口",
             key: "path",
             width: 260,
@@ -251,7 +259,7 @@ export default function AdminModelLogsPage() {
                 columns={columns}
                 dataSource={logs}
                 loading={loading}
-                scroll={{ x: 1220 }}
+                scroll={{ x: 1380 }}
                 pagination={{
                     ...pagination,
                     showSizeChanger: true,
@@ -271,6 +279,10 @@ export default function AdminModelLogsPage() {
                             <div>
                                 <Text type="secondary">模型：</Text>
                                 {selected.model || "-"}
+                            </div>
+                            <div>
+                                <Text type="secondary">渠道：</Text>
+                                {selected.channel_name || "—"}
                             </div>
                             <div>
                                 <Text type="secondary">类型：</Text>
