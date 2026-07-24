@@ -1,4 +1,5 @@
 import axios from "axios";
+import { ApiError } from "@/lib/api-error";
 
 const AUTH_TOKEN_KEY = "infinite-canvas:auth_token";
 export const AUTH_TOKEN_CHANGE_EVENT = "infinite-canvas:auth-token-change";
@@ -30,7 +31,7 @@ apiClient.interceptors.response.use(
     (response) => {
         const data = response.data;
         if (data && typeof data.code === "number" && data.code !== 0) {
-            return Promise.reject(new Error(data.msg || "request failed"));
+            return Promise.reject(new ApiError(data.msg || "request failed", data.error_detail));
         }
         return response;
     },

@@ -107,6 +107,9 @@ export type ModelCallLogItem = {
     error_message: string;
     error_body: string;
     created_at: string;
+    channel_id?: number;
+    channel_model_id?: number;
+    channel_name?: string;
 };
 
 export type ModelCallLogResult = {

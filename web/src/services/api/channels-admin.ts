@@ -8,6 +8,7 @@ import type { ChannelInfo } from "./channel";
 export type ChannelAdminInfo = ChannelInfo & {
     base_url: string;
     has_key: boolean;
+    remark?: string;
 };
 
 /**
@@ -21,6 +22,7 @@ export type SaveChannelInput = {
     enabled?: boolean;
     new_api_channel_id?: number | null;
     metrics_base_url?: string | null;
+    remark?: string;
 };
 
 /**
