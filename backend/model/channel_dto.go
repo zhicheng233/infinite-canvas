@@ -19,16 +19,18 @@ type ChannelAdminInfo struct {
 	ChannelInfo
 	BaseUrl string `json:"base_url"`
 	HasKey  bool   `json:"has_key"`
+	Remark  string `json:"remark,omitempty"`
 }
 
 // SaveChannelInput is the request body for SuperAdmin create/update.
 type SaveChannelInput struct {
-	Name            string `json:"name"`
-	BaseUrl         string `json:"base_url"`
-	ApiKey          string `json:"api_key"` // empty means "keep existing"
-	Enabled         *bool  `json:"enabled,omitempty"`
-	NewApiChannelID *int   `json:"new_api_channel_id,omitempty"`
+	Name            string  `json:"name"`
+	BaseUrl         string  `json:"base_url"`
+	ApiKey          string  `json:"api_key"` // empty means "keep existing"
+	Enabled         *bool   `json:"enabled,omitempty"`
+	NewApiChannelID *int    `json:"new_api_channel_id,omitempty"`
 	MetricsBaseUrl  *string `json:"metrics_base_url,omitempty"`
+	Remark          string  `json:"remark,omitempty"`
 }
 
 // ChannelModelInfo is a single model row (no key, no BaseUrl).

@@ -11,6 +11,7 @@ type Channel struct {
 	NewApiChannelID    *int       `json:"new_api_channel_id,omitempty"`
 	NewApiChannelIDVal string     `gorm:"size:100" json:"new_api_channel_id_val"`
 	MetricsBaseUrl     *string    `gorm:"size:500" json:"metrics_base_url,omitempty"`
+	Remark             string     `gorm:"size:500" json:"remark,omitempty"`
 	SyncStatus         string     `gorm:"size:20" json:"sync_status"`
 	SyncError          string     `gorm:"size:500" json:"sync_error"`
 	SyncedAt           *time.Time `json:"synced_at,omitempty"`
