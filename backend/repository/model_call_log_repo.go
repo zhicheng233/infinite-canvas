@@ -19,7 +19,25 @@ func (r *ModelCallLogRepo) Create(log *model.ModelCallLog) error {
 func (r *ModelCallLogRepo) List(tenantID uint, query ModelCallLogQuery) ([]model.ModelCallLog, int64, error) {
 	var items []model.ModelCallLog
 	var total int64
-	q := r.db.Model(&model.ModelCallLog{}).Where("tenant_id = ? AND is_success = ?", tenantID, false)
+	base := r.db.Model(&model.ModelCallLog{}).Where("tenant_id = ? AND is_success = ?", tenantID, false)
+	if query.UserID > 0 {
+		base = base.Where("user_id = ?", query.UserID)
+	}
+	if query.Model != "" {
+		base = base.Where("model LIKE ?", "%"+query.Model+"%")
+	}
+	if query.Generation != "" {
+		base = base.Where("generation = ?", query.Generation)
+	}
+	if query.Keyword != "" {
+		keyword := "%" + strings.TrimSpace(query.Keyword) + "%"
+		base = base.Where("error_message LIKE ? OR error_body LIKE ? OR path LIKE ? OR username LIKE ?", keyword, keyword, keyword, keyword)
+	}
+	base.Count(&total)
+
+	q := r.db.Select("model_call_logs.*, channels.name as channel_name").
+		Where("tenant_id = ? AND is_success = ?", tenantID, false).
+		Joins("LEFT JOIN channels ON channels.id = model_call_logs.channel_id")
 	if query.UserID > 0 {
 		q = q.Where("user_id = ?", query.UserID)
 	}
@@ -33,7 +51,6 @@ func (r *ModelCallLogRepo) List(tenantID uint, query ModelCallLogQuery) ([]model
 		keyword := "%" + strings.TrimSpace(query.Keyword) + "%"
 		q = q.Where("error_message LIKE ? OR error_body LIKE ? OR path LIKE ? OR username LIKE ?", keyword, keyword, keyword, keyword)
 	}
-	q.Count(&total)
 	err := q.Offset((query.Page - 1) * query.PageSize).Limit(query.PageSize).Order("id DESC").Find(&items).Error
 	return items, total, err
 }

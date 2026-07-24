@@ -17,6 +17,7 @@ type ModelCallLog struct {
 	ResponseTime   int    `gorm:"default:0" json:"response_time_ms"`
 	ChannelID      *uint  `gorm:"index" json:"channel_id,omitempty"`
 	ChannelModelID *uint  `gorm:"index" json:"channel_model_id,omitempty"`
+	ChannelName    string `gorm:"-" json:"channel_name,omitempty"`
 }
 
 func (ModelCallLog) TableName() string { return "model_call_logs" }
