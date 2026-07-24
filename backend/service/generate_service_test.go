@@ -14,6 +14,35 @@ import (
 	"infinite-canvas-server/model"
 )
 
+func TestIsUpstreamBalanceError(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want bool
+	}{
+		{name: "chinese balance不足", body: "余额不足", want: true},
+		{name: "english insufficient balance", body: "insufficient balance", want: true},
+		{name: "quota exceeded", body: "quota exceeded", want: true},
+		{name: "billing failed", body: "billing failed", want: true},
+		{name: "insufficient_quota", body: "insufficient_quota", want: true},
+		{name: "扣费额度失败", body: "扣费额度失败", want: true},
+		{name: "non-balance error", body: "Rate limit exceeded", want: false},
+		{name: "content filter triggered", body: "Content filter triggered", want: false},
+		{name: "empty string", body: "", want: false},
+		{name: "case insensitive", body: "Insufficient Balance", want: true},
+		{name: "mixed context with keyword", body: `{"error":{"message":"insufficient balance for this request"}}`, want: true},
+		{name: "normal error message", body: "invalid API key", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := IsUpstreamBalanceError(tt.body); got != tt.want {
+				t.Fatalf("IsUpstreamBalanceError(%q) = %v, want %v", tt.body, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestGenerationTypeFromPath(t *testing.T) {
 	tests := []struct {
 		path string
