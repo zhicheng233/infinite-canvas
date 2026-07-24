@@ -15,6 +15,9 @@ export async function getAdminStats() {
 export type ModelHealthModel = {
     model: string;
     generation: string;
+    channel_id?: number;
+    channel_model_id?: number;
+    channel_name?: string;
     failures: number;
     last_error: string;
 };
@@ -27,6 +30,9 @@ export type ModelHealthRecentError = {
     display_name: string;
     generation: string;
     model: string;
+    channel_id?: number;
+    channel_model_id?: number;
+    channel_name?: string;
     path: string;
     status_code: number;
     error_message: string;

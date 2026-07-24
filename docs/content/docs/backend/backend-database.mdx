@@ -148,8 +148,8 @@ API Key 仅用于后端代理调用，按 `API_KEY_ENCRYPTION_KEY` 配置加密�
 | display_name | string(64) | 显示名称快照 |
 | generation | string(20) | 生成类型 image/video/audio/text |
 | model | string(100) | 调用模型 |
-| channel_id | uint | 所属渠道 ID，非空，带索引 |
-| channel_model_id | uint | 所属渠道模型 ID，非空，带索引 |
+| channel_id | uint | 所属渠道 ID，可为空，带索引；Auto 或本地校验失败可能记录为 0 或空 |
+| channel_model_id | uint | 所属渠道模型 ID，可为空，带索引 |
 | method | string(10) | HTTP 方法 |
 | path | string(255) | 上游接口路径 |
 | status_code | int | 上游状态码，0 表示本地校验或网络错误 |

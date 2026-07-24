@@ -51,7 +51,7 @@ func (r *ModelCallLogRepo) List(tenantID uint, query ModelCallLogQuery) ([]model
 		keyword := "%" + strings.TrimSpace(query.Keyword) + "%"
 		q = q.Where("error_message LIKE ? OR error_body LIKE ? OR path LIKE ? OR username LIKE ?", keyword, keyword, keyword, keyword)
 	}
-	err := q.Offset((query.Page - 1) * query.PageSize).Limit(query.PageSize).Order("id DESC").Find(&items).Error
+	err := q.Offset((query.Page - 1) * query.PageSize).Limit(query.PageSize).Order("model_call_logs.id DESC").Find(&items).Error
 	return items, total, err
 }
 
@@ -60,8 +60,10 @@ func (r *ModelCallLogRepo) ListSince(tenantID uint, since time.Time, limit int) 
 	if limit <= 0 {
 		limit = 500
 	}
-	err := r.db.Where("tenant_id = ? AND created_at >= ?", tenantID, since).
-		Order("id DESC").
+	err := r.db.Select("model_call_logs.*, channels.name as channel_name").
+		Joins("LEFT JOIN channels ON channels.id = model_call_logs.channel_id").
+		Where("model_call_logs.tenant_id = ? AND model_call_logs.created_at >= ?", tenantID, since).
+		Order("model_call_logs.id DESC").
 		Limit(limit).
 		Find(&items).Error
 	return items, err

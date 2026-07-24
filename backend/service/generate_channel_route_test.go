@@ -201,6 +201,22 @@ func TestResolveChannelRouteSameModelDifferentChannels(t *testing.T) {
 	}
 }
 
+func TestRouteIdentityFromSelectionPreservesSelectedChannel(t *testing.T) {
+	route := routeIdentityFromSelection(ChannelSelection{ChannelID: 2, ChannelModelID: 22}, false)
+	if route == nil || route.ChannelID == nil || *route.ChannelID != 2 || route.ChannelModelID == nil || *route.ChannelModelID != 22 {
+		t.Fatalf("unexpected selected channel identity: %#v", route)
+	}
+
+	if emptyRoute := routeIdentityFromSelection(ChannelSelection{}, false); emptyRoute != nil {
+		t.Fatalf("unexpected empty channel identity: %#v", emptyRoute)
+	}
+
+	autoRoute := routeIdentityFromSelection(ChannelSelection{}, true)
+	if autoRoute == nil || autoRoute.ChannelID == nil || *autoRoute.ChannelID != 0 || autoRoute.ChannelModelID != nil {
+		t.Fatalf("unexpected auto channel identity: %#v", autoRoute)
+	}
+}
+
 func TestResolveChannelRouteForEstimateUsesExactNormalSelection(t *testing.T) {
 	svc := newRouteTestGenerateService()
 

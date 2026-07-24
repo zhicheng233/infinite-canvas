@@ -24,6 +24,19 @@ const generationOptions = [
     { label: "文本", value: "text" },
 ];
 
+type ChannelIdentity = {
+    channel_id?: number | null;
+    channel_name?: string | null;
+};
+
+function formatChannelLabel(item: ChannelIdentity) {
+    const name = item.channel_name?.trim();
+    if (name) return name;
+    if (item.channel_id === 0) return "Auto";
+    if (item.channel_id && item.channel_id > 0) return `渠道 #${item.channel_id}`;
+    return "—";
+}
+
 type FilterValues = {
     model?: string;
     generation?: string;
@@ -124,7 +137,7 @@ export default function AdminModelLogsPage() {
             key: "channel_name",
             width: 160,
             ellipsis: true,
-            render: (value: string) => value || "—",
+            render: (_, record) => formatChannelLabel(record),
         },
         {
             title: "接口",
@@ -210,7 +223,9 @@ export default function AdminModelLogsPage() {
                                 <div className="mb-2 flex items-center justify-between gap-3">
                                     <div className="min-w-0">
                                         <div className="truncate font-medium">{item.model || "未知模型"}</div>
-                                        <div className="text-xs text-stone-500">{generationLabels[item.generation] || item.generation || "未知类型"}</div>
+                                        <div className="text-xs text-stone-500">
+                                            {generationLabels[item.generation] || item.generation || "未知类型"} · {formatChannelLabel(item)}
+                                        </div>
                                     </div>
                                     <Tag color="red">{item.failures} 次失败</Tag>
                                 </div>
@@ -282,7 +297,7 @@ export default function AdminModelLogsPage() {
                             </div>
                             <div>
                                 <Text type="secondary">渠道：</Text>
-                                {selected.channel_name || "—"}
+                                {formatChannelLabel(selected)}
                             </div>
                             <div>
                                 <Text type="secondary">类型：</Text>

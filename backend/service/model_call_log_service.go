@@ -38,23 +38,29 @@ type ModelHealthSummary struct {
 }
 
 type ModelHealthModel struct {
-	Model      string `json:"model"`
-	Generation string `json:"generation"`
-	Failures   int64  `json:"failures"`
-	LastError  string `json:"last_error"`
+	Model          string `json:"model"`
+	Generation     string `json:"generation"`
+	ChannelID      *uint  `json:"channel_id,omitempty"`
+	ChannelModelID *uint  `json:"channel_model_id,omitempty"`
+	ChannelName    string `json:"channel_name,omitempty"`
+	Failures       int64  `json:"failures"`
+	LastError      string `json:"last_error"`
 }
 
 type ModelHealthRecentError struct {
-	ID           uint      `json:"id"`
-	CreatedAt    time.Time `json:"created_at"`
-	UserID       uint      `json:"user_id"`
-	Username     string    `json:"username"`
-	DisplayName  string    `json:"display_name"`
-	Generation   string    `json:"generation"`
-	Model        string    `json:"model"`
-	Path         string    `json:"path"`
-	StatusCode   int       `json:"status_code"`
-	ErrorMessage string    `json:"error_message"`
+	ID             uint      `json:"id"`
+	CreatedAt      time.Time `json:"created_at"`
+	UserID         uint      `json:"user_id"`
+	Username       string    `json:"username"`
+	DisplayName    string    `json:"display_name"`
+	Generation     string    `json:"generation"`
+	Model          string    `json:"model"`
+	ChannelID      *uint     `json:"channel_id,omitempty"`
+	ChannelModelID *uint     `json:"channel_model_id,omitempty"`
+	ChannelName    string    `json:"channel_name,omitempty"`
+	Path           string    `json:"path"`
+	StatusCode     int       `json:"status_code"`
+	ErrorMessage   string    `json:"error_message"`
 }
 
 func NewModelCallLogService(repo *repository.ModelCallLogRepo, userRepo *repository.UserRepo) *ModelCallLogService {
@@ -153,7 +159,7 @@ func buildModelHealthSummary(logs []model.ModelCallLog, now time.Time) ModelHeal
 		key := modelHealthKey(item)
 		row := models[key]
 		if row == nil {
-			row = &ModelHealthModel{Model: item.Model, Generation: item.Generation, LastError: item.ErrorMessage}
+			row = &ModelHealthModel{Model: item.Model, Generation: item.Generation, ChannelID: item.ChannelID, ChannelModelID: item.ChannelModelID, ChannelName: item.ChannelName, LastError: item.ErrorMessage}
 			models[key] = row
 		}
 		row.Failures++
@@ -163,16 +169,19 @@ func buildModelHealthSummary(logs []model.ModelCallLog, now time.Time) ModelHeal
 		}
 		if len(recentErrors) < 10 {
 			recentErrors = append(recentErrors, ModelHealthRecentError{
-				ID:           item.ID,
-				CreatedAt:    item.CreatedAt,
-				UserID:       item.UserID,
-				Username:     item.Username,
-				DisplayName:  item.DisplayName,
-				Generation:   item.Generation,
-				Model:        item.Model,
-				Path:         item.Path,
-				StatusCode:   item.StatusCode,
-				ErrorMessage: item.ErrorMessage,
+				ID:             item.ID,
+				CreatedAt:      item.CreatedAt,
+				UserID:         item.UserID,
+				Username:       item.Username,
+				DisplayName:    item.DisplayName,
+				Generation:     item.Generation,
+				Model:          item.Model,
+				ChannelID:      item.ChannelID,
+				ChannelModelID: item.ChannelModelID,
+				ChannelName:    item.ChannelName,
+				Path:           item.Path,
+				StatusCode:     item.StatusCode,
+				ErrorMessage:   item.ErrorMessage,
 			})
 		}
 	}

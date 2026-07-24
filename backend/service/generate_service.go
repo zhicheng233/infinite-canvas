@@ -259,19 +259,27 @@ func (s *GenerateService) proxyWithAutoFailover(tenantID, userID uint, capabilit
 		selection := ChannelSelection{ChannelID: candidate.ChannelID, ChannelModelID: candidate.ChannelModelID}
 		route, err := s.resolveChannelRoute(selection, capability, modelName)
 		if err != nil {
+			s.recordModelFailureWithSelection(tenantID, userID, capability, modelName, http.MethodPost, path, 0, nil, err.Error(), selection)
 			lastErr = err
 			continue
 		}
 
 		cost, pricingResult, err := s.getRequiredPricing(tenantID, candidate.ChannelID, capability, modelName, contentType, body)
 		if err != nil {
+			s.recordModelFailureWithRoute(tenantID, userID, capability, modelName, http.MethodPost, path, 0, nil, err.Error(), route)
 			lastErr = err
 			continue
 		}
 
 		account, accErr := s.creditService.GetOrCreateAccount(tenantID, userID)
-		if accErr != nil || account.Balance < cost {
+		if accErr != nil {
+			s.recordModelFailureWithRoute(tenantID, userID, capability, modelName, http.MethodPost, path, 0, nil, accErr.Error(), route)
+			lastErr = accErr
+			continue
+		}
+		if account == nil || account.Balance < cost {
 			lastErr = fmt.Errorf("积分不足")
+			s.recordModelFailureWithRoute(tenantID, userID, capability, modelName, http.MethodPost, path, 0, nil, lastErr.Error(), route)
 			continue
 		}
 
@@ -595,7 +603,7 @@ func (s *GenerateService) proxy(tenantID, userID uint, genType, path, contentTyp
 	modelName := extractModelName(contentType, body)
 	if modelName == "" {
 		err := errors.New("请指定模型")
-		s.recordModelFailure(tenantID, userID, genType, modelName, http.MethodPost, path, 0, nil, err.Error())
+		s.recordModelFailureWithSelection(tenantID, userID, genType, modelName, http.MethodPost, path, 0, nil, err.Error(), selection)
 		return nil, err
 	}
 
@@ -603,7 +611,7 @@ func (s *GenerateService) proxy(tenantID, userID uint, genType, path, contentTyp
 	if selection.ChannelID == 0 && s.autoChannelService != nil {
 		result, err := s.proxyWithAutoFailover(tenantID, userID, genType, path, contentType, body, modelName)
 		if err != nil {
-			s.recordModelFailure(tenantID, userID, genType, modelName, http.MethodPost, path, 0, nil, err.Error())
+			s.recordModelFailureWithAutoSelection(tenantID, userID, genType, modelName, http.MethodPost, path, 0, nil, err.Error())
 			return nil, err
 		}
 		return result, nil
@@ -617,7 +625,7 @@ func (s *GenerateService) proxy(tenantID, userID uint, genType, path, contentTyp
 		if err != nil && strings.Contains(err.Error(), "未找到合并组") {
 			// Group not found, fall through to normal route
 		} else if err != nil {
-			s.recordModelFailure(tenantID, userID, genType, modelName, http.MethodPost, path, 0, nil, err.Error())
+			s.recordModelFailureWithSelection(tenantID, userID, genType, modelName, http.MethodPost, path, 0, nil, err.Error(), selection)
 			return nil, err
 		}
 	}
@@ -625,7 +633,7 @@ func (s *GenerateService) proxy(tenantID, userID uint, genType, path, contentTyp
 		route, err = s.resolveChannelRoute(selection, genType, modelName)
 	}
 	if err != nil {
-		s.recordModelFailure(tenantID, userID, genType, modelName, http.MethodPost, path, 0, nil, err.Error())
+		s.recordModelFailureWithSelection(tenantID, userID, genType, modelName, http.MethodPost, path, 0, nil, err.Error(), selection)
 		return nil, err
 	}
 
@@ -789,7 +797,7 @@ func (s *GenerateService) ProxyRaw(tenantID, userID uint, method, path, contentT
 	}
 	if modelName == "" {
 		err := errors.New("请指定模型")
-		s.recordModelFailure(tenantID, userID, chargeType, modelName, method, path, 0, nil, err.Error())
+		s.recordModelFailureWithSelection(tenantID, userID, chargeType, modelName, method, path, 0, nil, err.Error(), selection)
 		return nil, err
 	}
 
@@ -797,7 +805,7 @@ func (s *GenerateService) ProxyRaw(tenantID, userID uint, method, path, contentT
 	if selection.ChannelID == 0 && s.autoChannelService != nil {
 		result, err := s.proxyWithAutoFailover(tenantID, userID, chargeType, path, contentType, body, modelName)
 		if err != nil {
-			s.recordModelFailure(tenantID, userID, chargeType, modelName, method, path, 0, nil, err.Error())
+			s.recordModelFailureWithAutoSelection(tenantID, userID, chargeType, modelName, method, path, 0, nil, err.Error())
 			return nil, err
 		}
 		return result, nil
@@ -811,7 +819,7 @@ func (s *GenerateService) ProxyRaw(tenantID, userID uint, method, path, contentT
 		if err != nil && strings.Contains(err.Error(), "未找到合并组") {
 			// Group not found, fall through to normal route
 		} else if err != nil {
-			s.recordModelFailure(tenantID, userID, chargeType, modelName, method, path, 0, nil, err.Error())
+			s.recordModelFailureWithSelection(tenantID, userID, chargeType, modelName, method, path, 0, nil, err.Error(), selection)
 			return nil, err
 		}
 	}
@@ -819,7 +827,7 @@ func (s *GenerateService) ProxyRaw(tenantID, userID uint, method, path, contentT
 		route, err = s.resolveChannelRoute(selection, chargeType, modelName)
 	}
 	if err != nil {
-		s.recordModelFailure(tenantID, userID, chargeType, modelName, method, path, 0, nil, err.Error())
+		s.recordModelFailureWithSelection(tenantID, userID, chargeType, modelName, method, path, 0, nil, err.Error(), selection)
 		return nil, err
 	}
 	pricingChannelID, pricingModel := pricingIdentityFromRoute(route, selection.ChannelID, modelName)
@@ -919,7 +927,7 @@ func (s *GenerateService) ProxyRawWithRepair(tenantID, userID uint, method, path
 	}
 	if modelName == "" {
 		err := errors.New("model is required")
-		s.recordModelFailure(tenantID, userID, generation, modelName, method, path, 0, nil, err.Error())
+		s.recordModelFailureWithSelection(tenantID, userID, generation, modelName, method, path, 0, nil, err.Error(), selection)
 		return nil, err
 	}
 
@@ -927,7 +935,7 @@ func (s *GenerateService) ProxyRawWithRepair(tenantID, userID uint, method, path
 	if selection.ChannelID == 0 && s.autoChannelService != nil {
 		result, err := s.proxyWithAutoFailover(tenantID, userID, generation, path, contentType, body, modelName)
 		if err != nil {
-			s.recordModelFailure(tenantID, userID, generation, modelName, method, path, 0, nil, err.Error())
+			s.recordModelFailureWithAutoSelection(tenantID, userID, generation, modelName, method, path, 0, nil, err.Error())
 			return nil, err
 		}
 		return result, nil
@@ -941,7 +949,7 @@ func (s *GenerateService) ProxyRawWithRepair(tenantID, userID uint, method, path
 		if err != nil && strings.Contains(err.Error(), "未找到合并组") {
 			// Group not found, fall through to normal route
 		} else if err != nil {
-			s.recordModelFailure(tenantID, userID, generation, modelName, method, path, 0, nil, err.Error())
+			s.recordModelFailureWithSelection(tenantID, userID, generation, modelName, method, path, 0, nil, err.Error(), selection)
 			return nil, err
 		}
 	}
@@ -949,7 +957,7 @@ func (s *GenerateService) ProxyRawWithRepair(tenantID, userID uint, method, path
 		route, err = s.resolveChannelRoute(selection, generation, modelName)
 	}
 	if err != nil {
-		s.recordModelFailure(tenantID, userID, generation, modelName, method, path, 0, nil, err.Error())
+		s.recordModelFailureWithSelection(tenantID, userID, generation, modelName, method, path, 0, nil, err.Error(), selection)
 		return nil, err
 	}
 	pricingChannelID, pricingModel := pricingIdentityFromRoute(route, selection.ChannelID, modelName)
@@ -1510,6 +1518,14 @@ func (s *GenerateService) recordModelFailure(tenantID, userID uint, genType, mod
 	s.recordModelFailureWithRoute(tenantID, userID, genType, modelName, method, path, statusCode, body, fallback, nil)
 }
 
+func (s *GenerateService) recordModelFailureWithSelection(tenantID, userID uint, genType, modelName, method, path string, statusCode int, body []byte, fallback string, selection ChannelSelection) {
+	s.recordModelFailureWithRoute(tenantID, userID, genType, modelName, method, path, statusCode, body, fallback, routeIdentityFromSelection(selection, false))
+}
+
+func (s *GenerateService) recordModelFailureWithAutoSelection(tenantID, userID uint, genType, modelName, method, path string, statusCode int, body []byte, fallback string) {
+	s.recordModelFailureWithRoute(tenantID, userID, genType, modelName, method, path, statusCode, body, fallback, routeIdentityFromSelection(ChannelSelection{}, true))
+}
+
 func (s *GenerateService) recordModelFailureWithRoute(tenantID, userID uint, genType, modelName, method, path string, statusCode int, body []byte, fallback string, route *channelRouteContext) {
 	if s.logService == nil {
 		return
@@ -1536,6 +1552,24 @@ func (s *GenerateService) recordModelFailureWithRoute(tenantID, userID uint, gen
 		ChannelID:      channelID,
 		ChannelModelID: channelModelID,
 	})
+}
+
+func routeIdentityFromSelection(selection ChannelSelection, includeAuto bool) *channelRouteContext {
+	if selection.ChannelID == 0 && selection.ChannelModelID == 0 {
+		if includeAuto {
+			channelID := uint(0)
+			return &channelRouteContext{ChannelID: &channelID}
+		}
+		return nil
+	}
+	route := &channelRouteContext{}
+	if selection.ChannelID > 0 {
+		route.ChannelID = uintPtr(selection.ChannelID)
+	}
+	if selection.ChannelModelID > 0 {
+		route.ChannelModelID = uintPtr(selection.ChannelModelID)
+	}
+	return route
 }
 
 func (s *GenerateService) recordModelSuccess(tenantID, userID uint, genType, modelName, method, path string, statusCode, responseTimeMs int) {
