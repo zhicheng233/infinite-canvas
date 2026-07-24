@@ -6,7 +6,7 @@ import { useParams, useRouter } from "next/navigation";
 import { Bot, Home, ImageIcon, Images, List, Menu, Music2, Plus, Redo2, Settings2, Trash2, Undo2, Upload, Video } from "lucide-react";
 import { saveAs } from "file-saver";
 
-import { beautifyVideoError } from "@/lib/error-helper";
+import { beautifyVideoError, isBalanceError, extractErrorDetail } from "@/lib/error-helper";
 import { requestEdit, requestGeneration, requestImageQuestion } from "@/services/api/image";
 import { requestAudioGeneration, storeGeneratedAudio } from "@/services/api/audio";
 import { requestVideoGeneration, storeGeneratedVideo } from "@/services/api/video";
@@ -1775,7 +1775,12 @@ function InfiniteCanvasPage() {
                 setNodes((prev) => prev.map((item) => (item.id === childId ? { ...item, width: size.width, height: size.height, metadata: { ...item.metadata, ...imageMetadata(uploaded), prompt, ...generationMetadata } } : item)));
             } catch (error) {
                 if (isGenerationCanceled(error)) return;
-                const errorDetails = error instanceof Error ? error.message : "局部修改失败";
+                const rawDetail = extractErrorDetail(error);
+                const friendlyMsg = error instanceof Error ? error.message : "局部修改失败";
+                let errorDetails = friendlyMsg;
+                if (rawDetail && !isBalanceError(friendlyMsg)) {
+                    errorDetails = `${errorDetails}\n\n上游错误详情：${rawDetail}`;
+                }
                 message.error(errorDetails);
                 setNodes((prev) => prev.map((item) => (item.id === childId ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_ERROR, errorDetails } } : item)));
             } finally {
@@ -1857,7 +1862,12 @@ function InfiniteCanvasPage() {
                 setNodes((prev) => prev.map((item) => (item.id === childId ? { ...item, width: size.width, height: size.height, metadata: { ...item.metadata, ...imageMetadata(uploaded), prompt, ...generationMetadata } } : item)));
             } catch (error) {
                 if (isGenerationCanceled(error)) return;
-                const errorDetails = beautifyVideoError(error instanceof Error ? error.message : "生成失败");
+                const rawDetail = extractErrorDetail(error);
+                const friendlyMsg = error instanceof Error ? error.message : "生成失败";
+                let errorDetails = beautifyVideoError(friendlyMsg);
+                if (rawDetail && !isBalanceError(friendlyMsg)) {
+                    errorDetails = `${errorDetails}\n\n上游错误详情：${rawDetail}`;
+                }
                 setNodes((prev) => prev.map((item) => (item.id === childId ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_ERROR, errorDetails } } : item)));
             } finally {
                 finishGenerationRequest(childId, controller);
@@ -2192,7 +2202,12 @@ function InfiniteCanvasPage() {
                                 return true;
                             } catch (error) {
                                 if (isGenerationCanceled(error)) return false;
-                                const errorDetails = beautifyVideoError(error instanceof Error ? error.message : "生成失败");
+                                const rawDetail = extractErrorDetail(error);
+                                const friendlyMsg = error instanceof Error ? error.message : "生成失败";
+                                let errorDetails = beautifyVideoError(friendlyMsg);
+                                if (rawDetail && !isBalanceError(friendlyMsg)) {
+                                    errorDetails = `${errorDetails}\n\n上游错误详情：${rawDetail}`;
+                                }
                                 hasFailure = true;
                                 setNodes((prev) => prev.map((node) => (node.id === targetId ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_ERROR, errorDetails } } : node)));
                             } finally {
@@ -2380,7 +2395,12 @@ function InfiniteCanvasPage() {
                 );
             } catch (error) {
                 if (isGenerationCanceled(error)) return;
-                const errorDetails = beautifyVideoError(error instanceof Error ? error.message : "生成失败");
+                const rawDetail = extractErrorDetail(error);
+                const friendlyMsg = error instanceof Error ? error.message : "生成失败";
+                let errorDetails = beautifyVideoError(friendlyMsg);
+                if (rawDetail && !isBalanceError(friendlyMsg)) {
+                    errorDetails = `${errorDetails}\n\n上游错误详情：${rawDetail}`;
+                }
                 message.error(errorDetails);
                 setNodes((prev) =>
                     prev.map((node) => (node.id === nodeId || pendingChildIds.includes(node.id) ? (node.id === nodeId && !markSourceStatus ? node : { ...node, metadata: { ...node.metadata, status: NODE_STATUS_ERROR, errorDetails } }) : node)),
@@ -2512,7 +2532,12 @@ function InfiniteCanvasPage() {
                 );
             } catch (error) {
                 if (isGenerationCanceled(error)) return;
-                const errorDetails = beautifyVideoError(error instanceof Error ? error.message : "生成失败");
+                const rawDetail = extractErrorDetail(error);
+                const friendlyMsg = error instanceof Error ? error.message : "生成失败";
+                let errorDetails = beautifyVideoError(friendlyMsg);
+                if (rawDetail && !isBalanceError(friendlyMsg)) {
+                    errorDetails = `${errorDetails}\n\n上游错误详情：${rawDetail}`;
+                }
                 message.error(errorDetails);
                 setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_ERROR, errorDetails } } : item)));
             } finally {
