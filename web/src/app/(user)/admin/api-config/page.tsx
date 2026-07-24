@@ -1279,8 +1279,8 @@ export default function AdminApiConfigPage() {
                                     key: "status",
                                     width: 80,
                                     render: (status: string) => {
-                                        const labels: Record<string, string> = { down: "宕机", up: "恢复" };
-                                        return <Tag color={status === "down" ? "red" : "green"}>{labels[status] || status}</Tag>;
+                                        const labels: Record<string, string> = { down: "宕机", up: "恢复", balance_insufficient: "余额不足" };
+                                        return <Tag color={status === "up" ? "green" : "red"}>{labels[status] || status}</Tag>;
                                     },
                                 },
                                 { title: "消息内容", dataIndex: "message", key: "message", width: 300, ellipsis: true },

@@ -72,7 +72,7 @@ func main() {
 	modelCallLogService := service.NewModelCallLogService(modelCallLogRepo, userRepo)
 	onDemandRepairService := service.NewOnDemandRepairService(cfg.OnDemandRepairURL, cfg.OnDemandRepairUser, cfg.OnDemandRepairPass, cfg.OnDemandRepairTimeoutSeconds)
 	autoChannelService := service.NewAutoChannelService(db, channelRepo, channelModelRepo)
-	generateService := service.NewGenerateService(apiConfigRepo, creditService, creditRepo, modelCallLogService, cfg.ApiKeyEncryptKey, onDemandRepairService, channelService, channelRepo, channelModelRepo, mergeGroupRepo, db, autoChannelService)
+	generateService := service.NewGenerateService(apiConfigRepo, creditService, creditRepo, modelCallLogService, cfg.ApiKeyEncryptKey, onDemandRepairService, channelService, channelRepo, channelModelRepo, mergeGroupRepo, db, autoChannelService, webhookRepo)
 	tempMediaService := service.NewTempMediaService(cfg)
 	channelStatusService := service.NewChannelStatusService(modelCallLogRepo, apiConfigRepo)
 	webhookPoller := service.NewWebhookPoller(webhookRepo, channelRepo, channelModelRepo, db, nil)

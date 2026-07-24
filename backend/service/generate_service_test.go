@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"infinite-canvas-server/model"
 )
@@ -40,6 +41,23 @@ func TestIsUpstreamBalanceError(t *testing.T) {
 				t.Fatalf("IsUpstreamBalanceError(%q) = %v, want %v", tt.body, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestChannelBalanceWebhookMessage(t *testing.T) {
+	now := time.Date(2026, 7, 25, 12, 30, 0, 0, time.UTC)
+	message := channelBalanceWebhookMessage(model.Channel{BaseModel: model.BaseModel{ID: 12}, Name: "主渠道"}, "veo-omni", "渠道 主渠道 因上游余额不足已被自动禁用", now)
+
+	for _, want := range []string{
+		"渠道 主渠道 因上游余额不足已被自动禁用",
+		"渠道 ID: 12",
+		"模型: veo-omni",
+		"原因: 渠道 主渠道 因上游余额不足已被自动禁用",
+		"时间: 2026-07-25T12:30:00Z",
+	} {
+		if !strings.Contains(message, want) {
+			t.Fatalf("message missing %q: %s", want, message)
+		}
 	}
 }
 

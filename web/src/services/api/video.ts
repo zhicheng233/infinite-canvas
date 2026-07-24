@@ -176,6 +176,10 @@ async function createXAIVideoTask(config: AiConfig, model: string, prompt: strin
     };
     const seconds = normalizeVideoSecondsForModel(config, model, config.videoSeconds);
     if (seconds) payload.duration = Number(seconds);
+    const ratio = normalizeXAIVideoAspectRatio(config.size);
+    if (ratio) payload.aspect_ratio = ratio;
+    const resolution = normalizeVideoResolution(config.vquality);
+    if (resolution) payload.resolution = resolution;
     const imageUrls = await Promise.all(
         references.map(async (image) => {
             const dataUrl = await imageToDataUrl(image);
@@ -187,10 +191,6 @@ async function createXAIVideoTask(config: AiConfig, model: string, prompt: strin
     } else {
         payload.prompt = prompt;
         if (imageUrls.length > 1) payload.reference_images = imageUrls.slice(0, 7).map((url) => ({ url }));
-        const ratio = normalizeXAIVideoAspectRatio(config.size);
-        if (ratio) payload.aspect_ratio = ratio;
-        const resolution = normalizeVideoResolution(config.vquality);
-        if (resolution) payload.resolution = resolution;
     }
     try {
         const created = unwrapXAIVideoTask((await axios.post<ApiEnvelope<XAIVideoTask>>(aiApiUrl(config, "/videos/generations"), payload, { headers: aiHeaders(config, "application/json"), signal: options?.signal })).data);

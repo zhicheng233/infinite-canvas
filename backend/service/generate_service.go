@@ -37,6 +37,7 @@ type GenerateService struct {
 	channelRepo        channelReader
 	modelRepo          channelModelReader
 	autoChannelService autoChannelModelAggregator
+	webhookRepo        *repository.WebhookRepo
 	mergeGroupRepo     mergeGroupRepoReader
 	estimateFuzzyRoute func(channelID uint, fuzzyGroupName, capability string) (*channelRouteContext, error)
 	db                 *gorm.DB
@@ -69,7 +70,7 @@ type pricingReader interface {
 	FindPricing(tenantID uint, modelName string, channelID uint) (*model.CreditPricing, error)
 }
 
-func NewGenerateService(apiConfigRepo *repository.ApiConfigRepo, creditService *CreditService, creditRepo *repository.CreditRepo, logService *ModelCallLogService, encryptKey string, repairService *OnDemandRepairService, channelSvc *ChannelService, channelRepo *repository.ChannelRepo, modelRepo *repository.ChannelModelRepo, mergeGroupRepo *repository.MergeGroupRepo, db *gorm.DB, autoChannelService *AutoChannelService) *GenerateService {
+func NewGenerateService(apiConfigRepo *repository.ApiConfigRepo, creditService *CreditService, creditRepo *repository.CreditRepo, logService *ModelCallLogService, encryptKey string, repairService *OnDemandRepairService, channelSvc *ChannelService, channelRepo *repository.ChannelRepo, modelRepo *repository.ChannelModelRepo, mergeGroupRepo *repository.MergeGroupRepo, db *gorm.DB, autoChannelService *AutoChannelService, webhookRepo *repository.WebhookRepo) *GenerateService {
 	return &GenerateService{
 		apiConfigRepo:      apiConfigRepo,
 		creditService:      creditService,
@@ -82,6 +83,7 @@ func NewGenerateService(apiConfigRepo *repository.ApiConfigRepo, creditService *
 		mergeGroupRepo:     mergeGroupRepo,
 		db:                 db,
 		autoChannelService: autoChannelService,
+		webhookRepo:        webhookRepo,
 		httpClient:         &http.Client{Timeout: 10 * time.Minute},
 		encryptKey:         encryptKey,
 	}
@@ -687,7 +689,7 @@ func (s *GenerateService) proxy(tenantID, userID uint, genType, path, contentTyp
 		}
 	}
 	if upstream.StatusCode >= 400 {
-		if disabled, msg := s.checkAndDisableOnBalanceError(respBytes, route); disabled {
+		if disabled, msg := s.checkAndDisableOnBalanceError(tenantID, modelName, respBytes, route); disabled {
 			return nil, errors.New(msg)
 		}
 		return &ProxyResult{
@@ -867,7 +869,7 @@ func (s *GenerateService) ProxyRaw(tenantID, userID uint, method, path, contentT
 		s.recordModelFailureWithRoute(tenantID, userID, chargeType, modelName, method, path, upstream.StatusCode, respBytes, "", route)
 	}
 	if upstream.StatusCode >= 400 {
-		if disabled, msg := s.checkAndDisableOnBalanceError(respBytes, route); disabled {
+		if disabled, msg := s.checkAndDisableOnBalanceError(tenantID, modelName, respBytes, route); disabled {
 			return nil, errors.New(msg)
 		}
 	}
@@ -1024,7 +1026,7 @@ func (s *GenerateService) ProxyRawWithRepair(tenantID, userID uint, method, path
 	}
 
 	if upstream.StatusCode >= 400 {
-		if disabled, msg := s.checkAndDisableOnBalanceError(respBytes, route); disabled {
+		if disabled, msg := s.checkAndDisableOnBalanceError(tenantID, modelName, respBytes, route); disabled {
 			return nil, errors.New(msg)
 		}
 	}
@@ -1294,7 +1296,7 @@ func isUpstreamBalanceError(body []byte, fallbackError string) bool {
 
 // checkAndDisableOnBalanceError checks upstream response for balance-related errors
 // and disables the channel if found. Returns true + error message if disabled.
-func (s *GenerateService) checkAndDisableOnBalanceError(respBody []byte, route *channelRouteContext) (bool, string) {
+func (s *GenerateService) checkAndDisableOnBalanceError(tenantID uint, modelName string, respBody []byte, route *channelRouteContext) (bool, string) {
 	if route == nil || route.Channel == nil {
 		return false, ""
 	}
@@ -1308,7 +1310,87 @@ func (s *GenerateService) checkAndDisableOnBalanceError(respBody []byte, route *
 	}
 	msg := fmt.Sprintf("渠道 %s 因上游余额不足已被自动禁用", route.Channel.Name)
 	log.Printf("Auto-disabling channel %d (%s) due to upstream balance error", channelID, route.Channel.Name)
+	s.notifyChannelBalanceInsufficientAsync(tenantID, modelName, msg, route)
 	return true, msg
+}
+
+func (s *GenerateService) notifyChannelBalanceInsufficientAsync(tenantID uint, modelName, reason string, route *channelRouteContext) {
+	if s.webhookRepo == nil || tenantID == 0 || route == nil || route.Channel == nil {
+		return
+	}
+	channel := *route.Channel
+	modelName = strings.TrimSpace(modelName)
+	go s.notifyChannelBalanceInsufficient(tenantID, channel, modelName, reason)
+}
+
+func (s *GenerateService) notifyChannelBalanceInsufficient(tenantID uint, channel model.Channel, modelName, reason string) {
+	configs, err := s.webhookRepo.ListEnabled(tenantID)
+	if err != nil {
+		log.Printf("webhook balance alert: query configs: %v", err)
+		return
+	}
+	now := time.Now()
+	status := "balance_insufficient"
+	logModelName := channel.Name
+	if strings.TrimSpace(logModelName) == "" {
+		logModelName = fmt.Sprintf("渠道 #%d", channel.ID)
+	}
+	for _, cfg := range configs {
+		if cfg.Platform == "" || strings.TrimSpace(cfg.WebhookURL) == "" {
+			continue
+		}
+		if lastLog, err := s.webhookRepo.LastLogForModel(cfg.TenantID, logModelName, status); err == nil {
+			cooldownDeadline := lastLog.CreatedAt.Add(time.Duration(cfg.CooldownMinutes) * time.Minute)
+			if now.Before(cooldownDeadline) {
+				_ = s.webhookRepo.InsertLog(&model.WebhookLog{TenantID: cfg.TenantID, Platform: cfg.Platform, ModelName: logModelName, Status: status, CooldownSkipped: true})
+				continue
+			}
+		}
+		sender := NewSender(cfg.Platform)
+		if sender == nil {
+			log.Printf("webhook balance alert: unknown platform %q for tenant %d", cfg.Platform, cfg.TenantID)
+			continue
+		}
+		message := channelBalanceWebhookMessage(channel, modelName, reason, now)
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		sendErr := sender.Send(ctx, cfg.WebhookURL, message)
+		cancel()
+		logEntry := &model.WebhookLog{
+			TenantID:        cfg.TenantID,
+			Platform:        cfg.Platform,
+			ModelName:       logModelName,
+			Status:          status,
+			Message:         message,
+			Success:         sendErr == nil,
+			CooldownSkipped: false,
+		}
+		if sendErr != nil {
+			logEntry.ResponseBody = sendErr.Error()
+			log.Printf("webhook balance alert: send %s to tenant %d: %v", cfg.Platform, cfg.TenantID, sendErr)
+		}
+		if err := s.webhookRepo.InsertLog(logEntry); err != nil {
+			log.Printf("webhook balance alert: insert log: %v", err)
+		}
+	}
+}
+
+func channelBalanceWebhookMessage(channel model.Channel, modelName, reason string, now time.Time) string {
+	channelName := strings.TrimSpace(channel.Name)
+	if channelName == "" {
+		channelName = fmt.Sprintf("渠道 #%d", channel.ID)
+	}
+	parts := []string{
+		fmt.Sprintf("渠道 %s 因上游余额不足已被自动禁用", channelName),
+		fmt.Sprintf("渠道 ID: %d", channel.ID),
+	}
+	if modelName != "" {
+		parts = append(parts, "模型: "+modelName)
+	}
+	if reason != "" {
+		parts = append(parts, "原因: "+reason)
+	}
+	parts = append(parts, "时间: "+now.Format(time.RFC3339))
+	return strings.Join(parts, "\n")
 }
 
 func buildRepairRequestContext(generation, method, path, contentType string, body []byte) *RepairRequestContext {
