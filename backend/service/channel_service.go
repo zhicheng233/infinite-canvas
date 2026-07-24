@@ -34,6 +34,10 @@ func (s *ChannelService) Create(input model.SaveChannelInput) (*model.ChannelAdm
 		return nil, err
 	}
 
+	if len([]rune(input.Remark)) > 500 {
+		return nil, errors.New("备注不能超过500个字符")
+	}
+
 	enabled := true
 	if input.Enabled != nil {
 		enabled = *input.Enabled
@@ -45,6 +49,7 @@ func (s *ChannelService) Create(input model.SaveChannelInput) (*model.ChannelAdm
 		Enabled:         enabled,
 		NewApiChannelID: input.NewApiChannelID,
 		MetricsBaseUrl:  input.MetricsBaseUrl,
+		Remark:          input.Remark,
 	}
 	if err := s.repo.Create(channel); err != nil {
 		return nil, err
@@ -65,6 +70,10 @@ func (s *ChannelService) Update(id uint, input model.SaveChannelInput) (*model.C
 		return nil, err
 	}
 
+	if len([]rune(input.Remark)) > 500 {
+		return nil, errors.New("备注不能超过500个字符")
+	}
+
 	channel.Name = name
 	channel.BaseUrl = baseURL
 	if input.Enabled != nil {
@@ -72,6 +81,9 @@ func (s *ChannelService) Update(id uint, input model.SaveChannelInput) (*model.C
 	}
 	channel.NewApiChannelID = input.NewApiChannelID
 	channel.MetricsBaseUrl = input.MetricsBaseUrl
+	if input.Remark != "" {
+		channel.Remark = input.Remark
+	}
 
 	apiKey := strings.TrimSpace(input.ApiKey)
 	if apiKey != "" {
@@ -190,5 +202,6 @@ func channelToAdminInfo(channel *model.Channel) model.ChannelAdminInfo {
 		ChannelInfo: channelToInfo(channel),
 		BaseUrl:     channel.BaseUrl,
 		HasKey:      channel.ApiKey != "",
+		Remark:      channel.Remark,
 	}
 }
