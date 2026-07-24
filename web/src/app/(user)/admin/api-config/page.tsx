@@ -367,6 +367,7 @@ export default function AdminApiConfigPage() {
                 new_api_channel_id: channel.new_api_channel_id || undefined,
                 metrics_base_url: channel.metrics_base_url || undefined,
                 enabled: channel.enabled,
+                remark: channel.remark ?? "",
             });
         } else {
             channelForm.resetFields();
@@ -385,6 +386,7 @@ export default function AdminApiConfigPage() {
                     new_api_channel_id: values.new_api_channel_id != null ? Number(values.new_api_channel_id) : null,
                     metrics_base_url: values.metrics_base_url || undefined,
                     enabled: values.enabled,
+                    remark: values.remark || "",
                 };
                 if (values.api_key) {
                     payload.api_key = values.api_key;
@@ -399,6 +401,7 @@ export default function AdminApiConfigPage() {
                     enabled: values.enabled,
                     new_api_channel_id: values.new_api_channel_id != null ? Number(values.new_api_channel_id) : null,
                     metrics_base_url: values.metrics_base_url || undefined,
+                    remark: values.remark || "",
                 };
                 await createChannel(payload);
                 message.success("创建渠道成功");
@@ -809,6 +812,14 @@ export default function AdminApiConfigPage() {
                         return <Tag>未同步</Tag>;
                 }
             },
+        },
+        {
+            title: "备注",
+            dataIndex: "remark",
+            key: "remark",
+            width: 180,
+            ellipsis: true,
+            render: (value: string) => value || "—",
         },
         {
             title: "状态",
@@ -1322,6 +1333,14 @@ export default function AdminApiConfigPage() {
                     </Form.Item>
                     <Form.Item name="metrics_base_url" label="指标服务地址 (可选)" extra="为空则使用渠道 BaseUrl + /api。配置旧版 New-API 时可留空。">
                         <Input placeholder="https://old-api.example.com" disabled={!isSuperAdmin} />
+                    </Form.Item>
+                    <Form.Item name="remark" label="备注">
+                        <Input.TextArea
+                            placeholder="渠道维护备注（可选，最多500字符）"
+                            maxLength={500}
+                            showCount
+                            rows={3}
+                        />
                     </Form.Item>
                     <Form.Item name="enabled" valuePropName="checked" label="启用渠道">
                         <Switch disabled={!isSuperAdmin} />
