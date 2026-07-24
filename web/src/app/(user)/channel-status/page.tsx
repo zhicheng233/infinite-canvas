@@ -257,7 +257,7 @@ function RateValue({ rate, status, prominent = false }: { rate: number | null; s
             }`}
             style={rate !== null ? { color: `hsl(${rate * 1.2}, 75%, 40%)` } : undefined}
         >
-            {rate === null ? unavailableRateText(status) : `${rate}%`}
+            {rate === null ? unavailableRateText(status) : `${Math.round(rate)}%`}
         </span>
     );
 }

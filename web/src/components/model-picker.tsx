@@ -155,7 +155,7 @@ function ModelLabel({ config, model, capability }: { config: AiConfig; model: st
                 <span className="shrink-0 rounded border border-border/50 px-1.5 py-0.5 text-[10px] font-medium leading-none text-muted-foreground">合并</span>
             ) : option && option.successRate !== null ? (
                 <span className="shrink-0 text-xs font-medium" style={{ color: `hsl(${option.successRate * 1.2}, 80%, 45%)` }}>
-                    {option.successRate}%
+                    {Math.round(option.successRate)}%
                 </span>
             ) : option ? (
                 <span className="shrink-0 text-xs opacity-55">{rateUnavailableLabel(option.metricsStatus)}</span>
