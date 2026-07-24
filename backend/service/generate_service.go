@@ -877,6 +877,16 @@ func (s *GenerateService) ProxyRaw(tenantID, userID uint, method, path, contentT
 				modelName = responseModel
 			}
 			s.recordModelFailureWithRoute(tenantID, userID, chargeType, modelName, method, path, upstream.StatusCode, respBytes, message, route)
+			// Refund credits deducted on the initial POST since the async task actually failed
+			if cost == 0 {
+				recalculatedCost := s.recalculateGenerationCost(tenantID, pricingChannelID, chargeType, modelName)
+				if recalculatedCost > 0 {
+					refundNote := fmt.Sprintf("异步任务失败退款: %s", message)
+					if err := s.creditService.Refund(userID, recalculatedCost, chargeType, modelName, refundNote); err != nil {
+						log.Printf("failed to refund credits for async task failure user=%d generation=%s model=%s: %v", userID, chargeType, modelName, err)
+					}
+				}
+			}
 		} else if chargeType != "" && modelName != "" {
 			s.recordModelSuccessWithRoute(tenantID, userID, chargeType, modelName, method, path, upstream.StatusCode, upstream.ResponseTimeMs, route)
 		}
@@ -1027,6 +1037,16 @@ func (s *GenerateService) ProxyRawWithRepair(tenantID, userID uint, method, path
 			s.recordModelFailureWithRoute(tenantID, userID, generation, modelName, method, path, upstream.StatusCode, respBytes, message, route)
 			requestContext := buildRepairRequestContext(generation, method, path, "application/json", respBytes)
 			s.triggerOnDemandRepairAsync(generation, modelName, message, requestContext)
+			// Refund credits deducted on the initial POST since the async task actually failed
+			if cost == 0 {
+				recalculatedCost := s.recalculateGenerationCost(tenantID, pricingChannelID, generation, modelName)
+				if recalculatedCost > 0 {
+					refundNote := fmt.Sprintf("异步任务失败退款: %s", message)
+					if err := s.creditService.Refund(userID, recalculatedCost, generation, modelName, refundNote); err != nil {
+						log.Printf("failed to refund credits for async task failure user=%d generation=%s model=%s: %v", userID, generation, modelName, err)
+					}
+				}
+			}
 		} else if generation != "" && modelName != "" {
 			s.recordModelSuccessWithRoute(tenantID, userID, generation, modelName, method, path, upstream.StatusCode, upstream.ResponseTimeMs, route)
 		}
@@ -1068,6 +1088,19 @@ func (s *GenerateService) getProxyCostByGeneration(tenantID uint, channelID uint
 		return 0, generation, CreditCostResult{}, err
 	}
 	return cost, generation, result, nil
+}
+
+// recalculateGenerationCost recalculates the cost for a generation without the POST-only restriction.
+// Used when GET polling discovers an async task has failed and we need to refund.
+func (s *GenerateService) recalculateGenerationCost(tenantID, channelID uint, generation, modelName string) int {
+	if generation == "" || modelName == "" {
+		return 0
+	}
+	cost, _, err := s.getRequiredPricing(tenantID, channelID, generation, modelName, "application/json", nil)
+	if err != nil {
+		return 0
+	}
+	return cost
 }
 
 func (s *GenerateService) repairAndRetryUpstream(tenantID, userID uint, generation, modelName, method, path, contentType string, body []byte, statusCode int, responseBody []byte, fallback string, route *channelRouteContext) (*upstreamCallResult, bool) {
