@@ -258,6 +258,32 @@ func TestBuildRepairRequestContextVideoImageToVideo(t *testing.T) {
 	}
 }
 
+func TestRecalculateGenerationCost(t *testing.T) {
+	t.Run("returns zero for empty generation", func(t *testing.T) {
+		s := &GenerateService{}
+		cost := s.recalculateGenerationCost(0, 0, "", "gpt-image-2")
+		if cost != 0 {
+			t.Fatalf("recalculateGenerationCost = %d, want 0", cost)
+		}
+	})
+
+	t.Run("returns zero for empty modelName", func(t *testing.T) {
+		s := &GenerateService{}
+		cost := s.recalculateGenerationCost(0, 0, "image", "")
+		if cost != 0 {
+			t.Fatalf("recalculateGenerationCost = %d, want 0", cost)
+		}
+	})
+
+	t.Run("returns zero for both empty", func(t *testing.T) {
+		s := &GenerateService{}
+		cost := s.recalculateGenerationCost(0, 0, "", "")
+		if cost != 0 {
+			t.Fatalf("recalculateGenerationCost = %d, want 0", cost)
+		}
+	})
+}
+
 func TestBuildRepairRequestContextImageEdit(t *testing.T) {
 	body := []byte(`{"model":"gpt-image-2","prompt":"test","image":["https://example.com/a.png"],"size":"1536x1024"}`)
 	ctx := buildRepairRequestContext("image", http.MethodPost, "/v1/images/edits", "application/json", body)

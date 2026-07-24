@@ -33,6 +33,62 @@ func TestReadFailedModelTaskResponse(t *testing.T) {
 	}
 }
 
+func TestReadFailedModelTaskResponse_SuccessStatus_ReturnsFalse(t *testing.T) {
+	body := []byte(`{"status":"completed","output":"ok"}`)
+	failed, modelName, message := readFailedModelTaskResponse(body)
+	if failed {
+		t.Fatalf("expected non-failure for completed status, got failed=true model=%q message=%q", modelName, message)
+	}
+}
+
+func TestReadFailedModelTaskResponse_ProcessingStatus_ReturnsFalse(t *testing.T) {
+	body := []byte(`{"status":"processing","task_id":"abc"}`)
+	failed, _, _ := readFailedModelTaskResponse(body)
+	if failed {
+		t.Fatalf("expected non-failure for processing status (intermediate polling)")
+	}
+}
+
+func TestReadFailedModelTaskResponse_QueuedStatus_ReturnsFalse(t *testing.T) {
+	body := []byte(`{"status":"queued"}`)
+	failed, _, _ := readFailedModelTaskResponse(body)
+	if failed {
+		t.Fatalf("expected non-failure for queued status")
+	}
+}
+
+func TestReadFailedModelTaskResponse_ErrorStatus_ReturnsTrue(t *testing.T) {
+	body := []byte(`{"status":"error","model":"sora","error":{"message":"processing error"}}`)
+	failed, modelName, message := readFailedModelTaskResponse(body)
+	if !failed || modelName != "sora" || message == "" {
+		t.Fatalf("failed=%v model=%q message=%q", failed, modelName, message)
+	}
+}
+
+func TestReadFailedModelTaskResponse_CancelledStatus_ReturnsTrue(t *testing.T) {
+	body := []byte(`{"status":"cancelled","error":{"message":"user cancelled"}}`)
+	failed, _, message := readFailedModelTaskResponse(body)
+	if !failed || message == "" {
+		t.Fatalf("failed=%v message=%q", failed, message)
+	}
+}
+
+func TestReadFailedModelTaskResponse_SuccessFalse_ReturnsTrue(t *testing.T) {
+	body := []byte(`{"success":false,"error":{"message":"processing error"}}`)
+	failed, _, message := readFailedModelTaskResponse(body)
+	if !failed || message == "" {
+		t.Fatalf("failed=%v message=%q", failed, message)
+	}
+}
+
+func TestReadFailedModelTaskResponse_InvalidJSON_ReturnsFalse(t *testing.T) {
+	body := []byte(`not json`)
+	failed, _, _ := readFailedModelTaskResponse(body)
+	if failed {
+		t.Fatalf("expected non-failure for invalid JSON")
+	}
+}
+
 func TestReadFailedModelTaskResponseReadsFailedEnvelope(t *testing.T) {
 	body := []byte(`{"code":"fail_to_fetch_task","message":"{\"error\":{\"message\":\"invalid request body\",\"type\":\"invalid_request_error\"}}","data":null}`)
 	failed, _, message := readFailedModelTaskResponse(body)
