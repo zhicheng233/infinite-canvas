@@ -26,12 +26,15 @@ func TestIsUpstreamBalanceError(t *testing.T) {
 		{name: "quota exceeded", body: "quota exceeded", want: true},
 		{name: "billing failed", body: "billing failed", want: true},
 		{name: "insufficient_quota", body: "insufficient_quota", want: true},
+		{name: "insufficient_user_quota", body: "insufficient_user_quota", want: true},
+		{name: "chinese user quota insufficient", body: "用户额度不足, 剩余额度: ¥0.000000", want: true},
 		{name: "扣费额度失败", body: "扣费额度失败", want: true},
 		{name: "non-balance error", body: "Rate limit exceeded", want: false},
 		{name: "content filter triggered", body: "Content filter triggered", want: false},
 		{name: "empty string", body: "", want: false},
 		{name: "case insensitive", body: "Insufficient Balance", want: true},
 		{name: "mixed context with keyword", body: `{"error":{"message":"insufficient balance for this request"}}`, want: true},
+		{name: "new api insufficient user quota response", body: `{"error":{"message":"用户额度不足, 剩余额度: ¥0.000000 (request id: 202607242118503872757708268d9d6DPiDlVHo)","type":"new_api_error","param":"","code":"insufficient_user_quota"}}`, want: true},
 		{name: "normal error message", body: "invalid API key", want: false},
 	}
 

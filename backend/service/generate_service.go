@@ -1164,6 +1164,9 @@ func (s *GenerateService) shouldAttemptOnDemandRepair(generation, modelName stri
 		return true
 	}
 	message := strings.ToLower(buildModelCallErrorSummary(statusCode, responseBody, fallback))
+	if IsUpstreamBalanceError(message) {
+		return false
+	}
 	if requestContext != nil && requestContext.Operation != "" && isCapabilityMismatchMessage(message) {
 		return true
 	}
@@ -1267,8 +1270,11 @@ func isCapabilityMismatchMessage(message string) bool {
 var UpstreamBalanceErrorKeywords = []string{
 	"扣费额度失败",
 	"余额不足",
+	"额度不足",
+	"用户额度不足",
 	"insufficient balance",
 	"insufficient_quota",
+	"insufficient_user_quota",
 	"quota exceeded",
 	"billing failed",
 }
