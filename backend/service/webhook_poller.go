@@ -27,6 +27,7 @@ type WebhookPoller struct {
 	db               *gorm.DB
 	sender           WebhookSender
 	states           map[string]string // model_name -> "up" | "down"
+	intervalChanged  chan struct{}
 }
 
 // NewWebhookPoller creates a poller. db is required for cross-tenant queries
@@ -46,6 +47,7 @@ func NewWebhookPoller(
 		sender:           sender,
 		interval:         5 * time.Minute,
 		states:           make(map[string]string),
+		intervalChanged:  make(chan struct{}, 1),
 	}
 }
 
@@ -75,7 +77,27 @@ func (p *WebhookPoller) Stop() {
 
 // IntervalSeconds returns the poll interval in seconds.
 func (p *WebhookPoller) IntervalSeconds() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	return int(p.interval.Seconds())
+}
+
+func (p *WebhookPoller) SetIntervalSeconds(seconds int) {
+	if seconds <= 0 {
+		seconds = 300
+	}
+	interval := time.Duration(seconds) * time.Second
+	p.mu.Lock()
+	changed := p.interval != interval
+	p.interval = interval
+	running := p.running
+	p.mu.Unlock()
+	if changed && running {
+		select {
+		case p.intervalChanged <- struct{}{}:
+		default:
+		}
+	}
 }
 
 // IsRunning reports whether the poller goroutine is active.
@@ -93,13 +115,16 @@ func (p *WebhookPoller) loop() {
 		p.mu.Unlock()
 	}()
 
-	ticker := time.NewTicker(p.interval)
+	ticker := time.NewTicker(time.Duration(p.IntervalSeconds()) * time.Second)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ticker.C:
 			p.checkOnce()
+		case <-p.intervalChanged:
+			ticker.Stop()
+			ticker = time.NewTicker(time.Duration(p.IntervalSeconds()) * time.Second)
 		case <-p.ctx.Done():
 			return
 		}
@@ -177,7 +202,7 @@ func (p *WebhookPoller) notifyStateChange(modelName, newState string, now time.T
 	for _, cfg := range configs {
 		// Cooldown check: skip if a log entry for this (tenant, model, state)
 		// was created within the cooldown window.
-		lastLog, err := p.webhookRepo.LastLogForModel(cfg.TenantID, modelName, newState)
+		lastLog, err := p.webhookRepo.LastLogForPlatformModel(cfg.TenantID, cfg.Platform, modelName, newState)
 		if err == nil {
 			cooldownDeadline := lastLog.CreatedAt.Add(time.Duration(cfg.CooldownMinutes) * time.Minute)
 			if now.Before(cooldownDeadline) {

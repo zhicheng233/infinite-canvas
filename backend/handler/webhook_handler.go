@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -23,7 +24,7 @@ func NewWebhookHandler(webhookRepo *repository.WebhookRepo, poller *service.Webh
 
 func (h *WebhookHandler) ListConfig(c *gin.Context) {
 	claims := c.MustGet("claims").(*service.Claims)
-	configs, err := h.webhookRepo.ListEnabled(claims.TenantID)
+	configs, err := h.webhookRepo.ListByTenant(claims.TenantID)
 	if err != nil {
 		model.Fail(c, 500, err.Error())
 		return
@@ -31,17 +32,68 @@ func (h *WebhookHandler) ListConfig(c *gin.Context) {
 	model.OK(c, configs)
 }
 
+type webhookConfigInput struct {
+	Platform        string  `json:"platform"`
+	WebhookURL      *string `json:"webhook_url"`
+	Enabled         *bool   `json:"enabled"`
+	TemplateDown    *string `json:"template_down"`
+	TemplateUp      *string `json:"template_up"`
+	IntervalSeconds *int    `json:"interval_seconds"`
+	CooldownMinutes *int    `json:"cooldown_minutes"`
+}
+
 func (h *WebhookHandler) SaveConfig(c *gin.Context) {
 	claims := c.MustGet("claims").(*service.Claims)
-	var cfg model.WebhookConfig
-	if err := c.ShouldBindJSON(&cfg); err != nil {
+	var input webhookConfigInput
+	if err := c.ShouldBindJSON(&input); err != nil {
 		model.Fail(c, 400, "无效的请求参数")
 		return
 	}
-	cfg.TenantID = claims.TenantID
-	if err := h.webhookRepo.Save(&cfg); err != nil {
+	updates := map[string]interface{}{}
+	if input.WebhookURL != nil {
+		updates["webhook_url"] = strings.TrimSpace(*input.WebhookURL)
+	}
+	if input.Enabled != nil {
+		updates["enabled"] = *input.Enabled
+	}
+	if input.TemplateDown != nil {
+		updates["template_down"] = *input.TemplateDown
+	}
+	if input.TemplateUp != nil {
+		updates["template_up"] = *input.TemplateUp
+	}
+	if input.IntervalSeconds != nil {
+		if *input.IntervalSeconds <= 0 {
+			model.Fail(c, 400, "轮询间隔必须大于 0")
+			return
+		}
+		updates["interval_seconds"] = *input.IntervalSeconds
+	}
+	if input.CooldownMinutes != nil {
+		if *input.CooldownMinutes < 0 {
+			model.Fail(c, 400, "冷却时间不能小于 0")
+			return
+		}
+		updates["cooldown_minutes"] = *input.CooldownMinutes
+	}
+
+	platform := strings.TrimSpace(input.Platform)
+	if platform == "" {
+		if input.IntervalSeconds != nil && len(updates) == 1 {
+			h.poller.SetIntervalSeconds(*input.IntervalSeconds)
+			model.OK(c, gin.H{"interval_seconds": *input.IntervalSeconds})
+			return
+		}
+		model.Fail(c, 400, "platform 不能为空")
+		return
+	}
+	cfg, err := h.webhookRepo.SavePatch(claims.TenantID, platform, updates)
+	if err != nil {
 		model.Fail(c, 500, err.Error())
 		return
+	}
+	if input.IntervalSeconds != nil {
+		h.poller.SetIntervalSeconds(*input.IntervalSeconds)
 	}
 	model.OK(c, cfg)
 }
@@ -118,7 +170,8 @@ func (h *WebhookHandler) ListLogs(c *gin.Context) {
 }
 
 func (h *WebhookHandler) StartPoller(c *gin.Context) {
-	_ = c.MustGet("claims").(*service.Claims)
+	claims := c.MustGet("claims").(*service.Claims)
+	h.poller.SetIntervalSeconds(h.webhookRepo.IntervalSeconds(claims.TenantID))
 	if err := h.poller.Start(); err != nil {
 		model.Fail(c, 500, err.Error())
 		return
@@ -133,7 +186,8 @@ func (h *WebhookHandler) StopPoller(c *gin.Context) {
 }
 
 func (h *WebhookHandler) PollerStatus(c *gin.Context) {
-	_ = c.MustGet("claims").(*service.Claims)
+	claims := c.MustGet("claims").(*service.Claims)
+	h.poller.SetIntervalSeconds(h.webhookRepo.IntervalSeconds(claims.TenantID))
 	model.OK(c, gin.H{
 		"running":          h.poller.IsRunning(),
 		"interval_seconds": h.poller.IntervalSeconds(),

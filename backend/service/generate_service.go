@@ -1339,7 +1339,7 @@ func (s *GenerateService) notifyChannelBalanceInsufficient(tenantID uint, channe
 		if cfg.Platform == "" || strings.TrimSpace(cfg.WebhookURL) == "" {
 			continue
 		}
-		if lastLog, err := s.webhookRepo.LastLogForModel(cfg.TenantID, logModelName, status); err == nil {
+		if lastLog, err := s.webhookRepo.LastLogForPlatformModel(cfg.TenantID, cfg.Platform, logModelName, status); err == nil {
 			cooldownDeadline := lastLog.CreatedAt.Add(time.Duration(cfg.CooldownMinutes) * time.Minute)
 			if now.Before(cooldownDeadline) {
 				_ = s.webhookRepo.InsertLog(&model.WebhookLog{TenantID: cfg.TenantID, Platform: cfg.Platform, ModelName: logModelName, Status: status, CooldownSkipped: true})

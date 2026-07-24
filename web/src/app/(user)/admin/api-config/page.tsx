@@ -1224,8 +1224,11 @@ export default function AdminApiConfigPage() {
                                 <Button loading={savingInterval} onClick={async () => {
                                     setSavingInterval(true);
                                     try {
-                                        await saveWebhookConfig({ interval_seconds: pollerInterval });
+                                        for (const platform of WEBHOOK_PLATFORMS) {
+                                            await saveWebhookConfig({ platform, interval_seconds: pollerInterval });
+                                        }
                                         message.success("间隔已保存");
+                                        await fetchPollerStatus();
                                     } catch (err: any) {
                                         message.error(err?.message || "保存间隔失败");
                                     } finally {
@@ -1246,6 +1249,7 @@ export default function AdminApiConfigPage() {
                                             await saveWebhookConfig({ platform, cooldown_minutes: cooldownMinutes });
                                         }
                                         message.success("冷却时间已保存");
+                                        await fetchWebhookConfigs();
                                     } catch (err: any) {
                                         message.error(err?.message || "保存冷却时间失败");
                                     } finally {
