@@ -11,6 +11,7 @@ import { PromptSelectDialog } from "@/components/prompts/prompt-select-dialog";
 import { AssetPickerModal, type InsertAssetPayload } from "@/app/(user)/canvas/components/asset-picker-modal";
 import { creditEstimateButtonText, CreditCostHint, CreditHelpActions, isInsufficientCreditError, useEstimatedCreditCost, useUserCreditBalance } from "@/constant/credits";
 import { canvasThemes } from "@/lib/canvas-theme";
+import { extractErrorDetail, isBalanceError } from "@/lib/error-helper";
 import { imageReferenceLabel } from "@/lib/image-reference-prompt";
 import { deleteGenerationRecords, listGenerationRecords, saveGenerationRecord } from "@/services/api/generation-records";
 import { modelOptionLabel, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
@@ -294,7 +295,13 @@ export default function ImagePage() {
             setResults((value) => updateResultAt(value, index, { status: "success", image: nextImage }));
             return nextImage;
         } catch (error) {
-            setResults((value) => updateResultAt(value, index, { status: "failed", error: error instanceof Error ? error.message : "生成失败" }));
+            const msg = error instanceof Error ? error.message : "生成失败";
+            const rawDetail = extractErrorDetail(error);
+            let displayError = msg;
+            if (rawDetail && !isBalanceError(msg)) {
+                displayError = `${msg}\n\n上游错误详情：${rawDetail}`;
+            }
+            setResults((value) => updateResultAt(value, index, { status: "failed", error: displayError }));
             throw error;
         }
     };

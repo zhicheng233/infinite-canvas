@@ -10,7 +10,7 @@ import { AssetPickerModal, type InsertAssetPayload } from "@/app/(user)/canvas/c
 import { ModelPicker } from "@/components/model-picker";
 import { PromptSelectDialog } from "@/components/prompts/prompt-select-dialog";
 import { creditEstimateButtonText, CreditCostHint, CreditHelpActions, isInsufficientCreditError, useEstimatedCreditCost, useUserCreditBalance } from "@/constant/credits";
-import { beautifyVideoError } from "@/lib/error-helper";
+import { beautifyVideoError, extractErrorDetail, isBalanceError } from "@/lib/error-helper";
 import { VideoSettingsPanel, normalizeVideoResolutionValue, normalizeVideoSizeValue, videoSizeLabel } from "@/components/video-settings-panel";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { formatBytes, formatDuration } from "@/lib/image-utils";
@@ -41,6 +41,7 @@ type GenerationResult = {
     status: "pending" | "success" | "failed";
     video?: GeneratedVideo;
     error?: string;
+    rawDetail?: string;
 };
 
 type GenerationLog = {
@@ -182,8 +183,14 @@ export default function VideoPage() {
             await saveLog(log);
             void pollGenerationLog(log, snapshot.config);
         } catch (error) {
-            const errorMessage = beautifyVideoError(error instanceof Error ? error.message : "生成失败");
-            setResults([{ id: nanoid(), status: "failed", error: errorMessage }]);
+            const msg = error instanceof Error ? error.message : "生成失败";
+            const rawDetail = extractErrorDetail(error);
+            const errorMessage = beautifyVideoError(msg);
+            let displayError = errorMessage;
+            if (rawDetail && !isBalanceError(msg)) {
+                displayError = `${errorMessage}\n\n上游错误详情：${rawDetail}`;
+            }
+            setResults([{ id: nanoid(), status: "failed", error: displayError, rawDetail: rawDetail && !isBalanceError(msg) ? rawDetail : undefined }]);
             await saveLog(
                 buildLog({
                     prompt: snapshot.text,
@@ -194,7 +201,7 @@ export default function VideoPage() {
                     audioReferences: snapshot.audioReferences,
                     durationMs: performance.now() - batchStartedAt,
                     status: "失败",
-                    error: errorMessage,
+                    error: displayError,
                 }),
             );
             message.error(errorMessage);
@@ -330,9 +337,15 @@ export default function VideoPage() {
                 await delay(log.task.provider === "seedance" ? 5000 : 2500);
             }
         } catch (error) {
-            const errorMessage = beautifyVideoError(error instanceof Error ? error.message : "生成失败");
-            setResults([{ id: log.id, status: "failed", error: errorMessage }]);
-            await saveLog({ ...log, status: "失败", durationMs: Date.now() - log.createdAt, error: errorMessage });
+            const msg = error instanceof Error ? error.message : "生成失败";
+            const rawDetail = extractErrorDetail(error);
+            const errorMessage = beautifyVideoError(msg);
+            let displayError = errorMessage;
+            if (rawDetail && !isBalanceError(msg)) {
+                displayError = `${errorMessage}\n\n上游错误详情：${rawDetail}`;
+            }
+            setResults([{ id: log.id, status: "failed", error: displayError, rawDetail: rawDetail && !isBalanceError(msg) ? rawDetail : undefined }]);
+            await saveLog({ ...log, status: "失败", durationMs: Date.now() - log.createdAt, error: displayError });
             message.error(errorMessage);
         } finally {
             activeLogIdsRef.current.delete(log.id);
@@ -356,7 +369,7 @@ export default function VideoPage() {
         if (log.config.videoSeconds) updateConfig("videoSeconds", log.config.videoSeconds);
         if (log.config.videoGenerateAudio) updateConfig("videoGenerateAudio", log.config.videoGenerateAudio);
         if (log.config.videoWatermark) updateConfig("videoWatermark", log.config.videoWatermark);
-        setResults(log.status === "生成中" ? [{ id: log.id, status: "pending" }] : log.video ? [{ id: log.video.id, status: "success", video: log.video }] : [{ id: log.id, status: "failed", error: beautifyVideoError(log.error || "生成失败") }]);
+        setResults(log.status === "生成中" ? [{ id: log.id, status: "pending" }] : log.video ? [{ id: log.video.id, status: "success", video: log.video }] : [{ id: log.id, status: "failed", error: log.error || "生成失败" }]);
     };
 
     return (
@@ -527,7 +540,7 @@ export default function VideoPage() {
                                     result.status === "success" && result.video ? (
                                         <ResultVideoCard key={result.id} video={result.video} onDownload={downloadVideo} onSaveAsset={saveResultToAssets} />
                                     ) : result.status === "failed" ? (
-                                        <FailedVideoCard key={result.id} error={beautifyVideoError(result.error || "生成失败")} onRetry={retryResult} />
+                                        <FailedVideoCard key={result.id} error={result.error || "生成失败"} rawDetail={result.rawDetail} onRetry={retryResult} />
                                     ) : (
                                         <PendingVideoCard key={result.id} />
                                     ),
@@ -630,8 +643,9 @@ function PendingVideoCard() {
     );
 }
 
-function FailedVideoCard({ error, onRetry }: { error: string; onRetry: () => void }) {
+function FailedVideoCard({ error, rawDetail, onRetry }: { error: string; rawDetail?: string; onRetry: () => void }) {
     const showCreditHelp = isInsufficientCreditError(error);
+    const showRawDetail = rawDetail && !showCreditHelp;
 
     return (
         <div className="overflow-hidden rounded-lg border border-red-200 bg-red-50 dark:border-red-950 dark:bg-red-950/20">
@@ -640,6 +654,12 @@ function FailedVideoCard({ error, onRetry }: { error: string; onRetry: () => voi
                 <Typography.Paragraph ellipsis={{ rows: 4 }} className="!mb-0 !text-xs !text-red-500 dark:!text-red-300">
                     {error}
                 </Typography.Paragraph>
+                {showRawDetail ? (
+                    <div className="w-full rounded bg-red-100/50 p-2 text-left text-xs text-red-600 dark:bg-red-900/30 dark:text-red-400">
+                        <div className="mb-0.5 font-medium">上游错误详情：</div>
+                        <code className="break-all">{rawDetail}</code>
+                    </div>
+                ) : null}
                 {showCreditHelp ? <CreditHelpActions /> : null}
             </div>
             <div className="flex justify-end border-t border-red-200 p-3 dark:border-red-950">
