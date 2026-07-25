@@ -2,10 +2,24 @@ package service
 
 import (
 	"encoding/json"
+	"reflect"
 	"testing"
 
 	"infinite-canvas-server/model"
 )
+
+func TestUniqueDiscoveredModelNames(t *testing.T) {
+	items := []discoveredModel{
+		{ID: " omni_flash_nowater "},
+		{ID: ""},
+		{ID: "omni_flash_nowater"},
+		{ID: "omni-fast"},
+	}
+	want := []string{"omni_flash_nowater", "omni-fast"}
+	if got := uniqueDiscoveredModelNames(items); !reflect.DeepEqual(got, want) {
+		t.Fatalf("names=%v, want %v", got, want)
+	}
+}
 
 func TestUpdateChannelModelCapabilities(t *testing.T) {
 	// Setup: Create a channel model with initial capabilities

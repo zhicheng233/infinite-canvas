@@ -56,6 +56,23 @@ type discoveredModelsResponse struct {
 	Data []discoveredModel `json:"data"`
 }
 
+func uniqueDiscoveredModelNames(items []discoveredModel) []string {
+	names := make([]string, 0, len(items))
+	seen := make(map[string]struct{}, len(items))
+	for _, item := range items {
+		name := strings.TrimSpace(item.ID)
+		if name == "" {
+			continue
+		}
+		if _, exists := seen[name]; exists {
+			continue
+		}
+		seen[name] = struct{}{}
+		names = append(names, name)
+	}
+	return names
+}
+
 func (s *ChannelModelService) List(channelID uint, enabledOnly bool) ([]model.ChannelModelInfo, error) {
 	items, err := s.modelRepo.ListByChannel(channelID, enabledOnly)
 	if err != nil {
@@ -200,11 +217,8 @@ func (s *ChannelModelService) Sync(channelID uint) error {
 		return s.markSyncFailure(channel, err)
 	}
 
-	for _, discovered := range payload.Data {
-		name := strings.TrimSpace(discovered.ID)
-		if name == "" {
-			continue
-		}
+	discoveredNames := uniqueDiscoveredModelNames(payload.Data)
+	for _, name := range discoveredNames {
 		item := &model.ChannelModel{ChannelID: channelID, ModelName: name, Enabled: true, Capabilities: defaultChannelModelCapabilitiesJSON(), ImageGenerateRoute: "auto", ImageEditRoute: "auto", VideoRoute: "auto"}
 		if existing, findErr := s.modelRepo.FindByChannelAndName(channelID, name); findErr == nil {
 			item = existing
@@ -219,12 +233,6 @@ func (s *ChannelModelService) Sync(channelID uint) error {
 		}
 	}
 
-	discoveredNames := make([]string, 0, len(payload.Data))
-	for _, d := range payload.Data {
-		if name := strings.TrimSpace(d.ID); name != "" {
-			discoveredNames = append(discoveredNames, name)
-		}
-	}
 	if err := s.modelRepo.DeleteStaleModels(channelID, discoveredNames); err != nil {
 		return s.markSyncFailure(channel, err)
 	}

@@ -1,9 +1,12 @@
 package repository
 
 import (
+	"strings"
+
 	"infinite-canvas-server/model"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type ChannelModelRepo struct {
@@ -48,19 +51,30 @@ func (r *ChannelModelRepo) Save(item *model.ChannelModel) error {
 
 func (r *ChannelModelRepo) Upsert(item *model.ChannelModel) error {
 	var existing model.ChannelModel
-	result := r.db.Where("channel_id = ? AND model_name = ?", item.ChannelID, item.ModelName).First(&existing)
+	result := r.db.Unscoped().Where("channel_id = ? AND model_name = ?", item.ChannelID, item.ModelName).First(&existing)
 	if result.Error == nil {
-		item.ID = existing.ID
-		item.CreatedAt = existing.CreatedAt
-		if item.Capabilities == "" {
-			item.Capabilities = existing.Capabilities
+		mergeChannelModelForUpsert(&existing, item)
+		if err := r.db.Unscoped().Save(&existing).Error; err != nil {
+			return err
 		}
-		return r.db.Save(item).Error
+		*item = existing
+		return nil
 	}
 	if result.Error != nil && result.Error != gorm.ErrRecordNotFound {
 		return result.Error
 	}
-	return r.db.Create(item).Error
+	item.DeletedAt = gorm.DeletedAt{}
+	return r.db.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "channel_id"}, {Name: "model_name"}},
+		DoUpdates: clause.AssignmentColumns([]string{"deleted_at"}),
+	}).Create(item).Error
+}
+
+func mergeChannelModelForUpsert(existing, incoming *model.ChannelModel) {
+	existing.DeletedAt = gorm.DeletedAt{}
+	if strings.TrimSpace(existing.Capabilities) == "" {
+		existing.Capabilities = incoming.Capabilities
+	}
 }
 
 func (r *ChannelModelRepo) SetEnabled(id uint, enabled bool) error {
