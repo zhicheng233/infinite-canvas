@@ -20,6 +20,13 @@ type WebhookSender interface {
 	Send(ctx context.Context, url string, message string) error
 }
 
+type webhookDeliveryResponse struct {
+	OK         *bool `json:"ok"`
+	ErrCode    *int  `json:"errcode"`
+	Code       *int  `json:"code"`
+	StatusCode *int  `json:"StatusCode"`
+}
+
 // --- Feishu (飞书) ---
 
 type FeishuSender struct{}
@@ -31,7 +38,7 @@ func (s *FeishuSender) Send(ctx context.Context, url string, message string) err
 			"text": message,
 		},
 	}
-	return postWebhook(ctx, url, body)
+	return postWebhook(ctx, url, body, "feishu")
 }
 
 // --- DingTalk (钉钉) ---
@@ -45,7 +52,7 @@ func (s *DingTalkSender) Send(ctx context.Context, url string, message string) e
 			"content": message,
 		},
 	}
-	return postWebhook(ctx, url, body)
+	return postWebhook(ctx, url, body, "dtalk")
 }
 
 // --- WeChat Work (企业微信) ---
@@ -59,7 +66,7 @@ func (s *WecomSender) Send(ctx context.Context, url string, message string) erro
 			"content": message,
 		},
 	}
-	return postWebhook(ctx, url, body)
+	return postWebhook(ctx, url, body, "wecom")
 }
 
 // --- Telegram ---
@@ -75,7 +82,7 @@ func (s *TelegramSender) Send(ctx context.Context, url string, message string) e
 		"chat_id": chatID,
 		"text":    message,
 	}
-	return postWebhook(ctx, url, body)
+	return postWebhook(ctx, url, body, "telegram")
 }
 
 func extractTelegramChatID(rawURL string) (string, error) {
@@ -112,7 +119,7 @@ func NewSender(platform string) WebhookSender {
 
 // --- shared helper ---
 
-func postWebhook(ctx context.Context, targetURL string, body interface{}) error {
+func postWebhook(ctx context.Context, targetURL string, body interface{}, platform string) error {
 	jsonBody, err := json.Marshal(body)
 	if err != nil {
 		return fmt.Errorf("marshal body: %w", err)
@@ -130,10 +137,45 @@ func postWebhook(ctx context.Context, targetURL string, body interface{}) error 
 	}
 	defer resp.Body.Close()
 
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	if err != nil {
+		return fmt.Errorf("read response: %w", err)
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return fmt.Errorf("unexpected status %d: %s", resp.StatusCode, string(respBody))
 	}
 
-	return nil
+	return validateWebhookDeliveryResponse(platform, respBody)
+}
+
+func validateWebhookDeliveryResponse(platform string, body []byte) error {
+	var response webhookDeliveryResponse
+	if err := json.Unmarshal(body, &response); err != nil {
+		return fmt.Errorf("%s invalid response: %s", platform, string(body))
+	}
+
+	switch platform {
+	case "telegram":
+		if response.OK != nil && *response.OK {
+			return nil
+		}
+	case "dtalk", "wecom":
+		if response.ErrCode != nil && *response.ErrCode == 0 {
+			return nil
+		}
+	case "feishu":
+		if response.Code != nil {
+			if *response.Code == 0 {
+				return nil
+			}
+			break
+		}
+		if response.StatusCode != nil && *response.StatusCode == 0 {
+			return nil
+		}
+	default:
+		return fmt.Errorf("unsupported webhook platform: %s", platform)
+	}
+
+	return fmt.Errorf("%s rejected request: %s", platform, string(body))
 }

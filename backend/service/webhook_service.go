@@ -128,11 +128,22 @@ func (s *WebhookService) ListLogs(tenantID uint, limit int) ([]model.WebhookLog,
 	return s.repo.ListLogs(tenantID, limit)
 }
 
+func shouldDispatchUpstreamWebhookAlert(event upstreamWebhookEvent) bool {
+	return strings.TrimSpace(event.Status) != ""
+}
+
 func (s *WebhookService) NotifyUpstreamAlertAsync(event upstreamWebhookEvent) {
-	if s == nil || s.repo == nil || event.TenantID == 0 || event.Status == "" {
+	if s == nil || s.repo == nil || !shouldDispatchUpstreamWebhookAlert(event) {
 		return
 	}
 	go s.notifyUpstreamAlert(event)
+}
+
+func webhookAlertInCooldown(lastLog *model.WebhookLog, err error, now time.Time, cooldownMinutes int) bool {
+	return err == nil &&
+		lastLog != nil &&
+		lastLog.Success &&
+		now.Before(lastLog.CreatedAt.Add(time.Duration(cooldownMinutes)*time.Minute))
 }
 
 func (s *WebhookService) notifyUpstreamAlert(event upstreamWebhookEvent) {
@@ -146,7 +157,7 @@ func (s *WebhookService) notifyUpstreamAlert(event upstreamWebhookEvent) {
 	for _, cfg := range configs {
 		if cfg.CooldownMinutes > 0 {
 			lastLog, err := s.repo.LastAlert(cfg.TenantID, cfg.Platform, event.ChannelID, event.ModelName, event.Status)
-			if err == nil && now.Before(lastLog.CreatedAt.Add(time.Duration(cfg.CooldownMinutes)*time.Minute)) {
+			if webhookAlertInCooldown(lastLog, err, now, cfg.CooldownMinutes) {
 				_ = s.repo.InsertLog(webhookLogFromEvent(cfg.Platform, event, message, false, true))
 				continue
 			}

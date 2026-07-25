@@ -104,7 +104,7 @@ func (r *WebhookRepo) ListLogs(tenantID uint, limit int) ([]model.WebhookLog, er
 
 func (r *WebhookRepo) LastAlert(tenantID uint, platform string, channelID uint, modelName string, status string) (*model.WebhookLog, error) {
 	var log model.WebhookLog
-	err := r.db.Where("tenant_id = ? AND platform = ? AND channel_id = ? AND model_name = ? AND status = ? AND cooldown_skipped = ?", tenantID, platform, channelID, modelName, status, false).
+	err := r.db.Where("tenant_id = ? AND platform = ? AND channel_id = ? AND model_name = ? AND status = ? AND success = ? AND cooldown_skipped = ?", tenantID, platform, channelID, modelName, status, true, false).
 		Order("id DESC").Limit(1).First(&log).Error
 	if err != nil {
 		return nil, err

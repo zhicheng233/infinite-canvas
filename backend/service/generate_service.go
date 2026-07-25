@@ -1330,6 +1330,7 @@ func (s *GenerateService) handleUpstreamWebhookAlert(tenantID uint, modelName st
 	}
 	clientMessage := alert.Reason
 	if alert.Status == WebhookStatusUserQuotaInsufficient {
+		clientMessage = "因上游问题被禁用"
 		switch {
 		case event.ChannelID == 0:
 			event.Action = "未定位到具体渠道，未执行自动禁用"
@@ -1341,7 +1342,6 @@ func (s *GenerateService) handleUpstreamWebhookAlert(tenantID uint, modelName st
 				log.Printf("auto-disable channel %d after upstream user quota alert: %v", event.ChannelID, err)
 			} else {
 				event.Action = "已自动禁用渠道"
-				clientMessage = fmt.Sprintf("渠道 %s 因上游用户额度不足已被自动禁用", webhookChannelLabel(event.ChannelID, event.ChannelName))
 				log.Printf("auto-disabled channel %d after upstream user quota alert", event.ChannelID)
 			}
 		}

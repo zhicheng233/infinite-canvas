@@ -92,14 +92,42 @@ func TestUpstreamWebhookMessage(t *testing.T) {
 	}
 }
 
+func TestShouldDispatchUpstreamWebhookAlertAllowsDefaultTenant(t *testing.T) {
+	event := upstreamWebhookEvent{
+		TenantID: 0,
+		Status:   WebhookStatusUserQuotaInsufficient,
+	}
+	if !shouldDispatchUpstreamWebhookAlert(event) {
+		t.Fatal("default tenant webhook alert should be dispatched")
+	}
+}
+
+func TestWebhookAlertInCooldownRequiresSuccessfulDelivery(t *testing.T) {
+	now := time.Date(2026, 7, 25, 12, 30, 0, 0, time.UTC)
+	failed := &model.WebhookLog{Success: false}
+	failed.CreatedAt = now.Add(-time.Minute)
+	if webhookAlertInCooldown(failed, nil, now, 10) {
+		t.Fatal("failed delivery must not enter cooldown")
+	}
+
+	succeeded := &model.WebhookLog{Success: true}
+	succeeded.CreatedAt = now.Add(-time.Minute)
+	if !webhookAlertInCooldown(succeeded, nil, now, 10) {
+		t.Fatal("successful delivery should enter cooldown")
+	}
+}
+
 func TestHandleUpstreamWebhookAlertDisablesOnlyUserQuotaChannel(t *testing.T) {
 	channelService := &webhookTestChannelService{}
 	generateService := &GenerateService{channelSvc: channelService}
 	route := &channelRouteContext{Channel: &model.Channel{BaseModel: model.BaseModel{ID: 12}, Name: "主渠道"}}
 
-	status, _ := generateService.handleUpstreamWebhookAlert(1, "omni-fast", []byte(`{"error":{"code":"insufficient_user_quota","message":"用户额度不足"}}`), route)
+	status, clientMessage := generateService.handleUpstreamWebhookAlert(1, "omni-fast", []byte(`{"error":{"code":"insufficient_user_quota","message":"用户额度不足"}}`), route)
 	if status != WebhookStatusUserQuotaInsufficient || len(channelService.disabledIDs) != 1 || channelService.disabledIDs[0] != 12 {
 		t.Fatalf("status=%q disabled=%v", status, channelService.disabledIDs)
+	}
+	if clientMessage != "因上游问题被禁用" || strings.Contains(clientMessage, "用户额度不足") {
+		t.Fatalf("unexpected client message: %q", clientMessage)
 	}
 
 	status, _ = generateService.handleUpstreamWebhookAlert(1, "omni-fast", []byte(`{"code":"fail_to_fetch_task","message":"{\"error\":{\"code\":\"model_not_found\",\"message\":\"No available channel for model omni-fast\"}}"}`), route)
