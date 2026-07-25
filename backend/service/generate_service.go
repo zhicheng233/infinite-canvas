@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"gorm.io/gorm"
 	"image"
 	_ "image/gif"
 	"image/jpeg"
@@ -20,6 +19,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"gorm.io/gorm"
 
 	"infinite-canvas-server/model"
 	"infinite-canvas-server/repository"
@@ -1314,7 +1315,7 @@ func (s *GenerateService) checkAndDisableOnBalanceError(tenantID uint, modelName
 		log.Printf("Failed to auto-disable channel %d: %v", channelID, err)
 		return false, ""
 	}
-	msg := fmt.Sprintf("渠道 %s 因上游余额不足已被自动禁用", route.Channel.Name)
+	msg := fmt.Sprintf("渠道 %s 因上游问题已被自动禁用", route.Channel.Name)
 	log.Printf("Auto-disabling channel %d (%s) due to upstream balance error", channelID, route.Channel.Name)
 	s.notifyChannelBalanceInsufficientAsync(tenantID, modelName, msg, route)
 	return true, msg
@@ -1386,7 +1387,7 @@ func channelBalanceWebhookMessage(channel model.Channel, modelName, reason strin
 		channelName = fmt.Sprintf("渠道 #%d", channel.ID)
 	}
 	parts := []string{
-		fmt.Sprintf("渠道 %s 因上游余额不足已被自动禁用", channelName),
+		fmt.Sprintf("渠道 %s 因上游问题已被自动禁用", channelName),
 		fmt.Sprintf("渠道 ID: %d", channel.ID),
 	}
 	if modelName != "" {

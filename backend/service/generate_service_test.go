@@ -49,7 +49,7 @@ func TestIsUpstreamBalanceError(t *testing.T) {
 
 func TestChannelBalanceWebhookMessage(t *testing.T) {
 	now := time.Date(2026, 7, 25, 12, 30, 0, 0, time.UTC)
-	message := channelBalanceWebhookMessage(model.Channel{BaseModel: model.BaseModel{ID: 12}, Name: "主渠道"}, "veo-omni", "渠道 主渠道 因上游余额不足已被自动禁用", now)
+	message := channelBalanceWebhookMessage(model.Channel{BaseModel: model.BaseModel{ID: 12}, Name: "主渠道"}, "veo-omni", "渠道 主渠道 因上游问题已被自动禁用", now)
 
 	for _, want := range []string{
 		"渠道 主渠道 因上游余额不足已被自动禁用",
