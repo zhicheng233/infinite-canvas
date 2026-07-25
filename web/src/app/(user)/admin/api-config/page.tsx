@@ -12,8 +12,8 @@ import { listChannelModelsAdmin, syncChannelModels, updateChannelModel, enableCh
 import { type ChannelModelInfo } from "@/services/api/channel";
 import { listPricing, savePricing, comparePricing, type PricingItem } from "@/services/api/pricing";
 import { testApiModel, type ApiModelTestResult } from "@/services/api/api-config";
-import { listWebhookConfigs, saveWebhookConfig, testWebhookSend, startPoller, stopPoller, getPollerStatus, listWebhookLogs } from "@/services/api/webhook";
-import type { WebhookConfig, WebhookLogItem, PollerStatus, TestSendResult } from "@/services/api/webhook";
+import { listWebhookConfigs, saveWebhookConfig, testWebhookSend, listWebhookLogs } from "@/services/api/webhook";
+import type { WebhookConfig, WebhookLogItem, TestSendResult } from "@/services/api/webhook";
 import { listMergeGroups, deleteMergeGroup, autoCreateMergeGroups, type MergeGroup } from "@/services/api/merge-groups-admin";
 
 const imageRouteOptions = [
@@ -151,17 +151,9 @@ export default function AdminApiConfigPage() {
     const [testGeneration, setTestGeneration] = useState("text");
 
     // Webhook tab state
-    const [webhookConfigs, setWebhookConfigs] = useState<WebhookConfig[]>([]);
     const [localConfigs, setLocalConfigs] = useState<Record<string, Partial<WebhookConfig>>>({});
     const [loadingConfigs, setLoadingConfigs] = useState(false);
     const [savingConfigPlatform, setSavingConfigPlatform] = useState<string | null>(null);
-    const [pollerStatus, setPollerStatus] = useState<PollerStatus | null>(null);
-    const [startingPoller, setStartingPoller] = useState(false);
-    const [stoppingPoller, setStoppingPoller] = useState(false);
-    const [pollerInterval, setPollerInterval] = useState(30);
-    const [savingInterval, setSavingInterval] = useState(false);
-    const [cooldownMinutes, setCooldownMinutes] = useState(10);
-    const [savingCooldown, setSavingCooldown] = useState(false);
     const [webhookLogs, setWebhookLogs] = useState<WebhookLogItem[]>([]);
     const [loadingLogs, setLoadingLogs] = useState(false);
     const [webhookTestModalOpen, setWebhookTestModalOpen] = useState(false);
@@ -234,31 +226,15 @@ export default function AdminApiConfigPage() {
         setLoadingConfigs(true);
         try {
             const data = await listWebhookConfigs();
-            setWebhookConfigs(data || []);
             const init: Record<string, Partial<WebhookConfig>> = {};
             for (const c of data || []) {
                 init[c.platform] = { ...c };
             }
             setLocalConfigs(init);
-            // Read cooldown from first feishu config (all platforms share the same cooldown)
-            const feishuCfg = (data || []).find(c => c.platform === "feishu");
-            if (feishuCfg?.cooldown_minutes != null) {
-                setCooldownMinutes(feishuCfg.cooldown_minutes);
-            }
         } catch (err: any) {
             message.error(err?.message || "获取推送配置失败");
         } finally {
             setLoadingConfigs(false);
-        }
-    };
-
-    const fetchPollerStatus = async () => {
-        try {
-            const status = await getPollerStatus();
-            setPollerStatus(status);
-            setPollerInterval(status.interval_seconds || 30);
-        } catch {
-            // advisory
         }
     };
 
@@ -277,7 +253,7 @@ export default function AdminApiConfigPage() {
     useEffect(() => {
         void fetchChannels();
         void fetchWebhookConfigs();
-        void fetchPollerStatus();
+        void fetchWebhookLogs();
     }, []);
 
     // Handles synchronization
@@ -693,8 +669,7 @@ export default function AdminApiConfigPage() {
                 platform,
                 webhook_url: config.webhook_url,
                 enabled: config.enabled ?? false,
-                template_down: config.template_down || "",
-                template_up: config.template_up || "",
+                cooldown_minutes: config.cooldown_minutes ?? 10,
             });
             message.success("保存成功");
             await fetchWebhookConfigs();
@@ -1082,11 +1057,10 @@ export default function AdminApiConfigPage() {
                 </Tabs.TabPane>
 
                 <Tabs.TabPane tab="消息推送" key="webhook">
-                    {/* Card 1: 平台配置 */}
                     <Card title="平台配置" className="mb-4">
                         <Table
                             rowKey="platform"
-                            dataSource={WEBHOOK_PLATFORMS.map((p) => localConfigs[p] || { platform: p, webhook_url: "", enabled: false, template_down: "", template_up: "" })}
+                            dataSource={WEBHOOK_PLATFORMS.map((p) => localConfigs[p] || { platform: p, webhook_url: "", enabled: false, cooldown_minutes: 10 })}
                             columns={[
                                 {
                                     title: "平台",
@@ -1116,35 +1090,17 @@ export default function AdminApiConfigPage() {
                                     },
                                 },
                                 {
-                                    title: "Down 模板",
-                                    key: "template_down",
-                                    width: 200,
+                                    title: "冷却时间（分钟）",
+                                    key: "cooldown_minutes",
+                                    width: 140,
                                     render: (_, record) => {
-                                        const val = localConfigs[record.platform]?.template_down ?? "";
+                                        const value = localConfigs[record.platform]?.cooldown_minutes ?? 10;
                                         return (
-                                            <Input.TextArea
-                                                rows={2}
+                                            <InputNumber
                                                 size="small"
-                                                value={val}
-                                                placeholder="模型 {{model}} 在所有渠道均不可用，时间: {{time}}"
-                                                onChange={(e) => handleConfigChange(record.platform, "template_down", e.target.value)}
-                                            />
-                                        );
-                                    },
-                                },
-                                {
-                                    title: "Up 模板",
-                                    key: "template_up",
-                                    width: 200,
-                                    render: (_, record) => {
-                                        const val = localConfigs[record.platform]?.template_up ?? "";
-                                        return (
-                                            <Input.TextArea
-                                                rows={2}
-                                                size="small"
-                                                value={val}
-                                                placeholder="模型 {{model}} 已恢复可用，时间: {{time}}"
-                                                onChange={(e) => handleConfigChange(record.platform, "template_up", e.target.value)}
+                                                min={0}
+                                                value={value}
+                                                onChange={(next) => handleConfigChange(record.platform, "cooldown_minutes", next ?? 10)}
                                             />
                                         );
                                     },
@@ -1175,93 +1131,9 @@ export default function AdminApiConfigPage() {
                             ]}
                             loading={loadingConfigs}
                             pagination={false}
-                            scroll={{ x: 1000 }}
+                            scroll={{ x: 760 }}
                         />
                     </Card>
-                    {/* Card 2: 轮询控制 */}
-                    <Card title="轮询控制" className="mb-4">
-                        <div className="space-y-4">
-                            <div className="flex items-center gap-4">
-                                <span className="text-sm text-stone-500">轮询状态:</span>
-                                <Tag color={pollerStatus?.running ? "green" : "red"}>
-                                    {pollerStatus ? (pollerStatus.running ? "运行中" : "已停止") : "加载中"}
-                                </Tag>
-                                <Button
-                                    type={pollerStatus?.running ? "default" : "primary"}
-                                    loading={startingPoller || stoppingPoller}
-                                    onClick={async () => {
-                                        if (pollerStatus?.running) {
-                                            setStoppingPoller(true);
-                                            try {
-                                                await stopPoller();
-                                                message.success("轮询已停止");
-                                                void fetchPollerStatus();
-                                            } catch (err: any) {
-                                                message.error(err?.message || "停止轮询失败");
-                                            } finally {
-                                                setStoppingPoller(false);
-                                            }
-                                        } else {
-                                            setStartingPoller(true);
-                                            try {
-                                                await startPoller();
-                                                message.success("轮询已启动");
-                                                void fetchPollerStatus();
-                                            } catch (err: any) {
-                                                message.error(err?.message || "启动轮询失败");
-                                            } finally {
-                                                setStartingPoller(false);
-                                            }
-                                        }
-                                    }}
-                                >
-                                    {pollerStatus?.running ? "停止" : "启动"}
-                                </Button>
-                            </div>
-                            <div className="flex items-center gap-4">
-                                <span className="text-sm text-stone-500">轮询间隔(秒):</span>
-                                <InputNumber min={1} value={pollerInterval} onChange={(v) => setPollerInterval(v ?? 30)} disabled={savingInterval} />
-                                <Button loading={savingInterval} onClick={async () => {
-                                    setSavingInterval(true);
-                                    try {
-                                        for (const platform of WEBHOOK_PLATFORMS) {
-                                            await saveWebhookConfig({ platform, interval_seconds: pollerInterval });
-                                        }
-                                        message.success("间隔已保存");
-                                        await fetchPollerStatus();
-                                    } catch (err: any) {
-                                        message.error(err?.message || "保存间隔失败");
-                                    } finally {
-                                        setSavingInterval(false);
-                                    }
-                                }}>
-                                    保存间隔
-                                </Button>
-                            </div>
-                            <div className="flex items-center gap-4">
-                                <span className="text-sm text-stone-500">冷却时间(分钟):</span>
-                                <InputNumber min={0} value={cooldownMinutes} onChange={(v) => setCooldownMinutes(v ?? 10)} disabled={savingCooldown} />
-                                <Button loading={savingCooldown} onClick={async () => {
-                                    setSavingCooldown(true);
-                                    try {
-                                        // Save cooldown to each platform's config
-                                        for (const platform of WEBHOOK_PLATFORMS) {
-                                            await saveWebhookConfig({ platform, cooldown_minutes: cooldownMinutes });
-                                        }
-                                        message.success("冷却时间已保存");
-                                        await fetchWebhookConfigs();
-                                    } catch (err: any) {
-                                        message.error(err?.message || "保存冷却时间失败");
-                                    } finally {
-                                        setSavingCooldown(false);
-                                    }
-                                }}>
-                                    保存冷却
-                                </Button>
-                            </div>
-                        </div>
-                    </Card>
-                    {/* Card 3: 推送日志 */}
                     <Card
                         title="推送日志"
                         extra={
@@ -1276,6 +1148,13 @@ export default function AdminApiConfigPage() {
                             columns={[
                                 { title: "时间", dataIndex: "created_at", key: "created_at", width: 170, render: (val: string) => val ? new Date(val).toLocaleString("zh-CN") : "-" },
                                 { title: "平台", dataIndex: "platform", key: "platform", width: 100, render: (p: string) => PLATFORM_LABELS[p] || p },
+                                {
+                                    title: "渠道",
+                                    key: "channel",
+                                    width: 140,
+                                    ellipsis: true,
+                                    render: (_, record) => record.channel_name || (record.channel_id ? `渠道 #${record.channel_id}` : "-"),
+                                },
                                 { title: "模型", dataIndex: "model_name", key: "model_name", width: 150, ellipsis: true },
                                 {
                                     title: "状态",
@@ -1283,8 +1162,12 @@ export default function AdminApiConfigPage() {
                                     key: "status",
                                     width: 80,
                                     render: (status: string) => {
-                                        const labels: Record<string, string> = { down: "宕机", up: "恢复", balance_insufficient: "余额不足" };
-                                        return <Tag color={status === "up" ? "green" : "red"}>{labels[status] || status}</Tag>;
+                                        const labels: Record<string, string> = {
+                                            user_quota_insufficient: "用户额度不足",
+                                            model_unavailable: "无可用渠道",
+                                            test: "测试",
+                                        };
+                                        return <Tag color={status === "test" ? "blue" : "red"}>{labels[status] || status}</Tag>;
                                     },
                                 },
                                 { title: "消息内容", dataIndex: "message", key: "message", width: 300, ellipsis: true },
@@ -1292,7 +1175,9 @@ export default function AdminApiConfigPage() {
                                     title: "推送结果",
                                     key: "success",
                                     width: 100,
-                                    render: (_, record) => <Tag color={record.success ? "green" : "red"}>{record.success ? "成功" : "失败"}</Tag>,
+                                    render: (_, record) => record.cooldown_skipped
+                                        ? <Tag>冷却跳过</Tag>
+                                        : <Tag color={record.success ? "green" : "red"}>{record.success ? "成功" : "失败"}</Tag>,
                                 },
                             ]}
                             loading={loadingLogs}

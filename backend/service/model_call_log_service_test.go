@@ -97,6 +97,14 @@ func TestReadFailedModelTaskResponseReadsFailedEnvelope(t *testing.T) {
 	}
 }
 
+func TestReadFailedModelTaskResponseReadsUnavailableChannelEnvelope(t *testing.T) {
+	body := []byte(`{"code":"fail_to_fetch_task","message":"{\"error\":{\"code\":\"model_not_found\",\"message\":\"No available channel for model omni-fast under group default (distributor)\",\"type\":\"new_api_error\"}}","data":null}`)
+	failed, _, message := readFailedModelTaskResponse(body)
+	if !failed || message != "No available channel for model omni-fast under group default (distributor)" {
+		t.Fatalf("failed=%v message=%q", failed, message)
+	}
+}
+
 func TestBuildModelHealthSummary(t *testing.T) {
 	now := time.Date(2026, 6, 27, 12, 0, 0, 0, time.UTC)
 	logs := []model.ModelCallLog{

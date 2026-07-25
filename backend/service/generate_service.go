@@ -38,7 +38,7 @@ type GenerateService struct {
 	channelRepo        channelReader
 	modelRepo          channelModelReader
 	autoChannelService autoChannelModelAggregator
-	webhookRepo        *repository.WebhookRepo
+	webhookService     *WebhookService
 	mergeGroupRepo     mergeGroupRepoReader
 	estimateFuzzyRoute func(channelID uint, fuzzyGroupName, capability string) (*channelRouteContext, error)
 	db                 *gorm.DB
@@ -71,7 +71,7 @@ type pricingReader interface {
 	FindPricing(tenantID uint, modelName string, channelID uint) (*model.CreditPricing, error)
 }
 
-func NewGenerateService(apiConfigRepo *repository.ApiConfigRepo, creditService *CreditService, creditRepo *repository.CreditRepo, logService *ModelCallLogService, encryptKey string, repairService *OnDemandRepairService, channelSvc *ChannelService, channelRepo *repository.ChannelRepo, modelRepo *repository.ChannelModelRepo, mergeGroupRepo *repository.MergeGroupRepo, db *gorm.DB, autoChannelService *AutoChannelService, webhookRepo *repository.WebhookRepo) *GenerateService {
+func NewGenerateService(apiConfigRepo *repository.ApiConfigRepo, creditService *CreditService, creditRepo *repository.CreditRepo, logService *ModelCallLogService, encryptKey string, repairService *OnDemandRepairService, channelSvc *ChannelService, channelRepo *repository.ChannelRepo, modelRepo *repository.ChannelModelRepo, mergeGroupRepo *repository.MergeGroupRepo, db *gorm.DB, autoChannelService *AutoChannelService, webhookService *WebhookService) *GenerateService {
 	return &GenerateService{
 		apiConfigRepo:      apiConfigRepo,
 		creditService:      creditService,
@@ -84,7 +84,7 @@ func NewGenerateService(apiConfigRepo *repository.ApiConfigRepo, creditService *
 		mergeGroupRepo:     mergeGroupRepo,
 		db:                 db,
 		autoChannelService: autoChannelService,
-		webhookRepo:        webhookRepo,
+		webhookService:     webhookService,
 		httpClient:         &http.Client{Timeout: 10 * time.Minute},
 		encryptKey:         encryptKey,
 	}
@@ -290,6 +290,13 @@ func (s *GenerateService) proxyWithAutoFailover(tenantID, userID uint, capabilit
 		if err != nil {
 			s.recordModelFailureWithRoute(tenantID, userID, capability, modelName, http.MethodPost, path, 0, nil, err.Error(), route)
 			lastErr = err
+			continue
+		}
+
+		alertStatus, alertMessage := s.handleUpstreamWebhookAlert(tenantID, modelName, upstream.Body, route)
+		if alertStatus != "" {
+			s.recordModelFailureWithRoute(tenantID, userID, capability, modelName, http.MethodPost, path, upstream.StatusCode, upstream.Body, "", route)
+			lastErr = errors.New(alertMessage)
 			continue
 		}
 
@@ -689,10 +696,14 @@ func (s *GenerateService) proxy(tenantID, userID uint, genType, path, contentTyp
 			}
 		}
 	}
-	if upstream.StatusCode >= 400 {
-		if disabled, msg := s.checkAndDisableOnBalanceError(tenantID, modelName, respBytes, route); disabled {
-			return nil, errors.New(msg)
+	alertStatus, alertMessage := s.handleUpstreamWebhookAlert(tenantID, modelName, respBytes, route)
+	if alertStatus != "" {
+		if upstream.StatusCode < 400 {
+			s.recordModelFailureWithRoute(tenantID, userID, genType, modelName, http.MethodPost, path, upstream.StatusCode, respBytes, alertMessage, route)
 		}
+		return nil, errors.New(alertMessage)
+	}
+	if upstream.StatusCode >= 400 {
 		return &ProxyResult{
 			StatusCode: upstream.StatusCode,
 			Body:       respBytes,
@@ -869,10 +880,15 @@ func (s *GenerateService) ProxyRaw(tenantID, userID uint, method, path, contentT
 	if upstream.StatusCode >= 400 && chargeType != "" {
 		s.recordModelFailureWithRoute(tenantID, userID, chargeType, modelName, method, path, upstream.StatusCode, respBytes, "", route)
 	}
-	if upstream.StatusCode >= 400 {
-		if disabled, msg := s.checkAndDisableOnBalanceError(tenantID, modelName, respBytes, route); disabled {
-			return nil, errors.New(msg)
+	alertStatus, alertMessage := s.handleUpstreamWebhookAlert(tenantID, modelName, respBytes, route)
+	if alertStatus == WebhookStatusUserQuotaInsufficient {
+		return nil, errors.New(alertMessage)
+	}
+	if alertStatus == WebhookStatusModelUnavailable && strings.ToUpper(strings.TrimSpace(method)) != http.MethodGet {
+		if upstream.StatusCode < 400 {
+			s.recordModelFailureWithRoute(tenantID, userID, chargeType, modelName, method, path, upstream.StatusCode, respBytes, alertMessage, route)
 		}
+		return nil, errors.New(alertMessage)
 	}
 	if upstream.StatusCode < 400 && strings.ToUpper(strings.TrimSpace(method)) == http.MethodGet {
 		if failed, responseModel, message := readFailedModelTaskResponse(respBytes); failed {
@@ -1026,10 +1042,15 @@ func (s *GenerateService) ProxyRawWithRepair(tenantID, userID uint, method, path
 		}
 	}
 
-	if upstream.StatusCode >= 400 {
-		if disabled, msg := s.checkAndDisableOnBalanceError(tenantID, modelName, respBytes, route); disabled {
-			return nil, errors.New(msg)
+	alertStatus, alertMessage := s.handleUpstreamWebhookAlert(tenantID, modelName, respBytes, route)
+	if alertStatus == WebhookStatusUserQuotaInsufficient {
+		return nil, errors.New(alertMessage)
+	}
+	if alertStatus == WebhookStatusModelUnavailable && strings.ToUpper(strings.TrimSpace(method)) != http.MethodGet {
+		if upstream.StatusCode < 400 {
+			s.recordModelFailureWithRoute(tenantID, userID, generation, modelName, method, path, upstream.StatusCode, respBytes, alertMessage, route)
 		}
+		return nil, errors.New(alertMessage)
 	}
 
 	if upstream.StatusCode < 400 && strings.ToUpper(strings.TrimSpace(method)) == http.MethodGet {
@@ -1267,7 +1288,8 @@ func isCapabilityMismatchMessage(message string) bool {
 	return false
 }
 
-// UpstreamBalanceErrorKeywords lists keywords that indicate upstream balance/credit issues.
+// UpstreamBalanceErrorKeywords controls HTTP error passthrough and repair decisions.
+// Automatic webhook alerts use the stricter classifier in webhook_service.go.
 var UpstreamBalanceErrorKeywords = []string{
 	"扣费额度失败",
 	"余额不足",
@@ -1291,113 +1313,41 @@ func IsUpstreamBalanceError(body string) bool {
 	return false
 }
 
-// isUpstreamBalanceError checks if the response indicates an upstream balance/credit issue.
-// These keywords mean the upstream API key has run out of credits — the channel should be disabled.
-func isUpstreamBalanceError(body []byte, fallbackError string) bool {
-	checkText := fallbackError
-	if len(body) > 0 {
-		checkText = string(body)
+func (s *GenerateService) handleUpstreamWebhookAlert(tenantID uint, modelName string, body []byte, route *channelRouteContext) (string, string) {
+	alert, ok := classifyUpstreamWebhookAlert(body)
+	if !ok {
+		return "", ""
 	}
-	return IsUpstreamBalanceError(checkText)
-}
-
-// checkAndDisableOnBalanceError checks upstream response for balance-related errors
-// and disables the channel if found. Returns true + error message if disabled.
-func (s *GenerateService) checkAndDisableOnBalanceError(tenantID uint, modelName string, respBody []byte, route *channelRouteContext) (bool, string) {
-	if route == nil || route.Channel == nil {
-		return false, ""
+	event := upstreamWebhookEvent{
+		TenantID:  tenantID,
+		ModelName: strings.TrimSpace(modelName),
+		Status:    alert.Status,
+		Reason:    alert.Reason,
 	}
-	if !isUpstreamBalanceError(respBody, "") {
-		return false, ""
+	if route != nil && route.Channel != nil {
+		event.ChannelID = route.Channel.ID
+		event.ChannelName = route.Channel.Name
 	}
-	channelID := route.Channel.ID
-	if err := s.channelSvc.Disable(channelID); err != nil {
-		log.Printf("Failed to auto-disable channel %d: %v", channelID, err)
-		return false, ""
-	}
-	msg := fmt.Sprintf("渠道 %s 因上游问题已被自动禁用", route.Channel.Name)
-	log.Printf("Auto-disabling channel %d (%s) due to upstream balance error", channelID, route.Channel.Name)
-	s.notifyChannelBalanceInsufficientAsync(tenantID, modelName, msg, route)
-	return true, msg
-}
-
-func (s *GenerateService) notifyChannelBalanceInsufficientAsync(tenantID uint, modelName, reason string, route *channelRouteContext) {
-	if s.webhookRepo == nil || tenantID == 0 || route == nil || route.Channel == nil {
-		return
-	}
-	channel := *route.Channel
-	modelName = strings.TrimSpace(modelName)
-	go s.notifyChannelBalanceInsufficient(tenantID, channel, modelName, reason)
-}
-
-func (s *GenerateService) notifyChannelBalanceInsufficient(tenantID uint, channel model.Channel, modelName, reason string) {
-	configs, err := s.webhookRepo.ListEnabled(tenantID)
-	if err != nil {
-		log.Printf("webhook balance alert: query configs: %v", err)
-		return
-	}
-	now := time.Now()
-	status := "balance_insufficient"
-	logModelName := channel.Name
-	if strings.TrimSpace(logModelName) == "" {
-		logModelName = fmt.Sprintf("渠道 #%d", channel.ID)
-	}
-	for _, cfg := range configs {
-		if cfg.Platform == "" || strings.TrimSpace(cfg.WebhookURL) == "" {
-			continue
-		}
-		if lastLog, err := s.webhookRepo.LastLogForPlatformModel(cfg.TenantID, cfg.Platform, logModelName, status); err == nil {
-			cooldownDeadline := lastLog.CreatedAt.Add(time.Duration(cfg.CooldownMinutes) * time.Minute)
-			if now.Before(cooldownDeadline) {
-				_ = s.webhookRepo.InsertLog(&model.WebhookLog{TenantID: cfg.TenantID, Platform: cfg.Platform, ModelName: logModelName, Status: status, CooldownSkipped: true})
-				continue
+	clientMessage := alert.Reason
+	if alert.Status == WebhookStatusUserQuotaInsufficient {
+		switch {
+		case event.ChannelID == 0:
+			event.Action = "未定位到具体渠道，未执行自动禁用"
+		case s.channelSvc == nil:
+			event.Action = "渠道服务不可用，自动禁用失败"
+		default:
+			if err := s.channelSvc.Disable(event.ChannelID); err != nil {
+				event.Action = "自动禁用渠道失败: " + err.Error()
+				log.Printf("auto-disable channel %d after upstream user quota alert: %v", event.ChannelID, err)
+			} else {
+				event.Action = "已自动禁用渠道"
+				clientMessage = fmt.Sprintf("渠道 %s 因上游用户额度不足已被自动禁用", webhookChannelLabel(event.ChannelID, event.ChannelName))
+				log.Printf("auto-disabled channel %d after upstream user quota alert", event.ChannelID)
 			}
 		}
-		sender := NewSender(cfg.Platform)
-		if sender == nil {
-			log.Printf("webhook balance alert: unknown platform %q for tenant %d", cfg.Platform, cfg.TenantID)
-			continue
-		}
-		message := channelBalanceWebhookMessage(channel, modelName, reason, now)
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		sendErr := sender.Send(ctx, cfg.WebhookURL, message)
-		cancel()
-		logEntry := &model.WebhookLog{
-			TenantID:        cfg.TenantID,
-			Platform:        cfg.Platform,
-			ModelName:       logModelName,
-			Status:          status,
-			Message:         message,
-			Success:         sendErr == nil,
-			CooldownSkipped: false,
-		}
-		if sendErr != nil {
-			logEntry.ResponseBody = sendErr.Error()
-			log.Printf("webhook balance alert: send %s to tenant %d: %v", cfg.Platform, cfg.TenantID, sendErr)
-		}
-		if err := s.webhookRepo.InsertLog(logEntry); err != nil {
-			log.Printf("webhook balance alert: insert log: %v", err)
-		}
 	}
-}
-
-func channelBalanceWebhookMessage(channel model.Channel, modelName, reason string, now time.Time) string {
-	channelName := strings.TrimSpace(channel.Name)
-	if channelName == "" {
-		channelName = fmt.Sprintf("渠道 #%d", channel.ID)
-	}
-	parts := []string{
-		fmt.Sprintf("渠道 %s 因上游问题已被自动禁用", channelName),
-		fmt.Sprintf("渠道 ID: %d", channel.ID),
-	}
-	if modelName != "" {
-		parts = append(parts, "模型: "+modelName)
-	}
-	if reason != "" {
-		parts = append(parts, "原因: "+reason)
-	}
-	parts = append(parts, "时间: "+now.Format(time.RFC3339))
-	return strings.Join(parts, "\n")
+	s.webhookService.NotifyUpstreamAlertAsync(event)
+	return alert.Status, clientMessage
 }
 
 func buildRepairRequestContext(generation, method, path, contentType string, body []byte) *RepairRequestContext {

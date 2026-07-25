@@ -129,9 +129,10 @@ func (s *GenerateService) TestModel(tenantID, userID uint, input ModelTestInput)
 			respBytes = converted
 		}
 	}
+	alertStatus, alertMessage := s.handleUpstreamWebhookAlert(tenantID, modelName, respBytes, route)
 
 	result := &ModelTestResult{
-		Success:        resp.StatusCode < 400,
+		Success:        resp.StatusCode < 400 && alertStatus == "",
 		Model:          modelName,
 		Generation:     testReq.Generation,
 		Route:          testReq.Route,
@@ -144,7 +145,10 @@ func (s *GenerateService) TestModel(tenantID, userID uint, input ModelTestInput)
 	if result.Success {
 		s.recordModelSuccessWithRoute(tenantID, userID, testReq.Generation, modelName, testReq.Method, testReq.Path, resp.StatusCode, responseTimeMs, route)
 	} else {
-		result.ErrorMessage = buildModelCallErrorSummary(resp.StatusCode, respBytes, "")
+		result.ErrorMessage = alertMessage
+		if result.ErrorMessage == "" {
+			result.ErrorMessage = buildModelCallErrorSummary(resp.StatusCode, respBytes, "")
+		}
 		s.recordModelFailureWithRoute(tenantID, userID, testReq.Generation, modelName, testReq.Method, testReq.Path, resp.StatusCode, respBytes, "", route)
 	}
 	return result, nil

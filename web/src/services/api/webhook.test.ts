@@ -2,12 +2,9 @@ import apiClient from "@/services/api/client";
 import { afterEach, describe, expect, it, jest } from "bun:test";
 
 import {
-    getPollerStatus,
     listWebhookConfigs,
     listWebhookLogs,
     saveWebhookConfig,
-    startPoller,
-    stopPoller,
     testWebhookSend,
 } from "./webhook";
 
@@ -66,38 +63,15 @@ describe("webhook API client", () => {
     });
 
     it("saveWebhookConfig accepts partial update", async () => {
-        const partial = { webhook_url: "https://new-url.com" };
+        const partial = { platform: "feishu", cooldown_minutes: 5 };
         const spy = jest.spyOn(apiClient, "put").mockResolvedValue(mockResponse(partial));
         await saveWebhookConfig(partial);
-        expect(spy).toHaveBeenCalledWith("/admin/webhook/config", { webhook_url: "https://new-url.com" });
+        expect(spy).toHaveBeenCalledWith("/admin/webhook/config", partial);
     });
 
     it("saveWebhookConfig rejects when API call fails", async () => {
         jest.spyOn(apiClient, "put").mockRejectedValue(new Error("validation failed"));
         await expect(saveWebhookConfig({ platform: "feishu", webhook_url: "bad", enabled: true })).rejects.toThrow("validation failed");
-    });
-
-    // ─── getPollerStatus ──────────────────────────────────────────────────────
-
-    it("getPollerStatus calls GET /admin/webhook/poller/status", async () => {
-        const status = { running: true, interval_seconds: 300 };
-        const spy = jest.spyOn(apiClient, "get").mockResolvedValue(mockResponse(status));
-        const result = await getPollerStatus();
-        expect(spy).toHaveBeenCalledWith("/admin/webhook/poller/status");
-        expect(result).toEqual(status);
-    });
-
-    it("getPollerStatus returns running=false when poller is stopped", async () => {
-        const status = { running: false, interval_seconds: 300 };
-        jest.spyOn(apiClient, "get").mockResolvedValue(mockResponse(status));
-        const result = await getPollerStatus();
-        expect(result.running).toBe(false);
-        expect(result.interval_seconds).toBe(300);
-    });
-
-    it("getPollerStatus rejects when API call fails", async () => {
-        jest.spyOn(apiClient, "get").mockRejectedValue(new Error("poller error"));
-        await expect(getPollerStatus()).rejects.toThrow("poller error");
     });
 
     // ─── listWebhookLogs ──────────────────────────────────────────────────────
@@ -166,31 +140,4 @@ describe("webhook API client", () => {
         await expect(testWebhookSend({ platform: "feishu", message: "x" })).rejects.toThrow("internal error");
     });
 
-    // ─── startPoller ──────────────────────────────────────────────────────────
-
-    it("startPoller calls POST /admin/webhook/poller/start", async () => {
-        const spy = jest.spyOn(apiClient, "post").mockResolvedValue(mockResponse({ started: true }));
-        const result = await startPoller();
-        expect(spy).toHaveBeenCalledWith("/admin/webhook/poller/start");
-        expect(result).toEqual({ started: true });
-    });
-
-    it("startPoller rejects when API call fails", async () => {
-        jest.spyOn(apiClient, "post").mockRejectedValue(new Error("poller already running"));
-        await expect(startPoller()).rejects.toThrow("poller already running");
-    });
-
-    // ─── stopPoller ───────────────────────────────────────────────────────────
-
-    it("stopPoller calls POST /admin/webhook/poller/stop", async () => {
-        const spy = jest.spyOn(apiClient, "post").mockResolvedValue(mockResponse({ stopped: true }));
-        const result = await stopPoller();
-        expect(spy).toHaveBeenCalledWith("/admin/webhook/poller/stop");
-        expect(result).toEqual({ stopped: true });
-    });
-
-    it("stopPoller rejects when API call fails", async () => {
-        jest.spyOn(apiClient, "post").mockRejectedValue(new Error("poller not running"));
-        await expect(stopPoller()).rejects.toThrow("poller not running");
-    });
 });

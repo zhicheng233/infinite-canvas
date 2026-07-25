@@ -158,6 +158,35 @@ API Key 仅用于后端代理调用，按 `API_KEY_ENCRYPTION_KEY` 配置加密�
 
 管理后台模型健康概览基于该表统计近 24 小时、近 7 天失败量和 Top 失败模型。
 
+## webhook_configs 表
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | uint | 主键 |
+| tenant_id | uint | 租户 ID，带索引 |
+| platform | string(50) | 推送平台：feishu/dtalk/wecom/telegram |
+| webhook_url | string(500) | Webhook 地址 |
+| enabled | bool | 是否启用该平台，默认 true |
+| cooldown_minutes | int | 相同渠道、模型和告警类型的冷却分钟数，默认 10；0 表示不冷却 |
+
+Webhook 自动告警采用上游错误事件驱动，不保存或轮询模型 Up/Down 状态。
+
+## webhook_logs 表
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | uint | 主键 |
+| tenant_id | uint | 租户 ID，带索引 |
+| platform | string(50) | 推送平台 |
+| channel_id | uint | 实际上游渠道 ID；未定位到具体渠道时为 0 |
+| channel_name | string(100) | 实际上游渠道名称快照 |
+| model_name | string(100) | 告警对应模型 |
+| status | string(50) | `user_quota_insufficient`、`model_unavailable` 或 `test` |
+| message | text | 实际发送的消息 |
+| success | bool | Webhook 请求是否成功 |
+| response_body | longtext | 推送失败信息 |
+| cooldown_skipped | bool | 是否因冷却时间跳过发送 |
+
 ## recharge_orders 表
 
 | 字段 | 类型 | 说明 |

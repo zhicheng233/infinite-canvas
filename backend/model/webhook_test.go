@@ -65,24 +65,6 @@ func TestWebhookConfigStructFields(t *testing.T) {
 			wantTag:  `gorm:"default:true" json:"enabled"`,
 		},
 		{
-			name:     "template_down",
-			field:    "TemplateDown",
-			wantKind: reflect.String,
-			wantTag:  `gorm:"type:text" json:"template_down"`,
-		},
-		{
-			name:     "template_up",
-			field:    "TemplateUp",
-			wantKind: reflect.String,
-			wantTag:  `gorm:"type:text" json:"template_up"`,
-		},
-		{
-			name:     "interval_seconds",
-			field:    "IntervalSeconds",
-			wantKind: reflect.Int,
-			wantTag:  `gorm:"default:300" json:"interval_seconds"`,
-		},
-		{
 			name:     "cooldown_minutes",
 			field:    "CooldownMinutes",
 			wantKind: reflect.Int,
@@ -122,8 +104,8 @@ func TestWebhookConfigTableName(t *testing.T) {
 // table-driven tests above.
 func TestWebhookConfigFieldCount(t *testing.T) {
 	typ := reflect.TypeOf(WebhookConfig{})
-	if got := typ.NumField(); got != 9 {
-		t.Fatalf("WebhookConfig has %d fields, expected 9 — add new field tests to TestWebhookConfigStructFields", got)
+	if got := typ.NumField(); got != 6 {
+		t.Fatalf("WebhookConfig has %d fields, expected 6 — add new field tests to TestWebhookConfigStructFields", got)
 	}
 }
 
@@ -171,6 +153,18 @@ func TestWebhookLogStructFields(t *testing.T) {
 			field:    "Platform",
 			wantKind: reflect.String,
 			wantTag:  `gorm:"size:50;not null" json:"platform"`,
+		},
+		{
+			name:     "channel_id",
+			field:    "ChannelID",
+			wantKind: reflect.Uint,
+			wantTag:  `gorm:"index" json:"channel_id"`,
+		},
+		{
+			name:     "channel_name",
+			field:    "ChannelName",
+			wantKind: reflect.String,
+			wantTag:  `gorm:"size:100" json:"channel_name"`,
 		},
 		{
 			name:     "model_name",
@@ -242,8 +236,8 @@ func TestWebhookLogTableName(t *testing.T) {
 // table-driven tests above.
 func TestWebhookLogFieldCount(t *testing.T) {
 	typ := reflect.TypeOf(WebhookLog{})
-	if got := typ.NumField(); got != 9 {
-		t.Fatalf("WebhookLog has %d fields, expected 9 — add new field tests to TestWebhookLogStructFields", got)
+	if got := typ.NumField(); got != 11 {
+		t.Fatalf("WebhookLog has %d fields, expected 11 — add new field tests to TestWebhookLogStructFields", got)
 	}
 }
 

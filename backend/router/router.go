@@ -108,9 +108,6 @@ func Setup(r *gin.Engine, authService *service.AuthService, authHandler *handler
 			superAdmin.PUT("/admin/webhook/config", webhookHandler.SaveConfig)
 			superAdmin.POST("/admin/webhook/test", webhookHandler.TestSend)
 			superAdmin.GET("/admin/webhook/logs", webhookHandler.ListLogs)
-			superAdmin.POST("/admin/webhook/poller/start", webhookHandler.StartPoller)
-			superAdmin.POST("/admin/webhook/poller/stop", webhookHandler.StopPoller)
-			superAdmin.GET("/admin/webhook/poller/status", webhookHandler.PollerStatus)
 		}
 	}
 }

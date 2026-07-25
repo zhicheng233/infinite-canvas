@@ -11,26 +11,6 @@ type WebhookRepo struct{ db *gorm.DB }
 
 func NewWebhookRepo(db *gorm.DB) *WebhookRepo { return &WebhookRepo{db: db} }
 
-// Save upserts a webhook config by (tenant_id, platform).
-func (r *WebhookRepo) Save(cfg *model.WebhookConfig) error {
-	var existing model.WebhookConfig
-	err := r.db.Where("tenant_id = ? AND platform = ?", cfg.TenantID, cfg.Platform).First(&existing).Error
-	if err == nil {
-		return r.db.Model(&existing).Updates(map[string]interface{}{
-			"webhook_url":      cfg.WebhookURL,
-			"enabled":          cfg.Enabled,
-			"template_down":    cfg.TemplateDown,
-			"template_up":      cfg.TemplateUp,
-			"interval_seconds": cfg.IntervalSeconds,
-			"cooldown_minutes": cfg.CooldownMinutes,
-		}).Error
-	}
-	if err != gorm.ErrRecordNotFound {
-		return err
-	}
-	return r.db.Create(cfg).Error
-}
-
 func (r *WebhookRepo) SavePatch(tenantID uint, platform string, updates map[string]interface{}) (*model.WebhookConfig, error) {
 	if platform == "" {
 		return nil, errors.New("platform 不能为空")
@@ -55,7 +35,6 @@ func (r *WebhookRepo) SavePatch(tenantID uint, platform string, updates map[stri
 		TenantID:        tenantID,
 		Platform:        platform,
 		Enabled:         false,
-		IntervalSeconds: 300,
 		CooldownMinutes: 10,
 	}
 	if value, ok := updates["webhook_url"].(string); ok {
@@ -64,19 +43,11 @@ func (r *WebhookRepo) SavePatch(tenantID uint, platform string, updates map[stri
 	if value, ok := updates["enabled"].(bool); ok {
 		item.Enabled = value
 	}
-	if value, ok := updates["template_down"].(string); ok {
-		item.TemplateDown = value
-	}
-	if value, ok := updates["template_up"].(string); ok {
-		item.TemplateUp = value
-	}
-	if value, ok := updates["interval_seconds"].(int); ok {
-		item.IntervalSeconds = value
-	}
 	if value, ok := updates["cooldown_minutes"].(int); ok {
 		item.CooldownMinutes = value
 	}
 	enabled := item.Enabled
+	cooldownMinutes := item.CooldownMinutes
 	if err := r.db.Create(&item).Error; err != nil {
 		return nil, err
 	}
@@ -85,6 +56,12 @@ func (r *WebhookRepo) SavePatch(tenantID uint, platform string, updates map[stri
 			return nil, err
 		}
 		item.Enabled = false
+	}
+	if cooldownMinutes == 0 {
+		if err := r.db.Model(&item).Update("cooldown_minutes", 0).Error; err != nil {
+			return nil, err
+		}
+		item.CooldownMinutes = 0
 	}
 	return &item, nil
 }
@@ -101,17 +78,6 @@ func (r *WebhookRepo) ListEnabled(tenantID uint) ([]model.WebhookConfig, error) 
 	var items []model.WebhookConfig
 	err := r.db.Where("tenant_id = ? AND enabled = ? AND platform <> ? AND webhook_url <> ?", tenantID, true, "", "").Find(&items).Error
 	return items, err
-}
-
-func (r *WebhookRepo) IntervalSeconds(tenantID uint) int {
-	var item model.WebhookConfig
-	err := r.db.Where("tenant_id = ? AND platform <> ? AND interval_seconds > 0", tenantID, "").
-		Order("updated_at DESC, id ASC").
-		First(&item).Error
-	if err != nil || item.IntervalSeconds <= 0 {
-		return 300
-	}
-	return item.IntervalSeconds
 }
 
 // GetByPlatform returns a single webhook config by tenant and platform.
@@ -136,20 +102,9 @@ func (r *WebhookRepo) ListLogs(tenantID uint, limit int) ([]model.WebhookLog, er
 	return logs, err
 }
 
-// LastLogForModel returns the most recent log for a given tenant, model, and status.
-func (r *WebhookRepo) LastLogForModel(tenantID uint, modelName string, status string) (*model.WebhookLog, error) {
+func (r *WebhookRepo) LastAlert(tenantID uint, platform string, channelID uint, modelName string, status string) (*model.WebhookLog, error) {
 	var log model.WebhookLog
-	err := r.db.Where("tenant_id = ? AND model_name = ? AND status = ?", tenantID, modelName, status).
-		Order("id DESC").Limit(1).First(&log).Error
-	if err != nil {
-		return nil, err
-	}
-	return &log, nil
-}
-
-func (r *WebhookRepo) LastLogForPlatformModel(tenantID uint, platform string, modelName string, status string) (*model.WebhookLog, error) {
-	var log model.WebhookLog
-	err := r.db.Where("tenant_id = ? AND platform = ? AND model_name = ? AND status = ?", tenantID, platform, modelName, status).
+	err := r.db.Where("tenant_id = ? AND platform = ? AND channel_id = ? AND model_name = ? AND status = ? AND cooldown_skipped = ?", tenantID, platform, channelID, modelName, status, false).
 		Order("id DESC").Limit(1).First(&log).Error
 	if err != nil {
 		return nil, err

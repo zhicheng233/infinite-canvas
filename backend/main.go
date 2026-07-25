@@ -72,10 +72,10 @@ func main() {
 	modelCallLogService := service.NewModelCallLogService(modelCallLogRepo, userRepo)
 	onDemandRepairService := service.NewOnDemandRepairService(cfg.OnDemandRepairURL, cfg.OnDemandRepairUser, cfg.OnDemandRepairPass, cfg.OnDemandRepairTimeoutSeconds)
 	autoChannelService := service.NewAutoChannelService(db, channelRepo, channelModelRepo)
-	generateService := service.NewGenerateService(apiConfigRepo, creditService, creditRepo, modelCallLogService, cfg.ApiKeyEncryptKey, onDemandRepairService, channelService, channelRepo, channelModelRepo, mergeGroupRepo, db, autoChannelService, webhookRepo)
+	webhookService := service.NewWebhookService(webhookRepo)
+	generateService := service.NewGenerateService(apiConfigRepo, creditService, creditRepo, modelCallLogService, cfg.ApiKeyEncryptKey, onDemandRepairService, channelService, channelRepo, channelModelRepo, mergeGroupRepo, db, autoChannelService, webhookService)
 	tempMediaService := service.NewTempMediaService(cfg)
 	channelStatusService := service.NewChannelStatusService(modelCallLogRepo, apiConfigRepo)
-	webhookPoller := service.NewWebhookPoller(webhookRepo, channelRepo, channelModelRepo, db, nil)
 	paymentGateway := service.NewMockPaymentGateway(rechargeRepo, creditService)
 	mergeGroupService := service.NewMergeGroupService(mergeGroupRepo)
 
@@ -95,7 +95,7 @@ func main() {
 	channelHandler := handler.NewChannelHandler(channelService, autoChannelService)
 	channelModelHandler := handler.NewChannelModelHandler(channelModelService)
 	metricsHandler := handler.NewMetricsHandler(metricsService)
-	webhookHandler := handler.NewWebhookHandler(webhookRepo, webhookPoller, nil)
+	webhookHandler := handler.NewWebhookHandler(webhookService)
 	mergeGroupHandler := handler.NewMergeGroupHandler(mergeGroupService)
 
 	r := gin.Default()
