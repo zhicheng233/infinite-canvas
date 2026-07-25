@@ -71,6 +71,25 @@ func TestGenerationTypeFromPath(t *testing.T) {
 	}
 }
 
+func TestExtractProxyModelNameUsesRoutingFallback(t *testing.T) {
+	selection := ChannelSelection{ModelName: " omni-fast "}
+	if got := extractProxyModelName("", nil, selection); got != "omni-fast" {
+		t.Fatalf("model=%q, want omni-fast", got)
+	}
+	if got := extractProxyModelName("application/json", []byte(`{"model":"body-model"}`), selection); got != "body-model" {
+		t.Fatalf("body model should take precedence, got %q", got)
+	}
+}
+
+func TestGetProxyCostByGenerationSkipsGetPolling(t *testing.T) {
+	pricing := &countingPricingReader{}
+	svc := &GenerateService{creditRepo: pricing}
+	cost, generation, _, err := svc.getProxyCostByGeneration(1, 1, http.MethodGet, "video", "", nil, "omni-fast")
+	if err != nil || cost != 0 || generation != "video" || pricing.calls != 0 {
+		t.Fatalf("cost=%d generation=%q pricingCalls=%d err=%v", cost, generation, pricing.calls, err)
+	}
+}
+
 func TestBuildCreditSpendDetail(t *testing.T) {
 	metadata, note := buildCreditSpendDetail("image", "gpt-image-2", "/v1/images/generations?x=1", CreditCostResult{
 		TotalCost: 6,

@@ -4,6 +4,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"infinite-canvas-server/service"
@@ -96,6 +97,7 @@ func channelSelectionFromRequest(c *gin.Context) service.ChannelSelection {
 	return service.ChannelSelection{
 		ChannelID:      uintQuery(c, "channel_id"),
 		ChannelModelID: uintQuery(c, "channel_model_id"),
+		ModelName:      strings.TrimSpace(c.Query("routing_model")),
 	}
 }
 

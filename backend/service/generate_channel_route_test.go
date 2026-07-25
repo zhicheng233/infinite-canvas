@@ -493,12 +493,48 @@ func TestProxyRawRejectsBeforeUpstreamOnInvalidIdentity(t *testing.T) {
 	}
 }
 
+func TestAutoVideoPollingPreservesGetWithoutPricing(t *testing.T) {
+	fake := NewFakeUpstreamServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"processing"}`))
+	})
+	defer fake.Close()
+
+	pricing := &countingPricingReader{}
+	svc := newRouteTestGenerateService()
+	svc.autoChannelService = fakeAutoChannelModelAggregator{items: []AggregatedModel{{
+		Model: "omni-fast",
+		Channels: []AggregatedChannelRef{{
+			ChannelID: 1, ChannelModelID: 66, SuccessRate: 100,
+		}},
+	}}}
+	svc.channelRepo = fakeChannelReader{items: map[uint]*model.Channel{
+		1: {BaseModel: model.BaseModel{ID: 1}, Name: "A", BaseUrl: fake.URL(), Enabled: true},
+	}}
+	svc.modelRepo = fakeChannelModelReader{items: map[uint]*model.ChannelModel{
+		66: {BaseModel: model.BaseModel{ID: 66}, ChannelID: 1, ModelName: "omni-fast", Capabilities: `["video"]`, Enabled: true},
+	}}
+	svc.creditRepo = pricing
+
+	result, err := svc.proxyWithAutoFailover(1, 1, http.MethodGet, "video", "/videos/task_123", "", nil, "omni-fast")
+	if err != nil || result == nil || result.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected polling result=%#v err=%v", result, err)
+	}
+	requests := fake.Requests()
+	if len(requests) != 1 || requests[0].Method != http.MethodGet {
+		t.Fatalf("unexpected upstream requests: %#v", requests)
+	}
+	if pricing.calls != 0 {
+		t.Fatalf("polling queried pricing %d times", pricing.calls)
+	}
+}
+
 func TestStripChannelIdentityBeforeUpstream(t *testing.T) {
 	body := stripJSONChannelIdentity("application/json", []byte(`{"model":"same-model","channel_id":1,"channel_model_id":11}`))
 	if string(body) != `{"model":"same-model"}` {
 		t.Fatalf("unexpected stripped body: %s", body)
 	}
-	path := stripChannelIdentityQuery("/v1/images/generations?channel_id=1&channel_model_id=11&keep=true")
+	path := stripChannelIdentityQuery("/v1/images/generations?channel_id=1&channel_model_id=11&routing_model=same-model&keep=true")
 	if path != "/v1/images/generations?keep=true" {
 		t.Fatalf("unexpected stripped path: %s", path)
 	}

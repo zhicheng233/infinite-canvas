@@ -108,6 +108,7 @@ type upstreamCallResult struct {
 type ChannelSelection struct {
 	ChannelID      uint
 	ChannelModelID uint
+	ModelName      string
 }
 
 type ResolvedEstimateRoute struct {
@@ -232,10 +233,11 @@ func (s *GenerateService) resolveFuzzyMergeRoute(channelID uint, fuzzyGroupName 
 	)
 }
 
-func (s *GenerateService) proxyWithAutoFailover(tenantID, userID uint, capability, path, contentType string, body []byte, modelName string) (*ProxyResult, error) {
+func (s *GenerateService) proxyWithAutoFailover(tenantID, userID uint, method, capability, path, contentType string, body []byte, modelName string) (*ProxyResult, error) {
 	if s.autoChannelService == nil {
 		return nil, errors.New("自动渠道服务不可用")
 	}
+	method = strings.ToUpper(strings.TrimSpace(method))
 
 	aggregated, err := s.autoChannelService.AggregateModels()
 	if err != nil {
@@ -262,61 +264,67 @@ func (s *GenerateService) proxyWithAutoFailover(tenantID, userID uint, capabilit
 		selection := ChannelSelection{ChannelID: candidate.ChannelID, ChannelModelID: candidate.ChannelModelID}
 		route, err := s.resolveChannelRoute(selection, capability, modelName)
 		if err != nil {
-			s.recordModelFailureWithSelection(tenantID, userID, capability, modelName, http.MethodPost, path, 0, nil, err.Error(), selection)
+			s.recordModelFailureWithSelection(tenantID, userID, capability, modelName, method, path, 0, nil, err.Error(), selection)
 			lastErr = err
 			continue
 		}
 
-		cost, pricingResult, err := s.getRequiredPricing(tenantID, candidate.ChannelID, capability, modelName, contentType, body)
+		cost, chargeType, pricingResult, err := s.getProxyCostByGeneration(tenantID, candidate.ChannelID, method, capability, contentType, body, modelName)
 		if err != nil {
-			s.recordModelFailureWithRoute(tenantID, userID, capability, modelName, http.MethodPost, path, 0, nil, err.Error(), route)
+			s.recordModelFailureWithRoute(tenantID, userID, capability, modelName, method, path, 0, nil, err.Error(), route)
 			lastErr = err
 			continue
 		}
 
-		account, accErr := s.creditService.GetOrCreateAccount(tenantID, userID)
-		if accErr != nil {
-			s.recordModelFailureWithRoute(tenantID, userID, capability, modelName, http.MethodPost, path, 0, nil, accErr.Error(), route)
-			lastErr = accErr
-			continue
-		}
-		if account == nil || account.Balance < cost {
-			lastErr = fmt.Errorf("积分不足")
-			s.recordModelFailureWithRoute(tenantID, userID, capability, modelName, http.MethodPost, path, 0, nil, lastErr.Error(), route)
-			continue
+		var account *model.CreditAccount
+		if cost > 0 {
+			var accErr error
+			account, accErr = s.creditService.GetOrCreateAccount(tenantID, userID)
+			if accErr != nil {
+				s.recordModelFailureWithRoute(tenantID, userID, capability, modelName, method, path, 0, nil, accErr.Error(), route)
+				lastErr = accErr
+				continue
+			}
+			if account == nil || account.Balance < cost {
+				lastErr = fmt.Errorf("积分不足")
+				s.recordModelFailureWithRoute(tenantID, userID, capability, modelName, method, path, 0, nil, lastErr.Error(), route)
+				continue
+			}
 		}
 
-		upstream, err := s.doUpstreamRequest(http.MethodPost, route.Channel.BaseUrl, route.ApiKey, path, contentType, body)
+		upstream, err := s.doUpstreamRequest(method, route.Channel.BaseUrl, route.ApiKey, path, contentType, body)
 		if err != nil {
-			s.recordModelFailureWithRoute(tenantID, userID, capability, modelName, http.MethodPost, path, 0, nil, err.Error(), route)
+			s.recordModelFailureWithRoute(tenantID, userID, capability, modelName, method, path, 0, nil, err.Error(), route)
 			lastErr = err
 			continue
 		}
 
 		alertStatus, alertMessage := s.handleUpstreamWebhookAlert(tenantID, modelName, upstream.Body, route)
 		if alertStatus != "" {
-			s.recordModelFailureWithRoute(tenantID, userID, capability, modelName, http.MethodPost, path, upstream.StatusCode, upstream.Body, "", route)
+			s.recordModelFailureWithRoute(tenantID, userID, capability, modelName, method, path, upstream.StatusCode, upstream.Body, "", route)
 			lastErr = errors.New(alertMessage)
 			continue
 		}
 
 		if upstream.StatusCode >= 400 {
-			s.recordModelFailureWithRoute(tenantID, userID, capability, modelName, http.MethodPost, path, upstream.StatusCode, upstream.Body, "", route)
+			s.recordModelFailureWithRoute(tenantID, userID, capability, modelName, method, path, upstream.StatusCode, upstream.Body, "", route)
 			lastErr = fmt.Errorf("上游返回 %d", upstream.StatusCode)
 			continue
 		}
 
-		s.recordModelSuccessWithRoute(tenantID, userID, capability, modelName, http.MethodPost, path, upstream.StatusCode, upstream.ResponseTimeMs, route)
+		s.recordModelSuccessWithRoute(tenantID, userID, capability, modelName, method, path, upstream.StatusCode, upstream.ResponseTimeMs, route)
 
 		if cost > 0 {
-			metadata, note := buildCreditSpendDetail(capability, modelName, path, pricingResult)
-			_ = s.creditService.SpendWithMetadata(0, userID, cost, capability, modelName, note, metadata)
+			metadata, note := buildCreditSpendDetail(chargeType, modelName, path, pricingResult)
+			_ = s.creditService.SpendWithMetadata(0, userID, cost, chargeType, modelName, note, metadata)
 		}
 
-		account, _ = s.creditService.GetOrCreateAccount(tenantID, userID)
 		balance := 0
-		if account != nil {
-			balance = account.Balance
+		if s.creditService != nil {
+			account, _ = s.creditService.GetOrCreateAccount(tenantID, userID)
+			if account != nil {
+				balance = account.Balance
+			}
 		}
 
 		return &ProxyResult{
@@ -484,6 +492,9 @@ func mergeSelection(primary, fallback ChannelSelection) ChannelSelection {
 	if primary.ChannelModelID == 0 {
 		primary.ChannelModelID = fallback.ChannelModelID
 	}
+	if strings.TrimSpace(primary.ModelName) == "" {
+		primary.ModelName = fallback.ModelName
+	}
 	return primary
 }
 
@@ -540,6 +551,7 @@ func stripChannelIdentityQuery(path string) string {
 	values := parsed.Query()
 	values.Del("channel_id")
 	values.Del("channel_model_id")
+	values.Del("routing_model")
 	parsed.RawQuery = values.Encode()
 	return parsed.String()
 }
@@ -610,7 +622,7 @@ func (s *GenerateService) proxy(tenantID, userID uint, genType, path, contentTyp
 		body = normalizedBody
 	}
 
-	modelName := extractModelName(contentType, body)
+	modelName := extractProxyModelName(contentType, body, selection)
 	if modelName == "" {
 		err := errors.New("请指定模型")
 		s.recordModelFailureWithSelection(tenantID, userID, genType, modelName, http.MethodPost, path, 0, nil, err.Error(), selection)
@@ -619,7 +631,7 @@ func (s *GenerateService) proxy(tenantID, userID uint, genType, path, contentTyp
 
 	// Auto channel routing with success-rate priority failover
 	if selection.ChannelID == 0 && s.autoChannelService != nil {
-		result, err := s.proxyWithAutoFailover(tenantID, userID, genType, path, contentType, body, modelName)
+		result, err := s.proxyWithAutoFailover(tenantID, userID, http.MethodPost, genType, path, contentType, body, modelName)
 		if err != nil {
 			s.recordModelFailureWithAutoSelection(tenantID, userID, genType, modelName, http.MethodPost, path, 0, nil, err.Error())
 			return nil, err
@@ -768,6 +780,13 @@ func extractModelName(contentType string, body []byte) string {
 	return ""
 }
 
+func extractProxyModelName(contentType string, body []byte, selection ChannelSelection) string {
+	if modelName := strings.TrimSpace(extractModelName(contentType, body)); modelName != "" {
+		return modelName
+	}
+	return strings.TrimSpace(selection.ModelName)
+}
+
 func extractBoundary(contentType string) string {
 	parts := strings.Split(contentType, "boundary=")
 	if len(parts) < 2 {
@@ -799,7 +818,7 @@ func (s *GenerateService) ProxyRaw(tenantID, userID uint, method, path, contentT
 		body = normalizedBody
 	}
 
-	modelName := extractModelName(contentType, body)
+	modelName := extractProxyModelName(contentType, body, selection)
 	chargeType := generationTypeFromPath(path)
 	if modelName == "" && strings.ToUpper(strings.TrimSpace(method)) == http.MethodGet && selection.ChannelModelID != 0 && s.modelRepo != nil {
 		if item, err := s.modelRepo.FindByID(selection.ChannelModelID); err == nil {
@@ -817,7 +836,7 @@ func (s *GenerateService) ProxyRaw(tenantID, userID uint, method, path, contentT
 
 	// Auto channel routing with success-rate priority failover
 	if selection.ChannelID == 0 && s.autoChannelService != nil {
-		result, err := s.proxyWithAutoFailover(tenantID, userID, chargeType, path, contentType, body, modelName)
+		result, err := s.proxyWithAutoFailover(tenantID, userID, method, chargeType, path, contentType, body, modelName)
 		if err != nil {
 			s.recordModelFailureWithAutoSelection(tenantID, userID, chargeType, modelName, method, path, 0, nil, err.Error())
 			return nil, err
@@ -944,7 +963,7 @@ func (s *GenerateService) ProxyRawWithRepair(tenantID, userID uint, method, path
 		body = normalizedBody
 	}
 
-	modelName := extractModelName(contentType, body)
+	modelName := extractProxyModelName(contentType, body, selection)
 	generation := generationTypeFromPath(path)
 	if modelName == "" && strings.ToUpper(strings.TrimSpace(method)) == http.MethodGet && selection.ChannelModelID != 0 && s.modelRepo != nil {
 		if item, err := s.modelRepo.FindByID(selection.ChannelModelID); err == nil {
@@ -962,7 +981,7 @@ func (s *GenerateService) ProxyRawWithRepair(tenantID, userID uint, method, path
 
 	// Auto channel routing with success-rate priority failover
 	if selection.ChannelID == 0 && s.autoChannelService != nil {
-		result, err := s.proxyWithAutoFailover(tenantID, userID, generation, path, contentType, body, modelName)
+		result, err := s.proxyWithAutoFailover(tenantID, userID, method, generation, path, contentType, body, modelName)
 		if err != nil {
 			s.recordModelFailureWithAutoSelection(tenantID, userID, generation, modelName, method, path, 0, nil, err.Error())
 			return nil, err

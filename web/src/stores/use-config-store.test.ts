@@ -298,9 +298,18 @@ test("authenticated stale identity fails closed and valid request includes both 
     const query = new URL(valid).searchParams;
     expect(query.get("channel_id")).toBe("2");
     expect(query.get("channel_model_id")).toBe("22");
+    expect(query.get("routing_model")).toBe("same-model");
     expect(selectedChannelIdentityForModel(config, "2::999::same-model")).toBeNull();
     expect(() => buildProxyApiUrl("https://app.test/backend-api", config, "2::999::same-model", "/images/generations")).toThrow("所选模型已失效");
     expect(resolveModelRequestConfig(config, "2::999::same-model").model).toBe("same-model");
+});
+
+test("Auto proxy request carries the raw routing model for bodyless polling", () => {
+    const config = { ...defaultConfig, videoChannelId: 0, videoModel: "0::0::gpt-video-auto" };
+    const query = new URL(buildProxyApiUrl("https://app.test/backend-api", config, config.videoModel, "/videos/task_123")).searchParams;
+    expect(query.get("channel_id")).toBe("0");
+    expect(query.get("channel_model_id")).toBe("0");
+    expect(query.get("routing_model")).toBe("gpt-video-auto");
 });
 
 describe("buildChannelModelOptions pricing-gated filter", () => {

@@ -286,11 +286,11 @@ export function selectedChannelIdentityForModel(config: AiConfig, value: string)
 export function buildProxyApiUrl(apiBase: string, config: AiConfig, value: string, path: string) {
     const mergeParsed = parseMergeModelValue(value);
     if (mergeParsed) {
-        return `${apiBase}/proxy?${new URLSearchParams({ path, channel_id: String(mergeParsed.channelId), fuzzy_group_name: mergeParsed.groupName }).toString()}`;
+        return `${apiBase}/proxy?${new URLSearchParams({ path, channel_id: String(mergeParsed.channelId), fuzzy_group_name: mergeParsed.groupName, routing_model: mergeParsed.groupName }).toString()}`;
     }
     const identity = selectedChannelIdentityForModel(config, value);
     if (!identity) throw new Error("所选模型已失效，请刷新后重新选择");
-    const query = new URLSearchParams({ path, channel_id: String(identity.channelId), channel_model_id: String(identity.channelModelId) });
+    const query = new URLSearchParams({ path, channel_id: String(identity.channelId), channel_model_id: String(identity.channelModelId), routing_model: modelOptionName(value) });
     return `${apiBase}/proxy?${query.toString()}`;
 }
 
