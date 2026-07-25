@@ -13,6 +13,7 @@ import {
     selectedChannelId,
     selectedChannelIdentityForModel,
     useConfigStore,
+    videoRouteForModel,
 } from "./use-config-store";
 
 const channels = [
@@ -130,6 +131,31 @@ test("priced Auto catalog exposes usable options for the matching capability", (
     const videoOptions = buildChannelModelOptions(channels, models, [...pricing, autoPricing], null, "video", 0, [autoModel]);
     expect(imageOptions.map((option) => option.value)).toEqual(["0::0::gpt-image-auto"]);
     expect(videoOptions).toEqual([]);
+});
+
+test("Auto video inherits the highest-success candidate route and duration metadata", () => {
+    const videoModels = {
+        1: [{ ...models[1][0], id: 31, model_name: "omni-fast", capabilities: ["video"], video_route: "waninter", video_durations: [6, 10], video_customizable: true }],
+        2: [{ ...models[2][0], id: 32, model_name: "omni-fast", capabilities: ["video"], video_route: "xai", video_durations: [6], video_customizable: false }],
+    };
+    const autoVideoModel = {
+        model: "omni-fast",
+        channels: [
+            { channel_id: 1, channel_model_id: 31, channel_name: "A", success_rate: 95 },
+            { channel_id: 2, channel_model_id: 32, channel_name: "B", success_rate: 80 },
+        ],
+    };
+    const videoPricing = [{ model: "omni-fast", credits_per_unit: 1, unit_type: "per_video" }];
+    const options = buildChannelModelOptions(channels, videoModels, videoPricing, null, "video", 0, [autoVideoModel]);
+    expect(options[0]).toMatchObject({ value: "0::0::omni-fast", videoRoute: "waninter", videoDurations: [6, 10], videoCustomizable: true });
+
+    useConfigStore.setState({ config: { ...defaultConfig, videoChannelId: 0, videoModel: "0::0::omni-fast" } });
+    const requestId = useConfigStore.getState().beginServerCatalogRefresh();
+    useConfigStore.getState().applyServerCatalogSnapshot(requestId, { channels, channelModels: videoModels, autoChannelModels: [autoVideoModel], pricing: videoPricing, metrics: null });
+    const config = useConfigStore.getState().config;
+    expect(videoRouteForModel(config, "0::0::omni-fast")).toBe("waninter");
+    expect(config.modelVideoDurations["0::0::omni-fast"]).toEqual([6, 10]);
+    expect(config.modelVideoCustomizable["0::0::omni-fast"]).toBe(true);
 });
 
 test("Auto visibility follows usable priced options rather than physical channel count", () => {
@@ -310,6 +336,25 @@ test("Auto proxy request carries the raw routing model for bodyless polling", ()
     expect(query.get("channel_id")).toBe("0");
     expect(query.get("channel_model_id")).toBe("0");
     expect(query.get("routing_model")).toBe("gpt-video-auto");
+});
+
+test("Auto video proxy carries its protocol and resolved tasks override the physical identity", () => {
+    const config = { ...defaultConfig, videoChannelId: 0, videoModel: "0::0::omni-fast" };
+    const autoQuery = new URL(buildProxyApiUrl("https://app.test/backend-api", config, config.videoModel, "/videos", { routingVideoRoute: "waninter" })).searchParams;
+    expect(autoQuery.get("routing_video_route")).toBe("waninter");
+
+    const resolvedQuery = new URL(
+        buildProxyApiUrl("https://app.test/backend-api", config, config.videoModel, "/videos/task_123", {
+            channelId: 2,
+            channelModelId: 62,
+            routingModel: "omni-fast",
+            routingVideoRoute: "waninter",
+        }),
+    ).searchParams;
+    expect(resolvedQuery.get("channel_id")).toBe("2");
+    expect(resolvedQuery.get("channel_model_id")).toBe("62");
+    expect(resolvedQuery.get("routing_model")).toBe("omni-fast");
+    expect(resolvedQuery.has("routing_video_route")).toBe(false);
 });
 
 describe("buildChannelModelOptions pricing-gated filter", () => {

@@ -516,7 +516,7 @@ func TestAutoVideoPollingPreservesGetWithoutPricing(t *testing.T) {
 	}}
 	svc.creditRepo = pricing
 
-	result, err := svc.proxyWithAutoFailover(1, 1, http.MethodGet, "video", "/videos/task_123", "", nil, "omni-fast")
+	result, err := svc.proxyWithAutoFailover(1, 1, http.MethodGet, "video", "/videos/task_123", "", nil, "omni-fast", "")
 	if err != nil || result == nil || result.StatusCode != http.StatusOK {
 		t.Fatalf("unexpected polling result=%#v err=%v", result, err)
 	}
@@ -529,12 +529,53 @@ func TestAutoVideoPollingPreservesGetWithoutPricing(t *testing.T) {
 	}
 }
 
+func TestAutoVideoRouteFiltersCandidatesAndReturnsResolvedIdentity(t *testing.T) {
+	xai := NewFakeUpstreamServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"processing"}`))
+	})
+	defer xai.Close()
+	waninter := NewFakeUpstreamServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"processing"}`))
+	})
+	defer waninter.Close()
+
+	svc := newRouteTestGenerateService()
+	svc.autoChannelService = fakeAutoChannelModelAggregator{items: []AggregatedModel{{
+		Model: "omni-fast",
+		Channels: []AggregatedChannelRef{
+			{ChannelID: 1, ChannelModelID: 61, SuccessRate: 100},
+			{ChannelID: 2, ChannelModelID: 62, SuccessRate: 90},
+		},
+	}}}
+	svc.channelRepo = fakeChannelReader{items: map[uint]*model.Channel{
+		1: {BaseModel: model.BaseModel{ID: 1}, Name: "XAI", BaseUrl: xai.URL(), Enabled: true},
+		2: {BaseModel: model.BaseModel{ID: 2}, Name: "Waninter", BaseUrl: waninter.URL(), Enabled: true},
+	}}
+	svc.modelRepo = fakeChannelModelReader{items: map[uint]*model.ChannelModel{
+		61: {BaseModel: model.BaseModel{ID: 61}, ChannelID: 1, ModelName: "omni-fast", Capabilities: `["video"]`, VideoRoute: "xai", Enabled: true},
+		62: {BaseModel: model.BaseModel{ID: 62}, ChannelID: 2, ModelName: "omni-fast", Capabilities: `["video"]`, VideoRoute: "waninter", Enabled: true},
+	}}
+
+	result, err := svc.proxyWithAutoFailover(1, 1, http.MethodGet, "video", "/videos/task_123", "", nil, "omni-fast", "waninter")
+	if err != nil {
+		t.Fatalf("Auto video route failed: %v", err)
+	}
+	if len(xai.Requests()) != 0 || len(waninter.Requests()) != 1 {
+		t.Fatalf("request crossed video protocols: xai=%d waninter=%d", len(xai.Requests()), len(waninter.Requests()))
+	}
+	if result.ResolvedChannelID != 2 || result.ResolvedChannelModelID != 62 {
+		t.Fatalf("unexpected resolved identity: channel=%d model=%d", result.ResolvedChannelID, result.ResolvedChannelModelID)
+	}
+}
+
 func TestStripChannelIdentityBeforeUpstream(t *testing.T) {
 	body := stripJSONChannelIdentity("application/json", []byte(`{"model":"same-model","channel_id":1,"channel_model_id":11}`))
 	if string(body) != `{"model":"same-model"}` {
 		t.Fatalf("unexpected stripped body: %s", body)
 	}
-	path := stripChannelIdentityQuery("/v1/images/generations?channel_id=1&channel_model_id=11&routing_model=same-model&keep=true")
+	path := stripChannelIdentityQuery("/v1/images/generations?channel_id=1&channel_model_id=11&routing_model=same-model&routing_video_route=waninter&keep=true")
 	if path != "/v1/images/generations?keep=true" {
 		t.Fatalf("unexpected stripped path: %s", path)
 	}

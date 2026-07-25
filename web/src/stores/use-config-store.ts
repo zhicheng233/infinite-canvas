@@ -283,14 +283,22 @@ export function selectedChannelIdentityForModel(config: AiConfig, value: string)
     return channelId && channelModelId ? { channelId, channelModelId } : null;
 }
 
-export function buildProxyApiUrl(apiBase: string, config: AiConfig, value: string, path: string) {
+export function buildProxyApiUrl(
+    apiBase: string,
+    config: AiConfig,
+    value: string,
+    path: string,
+    routing?: { channelId?: number; channelModelId?: number; routingModel?: string; routingVideoRoute?: string },
+) {
     const mergeParsed = parseMergeModelValue(value);
     if (mergeParsed) {
         return `${apiBase}/proxy?${new URLSearchParams({ path, channel_id: String(mergeParsed.channelId), fuzzy_group_name: mergeParsed.groupName, routing_model: mergeParsed.groupName }).toString()}`;
     }
-    const identity = selectedChannelIdentityForModel(config, value);
+    const hasRoutingIdentity = routing?.channelId !== undefined && routing.channelModelId !== undefined;
+    const identity = hasRoutingIdentity ? { channelId: routing.channelId!, channelModelId: routing.channelModelId! } : selectedChannelIdentityForModel(config, value);
     if (!identity) throw new Error("所选模型已失效，请刷新后重新选择");
-    const query = new URLSearchParams({ path, channel_id: String(identity.channelId), channel_model_id: String(identity.channelModelId), routing_model: modelOptionName(value) });
+    const query = new URLSearchParams({ path, channel_id: String(identity.channelId), channel_model_id: String(identity.channelModelId), routing_model: routing?.routingModel || modelOptionName(value) });
+    if (identity.channelId === 0 && routing?.routingVideoRoute) query.set("routing_video_route", routing.routingVideoRoute);
     return `${apiBase}/proxy?${query.toString()}`;
 }
 
@@ -730,6 +738,7 @@ export function buildChannelModelOptions(
                 });
                 const bestChannel = candidates.reduce<AutoChannelModelRef | null>((best, curr) => (curr.success_rate > (best?.success_rate ?? -1) ? curr : best), null);
                 if (!bestChannel) return [];
+                const bestModel = enabledModels.get(bestChannel.channel_model_id);
                 const price = pricing.find((item) => item.model === am.model && item.channel_id === bestChannel.channel_id) || pricing.find((item) => item.model === am.model && !item.channel_id);
                 if (!price) return [];
                 return [
@@ -745,9 +754,9 @@ export function buildChannelModelOptions(
                         metricsStatus: bestChannel ? "ok" : "unavailable",
                         imageGenerateRoute: "auto",
                         imageEditRoute: "auto",
-                        videoRoute: "auto",
-                        videoDurations: [],
-                        videoCustomizable: false,
+                        videoRoute: capability === "video" ? bestModel?.video_route || "auto" : "auto",
+                        videoDurations: capability === "video" ? bestModel?.video_durations || [] : [],
+                        videoCustomizable: capability === "video" ? Boolean(bestModel?.video_customizable) : false,
                         sortOrder: 0,
                     },
                 ];
@@ -984,6 +993,11 @@ function applyChannelScopedSelections(config: AiConfig, channels: ModelChannel[]
         if (model.video_route && model.video_route !== "auto") next.modelRoutes[modelRouteKey("video", option)] = model.video_route;
         if (model.video_durations.length) next.modelVideoDurations[option] = model.video_durations;
         if (model.video_customizable) next.modelVideoCustomizable[option] = true;
+    }
+    for (const option of buildChannelModelOptions(channels, models, pricing, metrics, "video", 0, autoChannelModels)) {
+        if (option.videoRoute !== "auto") next.modelRoutes[modelRouteKey("video", option.value)] = option.videoRoute;
+        if (option.videoDurations.length) next.modelVideoDurations[option.value] = option.videoDurations;
+        if (option.videoCustomizable) next.modelVideoCustomizable[option.value] = true;
     }
     next.model = next.imageModel || next.videoModel || next.textModel || next.audioModel || "";
     return next;

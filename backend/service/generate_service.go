@@ -91,11 +91,13 @@ func NewGenerateService(apiConfigRepo *repository.ApiConfigRepo, creditService *
 }
 
 type ProxyResult struct {
-	StatusCode int
-	Body       []byte
-	Headers    http.Header
-	Cost       int
-	Balance    int
+	StatusCode             int
+	Body                   []byte
+	Headers                http.Header
+	Cost                   int
+	Balance                int
+	ResolvedChannelID      uint
+	ResolvedChannelModelID uint
 }
 
 type upstreamCallResult struct {
@@ -109,6 +111,7 @@ type ChannelSelection struct {
 	ChannelID      uint
 	ChannelModelID uint
 	ModelName      string
+	VideoRoute     string
 }
 
 type ResolvedEstimateRoute struct {
@@ -233,11 +236,12 @@ func (s *GenerateService) resolveFuzzyMergeRoute(channelID uint, fuzzyGroupName 
 	)
 }
 
-func (s *GenerateService) proxyWithAutoFailover(tenantID, userID uint, method, capability, path, contentType string, body []byte, modelName string) (*ProxyResult, error) {
+func (s *GenerateService) proxyWithAutoFailover(tenantID, userID uint, method, capability, path, contentType string, body []byte, modelName, requestedVideoRoute string) (*ProxyResult, error) {
 	if s.autoChannelService == nil {
 		return nil, errors.New("自动渠道服务不可用")
 	}
 	method = strings.ToUpper(strings.TrimSpace(method))
+	requestedVideoRoute = strings.ToLower(strings.TrimSpace(requestedVideoRoute))
 
 	aggregated, err := s.autoChannelService.AggregateModels()
 	if err != nil {
@@ -260,6 +264,7 @@ func (s *GenerateService) proxyWithAutoFailover(tenantID, userID uint, method, c
 	})
 
 	var lastErr error
+	matchedVideoRoute := requestedVideoRoute == "" || capability != "video"
 	for _, candidate := range candidates {
 		selection := ChannelSelection{ChannelID: candidate.ChannelID, ChannelModelID: candidate.ChannelModelID}
 		route, err := s.resolveChannelRoute(selection, capability, modelName)
@@ -268,6 +273,10 @@ func (s *GenerateService) proxyWithAutoFailover(tenantID, userID uint, method, c
 			lastErr = err
 			continue
 		}
+		if capability == "video" && requestedVideoRoute != "" && normalizeVideoRoute(route.ChannelModel.VideoRoute) != requestedVideoRoute {
+			continue
+		}
+		matchedVideoRoute = true
 
 		cost, chargeType, pricingResult, err := s.getProxyCostByGeneration(tenantID, candidate.ChannelID, method, capability, contentType, body, modelName)
 		if err != nil {
@@ -328,16 +337,21 @@ func (s *GenerateService) proxyWithAutoFailover(tenantID, userID uint, method, c
 		}
 
 		return &ProxyResult{
-			StatusCode: upstream.StatusCode,
-			Body:       upstream.Body,
-			Headers:    upstream.Headers,
-			Cost:       cost,
-			Balance:    balance,
+			StatusCode:             upstream.StatusCode,
+			Body:                   upstream.Body,
+			Headers:                upstream.Headers,
+			Cost:                   cost,
+			Balance:                balance,
+			ResolvedChannelID:      candidate.ChannelID,
+			ResolvedChannelModelID: candidate.ChannelModelID,
 		}, nil
 	}
 
 	if lastErr != nil {
 		return nil, fmt.Errorf("Auto 路由所有渠道均失败: %v", lastErr)
+	}
+	if !matchedVideoRoute {
+		return nil, fmt.Errorf("Auto 渠道下没有匹配视频路由 %s 的可用渠道", requestedVideoRoute)
 	}
 	return nil, errors.New("Auto 路由无可用渠道")
 }
@@ -495,7 +509,18 @@ func mergeSelection(primary, fallback ChannelSelection) ChannelSelection {
 	if strings.TrimSpace(primary.ModelName) == "" {
 		primary.ModelName = fallback.ModelName
 	}
+	if strings.TrimSpace(primary.VideoRoute) == "" {
+		primary.VideoRoute = fallback.VideoRoute
+	}
 	return primary
+}
+
+func normalizeVideoRoute(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if value == "" {
+		return "auto"
+	}
+	return value
 }
 
 func extractChannelSelection(contentType string, body []byte, path string) ChannelSelection {
@@ -552,6 +577,7 @@ func stripChannelIdentityQuery(path string) string {
 	values.Del("channel_id")
 	values.Del("channel_model_id")
 	values.Del("routing_model")
+	values.Del("routing_video_route")
 	parsed.RawQuery = values.Encode()
 	return parsed.String()
 }
@@ -631,7 +657,7 @@ func (s *GenerateService) proxy(tenantID, userID uint, genType, path, contentTyp
 
 	// Auto channel routing with success-rate priority failover
 	if selection.ChannelID == 0 && s.autoChannelService != nil {
-		result, err := s.proxyWithAutoFailover(tenantID, userID, http.MethodPost, genType, path, contentType, body, modelName)
+		result, err := s.proxyWithAutoFailover(tenantID, userID, http.MethodPost, genType, path, contentType, body, modelName, selection.VideoRoute)
 		if err != nil {
 			s.recordModelFailureWithAutoSelection(tenantID, userID, genType, modelName, http.MethodPost, path, 0, nil, err.Error())
 			return nil, err
@@ -739,11 +765,13 @@ func (s *GenerateService) proxy(tenantID, userID uint, genType, path, contentTyp
 	}
 
 	return &ProxyResult{
-		StatusCode: upstream.StatusCode,
-		Body:       respBytes,
-		Headers:    upstream.Headers,
-		Cost:       cost,
-		Balance:    balance,
+		StatusCode:             upstream.StatusCode,
+		Body:                   respBytes,
+		Headers:                upstream.Headers,
+		Cost:                   cost,
+		Balance:                balance,
+		ResolvedChannelID:      selectionFromRoute(route).ChannelID,
+		ResolvedChannelModelID: selectionFromRoute(route).ChannelModelID,
 	}, nil
 }
 
@@ -836,7 +864,7 @@ func (s *GenerateService) ProxyRaw(tenantID, userID uint, method, path, contentT
 
 	// Auto channel routing with success-rate priority failover
 	if selection.ChannelID == 0 && s.autoChannelService != nil {
-		result, err := s.proxyWithAutoFailover(tenantID, userID, method, chargeType, path, contentType, body, modelName)
+		result, err := s.proxyWithAutoFailover(tenantID, userID, method, chargeType, path, contentType, body, modelName, selection.VideoRoute)
 		if err != nil {
 			s.recordModelFailureWithAutoSelection(tenantID, userID, chargeType, modelName, method, path, 0, nil, err.Error())
 			return nil, err
@@ -946,11 +974,13 @@ func (s *GenerateService) ProxyRaw(tenantID, userID uint, method, path, contentT
 	}
 
 	return &ProxyResult{
-		StatusCode: upstream.StatusCode,
-		Body:       respBytes,
-		Headers:    upstream.Headers,
-		Cost:       cost,
-		Balance:    balance,
+		StatusCode:             upstream.StatusCode,
+		Body:                   respBytes,
+		Headers:                upstream.Headers,
+		Cost:                   cost,
+		Balance:                balance,
+		ResolvedChannelID:      selectionFromRoute(route).ChannelID,
+		ResolvedChannelModelID: selectionFromRoute(route).ChannelModelID,
 	}, nil
 }
 
@@ -981,7 +1011,7 @@ func (s *GenerateService) ProxyRawWithRepair(tenantID, userID uint, method, path
 
 	// Auto channel routing with success-rate priority failover
 	if selection.ChannelID == 0 && s.autoChannelService != nil {
-		result, err := s.proxyWithAutoFailover(tenantID, userID, method, generation, path, contentType, body, modelName)
+		result, err := s.proxyWithAutoFailover(tenantID, userID, method, generation, path, contentType, body, modelName, selection.VideoRoute)
 		if err != nil {
 			s.recordModelFailureWithAutoSelection(tenantID, userID, generation, modelName, method, path, 0, nil, err.Error())
 			return nil, err
@@ -1111,11 +1141,13 @@ func (s *GenerateService) ProxyRawWithRepair(tenantID, userID uint, method, path
 	}
 
 	return &ProxyResult{
-		StatusCode: upstream.StatusCode,
-		Body:       respBytes,
-		Headers:    upstream.Headers,
-		Cost:       cost,
-		Balance:    balance,
+		StatusCode:             upstream.StatusCode,
+		Body:                   respBytes,
+		Headers:                upstream.Headers,
+		Cost:                   cost,
+		Balance:                balance,
+		ResolvedChannelID:      selectionFromRoute(route).ChannelID,
+		ResolvedChannelModelID: selectionFromRoute(route).ChannelModelID,
 	}, nil
 }
 

@@ -59,6 +59,7 @@ func (h *GenerateHandler) handleProxy(c *gin.Context, fn proxyFunc) {
 
 	c.Header("X-Credits-Cost", itoa(result.Cost))
 	c.Header("X-Credits-Balance", itoa(result.Balance))
+	writeResolvedChannelHeaders(c, result)
 
 	if result.StatusCode >= http.StatusBadRequest {
 		bodyStr := string(result.Body)
@@ -98,6 +99,16 @@ func channelSelectionFromRequest(c *gin.Context) service.ChannelSelection {
 		ChannelID:      uintQuery(c, "channel_id"),
 		ChannelModelID: uintQuery(c, "channel_model_id"),
 		ModelName:      strings.TrimSpace(c.Query("routing_model")),
+		VideoRoute:     strings.TrimSpace(c.Query("routing_video_route")),
+	}
+}
+
+func writeResolvedChannelHeaders(c *gin.Context, result *service.ProxyResult) {
+	if result.ResolvedChannelID > 0 {
+		c.Header("X-Resolved-Channel-ID", itoa(int(result.ResolvedChannelID)))
+	}
+	if result.ResolvedChannelModelID > 0 {
+		c.Header("X-Resolved-Channel-Model-ID", itoa(int(result.ResolvedChannelModelID)))
 	}
 }
 

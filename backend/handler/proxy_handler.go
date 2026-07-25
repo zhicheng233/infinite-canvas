@@ -42,6 +42,7 @@ func (h *ProxyHandler) Proxy(c *gin.Context) {
 	}
 	c.Header("X-Credits-Cost", itoa(result.Cost))
 	c.Header("X-Credits-Balance", itoa(result.Balance))
+	writeResolvedChannelHeaders(c, result)
 
 	if result.StatusCode >= http.StatusBadRequest {
 		bodyStr := string(result.Body)
@@ -76,6 +77,7 @@ func (h *ProxyHandler) ProxyGet(c *gin.Context) {
 			c.Header(key, value)
 		}
 	}
+	writeResolvedChannelHeaders(c, result)
 
 	if result.StatusCode >= http.StatusBadRequest {
 		bodyStr := string(result.Body)
@@ -110,6 +112,7 @@ func (h *ProxyHandler) ProxyGetPath(c *gin.Context) {
 			c.Header(key, value)
 		}
 	}
+	writeResolvedChannelHeaders(c, result)
 
 	if result.StatusCode >= http.StatusBadRequest {
 		bodyStr := string(result.Body)
