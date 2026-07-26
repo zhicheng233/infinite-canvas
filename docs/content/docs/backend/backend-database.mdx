@@ -76,6 +76,7 @@ description: 当前后端数据库表结构说明
 | base_url | string(500) | 上游 API 基础地址 |
 | api_key | string(500) | 加密后的上游 API Key；模型 JSON 输出中隐藏该字段 |
 | enabled | bool | 渠道是否启用，默认 true，带索引 |
+| video_api_standard | string(20) | 视频 API 标准：`default` / `binghuo`，默认 `default`；`binghuo` 会覆盖该渠道全部视频模型的模型级路由 |
 | new_api_channel_id | int | 可为空，对应 new-api 的 channel_id |
 | new_api_channel_id_val | string(100) | new-api 渠道人类可读映射名称 |
 | metrics_base_url | VARCHAR(512) | NULL | 指标服务地址（为空则使用 base_url + /api） |
@@ -97,7 +98,7 @@ API Key 仅用于后端代理调用，按 `API_KEY_ENCRYPTION_KEY` 配置加密�
 | enabled | bool | 渠道内模型是否启用，默认 true |
 | image_generate_route | string(30) | 图片生成路由：auto/generations/edits/chat/banana |
 | image_edit_route | string(30) | 图片编辑路由 |
-| video_route | string(30) | 视频路由：auto/openai/veo_json/waninter/yijia/xai/newapi/seedance |
+| video_route | string(30) | 视频路由：auto/openai/veo_json/waninter/yijia/xai/newapi/seedance；渠道使用炳火标准时保留但暂不生效 |
 | video_durations | string(200) | 视频时长 JSON 数组，例如 `[5,10]` |
 | video_customizable | bool | 视频参数是否支持用户自定义，默认 false |
 | sort_order | int | 前台展示排序，默认 0 |

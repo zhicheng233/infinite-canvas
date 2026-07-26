@@ -37,6 +37,10 @@ func (s *ChannelService) Create(input model.SaveChannelInput) (*model.ChannelAdm
 	if len([]rune(input.Remark)) > 500 {
 		return nil, errors.New("备注不能超过500个字符")
 	}
+	videoAPIStandard, err := validateVideoAPIStandard(input.VideoAPIStandard)
+	if err != nil {
+		return nil, err
+	}
 
 	enabled := true
 	if input.Enabled != nil {
@@ -47,6 +51,7 @@ func (s *ChannelService) Create(input model.SaveChannelInput) (*model.ChannelAdm
 		BaseUrl:         baseURL,
 		ApiKey:          encryptedKey,
 		Enabled:         enabled,
+		VideoAPIStandard: videoAPIStandard,
 		NewApiChannelID: input.NewApiChannelID,
 		MetricsBaseUrl:  input.MetricsBaseUrl,
 		Remark:          input.Remark,
@@ -72,6 +77,13 @@ func (s *ChannelService) Update(id uint, input model.SaveChannelInput) (*model.C
 
 	if len([]rune(input.Remark)) > 500 {
 		return nil, errors.New("备注不能超过500个字符")
+	}
+	if input.VideoAPIStandard != nil {
+		videoAPIStandard, err := validateVideoAPIStandard(input.VideoAPIStandard)
+		if err != nil {
+			return nil, err
+		}
+		channel.VideoAPIStandard = videoAPIStandard
 	}
 
 	channel.Name = name
@@ -168,6 +180,17 @@ func validateChannelInput(nameInput, baseURLInput string) (string, string, error
 	return name, baseURL, nil
 }
 
+func validateVideoAPIStandard(input *string) (string, error) {
+	if input == nil || strings.TrimSpace(*input) == "" {
+		return model.VideoAPIStandardDefault, nil
+	}
+	value := strings.ToLower(strings.TrimSpace(*input))
+	if value != model.VideoAPIStandardDefault && value != model.VideoAPIStandardBinghuo {
+		return "", errors.New("video_api_standard must be default or binghuo")
+	}
+	return value, nil
+}
+
 func channelsToInfo(channels []model.Channel) []model.ChannelInfo {
 	infos := make([]model.ChannelInfo, 0, len(channels))
 	for index := range channels {
@@ -189,12 +212,20 @@ func channelToInfo(channel *model.Channel) model.ChannelInfo {
 		ID:              channel.ID,
 		Name:            channel.Name,
 		Enabled:         channel.Enabled,
+		VideoAPIStandard: normalizeChannelVideoAPIStandard(channel.VideoAPIStandard),
 		NewApiChannelID: channel.NewApiChannelID,
 		MetricsBaseUrl:  channel.MetricsBaseUrl,
 		SyncStatus:      channel.SyncStatus,
 		SyncError:       channel.SyncError,
 		SyncedAt:        channel.SyncedAt,
 	}
+}
+
+func normalizeChannelVideoAPIStandard(value string) string {
+	if strings.EqualFold(strings.TrimSpace(value), model.VideoAPIStandardBinghuo) {
+		return model.VideoAPIStandardBinghuo
+	}
+	return model.VideoAPIStandardDefault
 }
 
 func channelToAdminInfo(channel *model.Channel) model.ChannelAdminInfo {

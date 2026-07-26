@@ -64,7 +64,7 @@ describe("video aspect ratio routing", () => {
             headers: { "x-resolved-channel-id": "2", "x-resolved-channel-model-id": "62" },
         });
 
-        for (const route of ["openai", "veo_json", "waninter", "xai", "newapi", "seedance"] as const) {
+        for (const route of ["openai", "veo_json", "waninter", "xai", "newapi", "seedance", "binghuo"] as const) {
             post.mockClear();
             const task = await createVideoGenerationTask(videoConfig(route), "test prompt");
             const [requestUrl, body] = post.mock.calls[0];
@@ -81,10 +81,42 @@ describe("video aspect ratio routing", () => {
                 expect(body).toMatchObject({ size: "720x1280", aspect_ratio: "9:16" });
             } else if (route === "newapi") {
                 expect(body).toMatchObject({ width: 720, height: 1280 });
-            } else {
+            } else if (route === "seedance") {
                 expect(body).toMatchObject({ ratio: "9:16" });
+            } else {
+                expect(body).toMatchObject({ ratio: "9:16", resolution: "720P", generate_audio: false, n: 1 });
+                for (const field of ["size", "width", "height", "aspect_ratio", "image"]) expect(body).not.toHaveProperty(field);
             }
         }
+    });
+
+    it("maps Binghuo reference media to canonical fields", async () => {
+        const post = jest.spyOn(axios, "post").mockResolvedValue({ data: { id: "task_binghuo" }, headers: {} });
+        const config = { ...videoConfig("binghuo"), videoReferenceMode: "first_last" as const, vquality: "4K" };
+        await createVideoGenerationTask(
+            config,
+            "test prompt",
+            [
+                { id: "first", name: "first.png", type: "image/png", dataUrl: "", url: "https://media.example.com/first.png" },
+                { id: "last", name: "last.png", type: "image/png", dataUrl: "", url: "https://media.example.com/last.png" },
+            ],
+            [{ id: "video", name: "video.mp4", type: "video/mp4", url: "https://media.example.com/reference.mp4" }],
+            [{ id: "audio", name: "audio.mp3", type: "audio/mpeg", url: "https://media.example.com/reference.mp3" }],
+        );
+        const body = post.mock.calls[0][1];
+        expect(body).toMatchObject({
+            start_frame: ["https://media.example.com/first.png"],
+            end_frame: ["https://media.example.com/last.png"],
+            reference_videos: ["https://media.example.com/reference.mp4"],
+            reference_audios: ["https://media.example.com/reference.mp3"],
+            resolution: "4K",
+            n: 1,
+        });
+        expect(body).not.toHaveProperty("images");
+    });
+
+    it("requires exactly two ordered images in Binghuo first-last mode", async () => {
+        await expect(createVideoGenerationTask({ ...videoConfig("binghuo"), videoReferenceMode: "first_last" }, "test prompt", [])).rejects.toThrow("恰好两张参考图");
     });
 
     it("pins polling to the physical channel that created the task", async () => {
@@ -103,6 +135,23 @@ describe("video aspect ratio routing", () => {
         expect(query.get("channel_model_id")).toBe("62");
         expect(query.get("routing_model")).toBe("video-model");
         expect(query.has("routing_video_route")).toBe(false);
+    });
+
+    it("polls Binghuo tasks through the New API endpoint on the resolved channel", async () => {
+        const get = jest.spyOn(axios, "get").mockResolvedValue({ data: { status: "processing" } });
+        const state = await pollVideoGenerationTask(videoConfig("binghuo"), {
+            id: "task_binghuo",
+            provider: "binghuo",
+            model: "0::0::video-model",
+            channelId: 2,
+            channelModelId: 62,
+        });
+
+        expect(state).toEqual({ status: "pending" });
+        const url = new URL(String(get.mock.calls[0][0]));
+        expect(url.searchParams.get("path")).toBe("/video/generations/task_binghuo");
+        expect(url.searchParams.get("channel_id")).toBe("2");
+        expect(url.searchParams.get("channel_model_id")).toBe("62");
     });
 
     it("pins proxied video content downloads to the task channel", async () => {

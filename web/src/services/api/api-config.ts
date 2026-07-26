@@ -33,6 +33,8 @@ export type ApiModelCatalog = {
 
 export type ApiModelTestInput = {
     model: string;
+    channel_id?: number;
+    channel_model_id?: number;
     generation: string;
     route?: string;
     prompt?: string;

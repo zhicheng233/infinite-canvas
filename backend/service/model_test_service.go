@@ -78,7 +78,11 @@ func (s *GenerateService) TestModel(tenantID, userID uint, input ModelTestInput)
 		return nil, err
 	}
 	input.Generation = generation
-	input.Route = routeForModelTest(input.Route, generation, route.ChannelModel)
+	if generation == "video" && effectiveVideoRoute(route) == model.VideoAPIStandardBinghuo {
+		input.Route = model.VideoAPIStandardBinghuo
+	} else {
+		input.Route = routeForModelTest(input.Route, generation, route.ChannelModel)
+	}
 	cfg := configForChannelModel(route.ChannelModel)
 
 	testReq, err := buildModelTestRequest(cfg, input)
@@ -462,6 +466,20 @@ func buildVideoModelTestRequest(cfg *model.TenantApiConfig, input ModelTestInput
 		}
 		if hasReferences {
 			payload["image"] = testReferenceImageURL
+		}
+		return jsonModelTestRequest("video", route, "/video/generations", payload)
+	case "binghuo":
+		payload := map[string]interface{}{
+			"model":          modelName,
+			"prompt":         prompt,
+			"duration":       seconds,
+			"ratio":          aspectRatio,
+			"resolution":     "720P",
+			"generate_audio": true,
+			"n":              1,
+		}
+		if hasReferences {
+			payload["images"] = []string{testReferenceImageURL}
 		}
 		return jsonModelTestRequest("video", route, "/video/generations", payload)
 	case "seedance":

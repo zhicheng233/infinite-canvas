@@ -273,7 +273,7 @@ func (s *GenerateService) proxyWithAutoFailover(tenantID, userID uint, method, c
 			lastErr = err
 			continue
 		}
-		if capability == "video" && requestedVideoRoute != "" && normalizeVideoRoute(route.ChannelModel.VideoRoute) != requestedVideoRoute {
+		if capability == "video" && requestedVideoRoute != "" && effectiveVideoRoute(route) != requestedVideoRoute {
 			continue
 		}
 		matchedVideoRoute = true
@@ -521,6 +521,16 @@ func normalizeVideoRoute(value string) string {
 		return "auto"
 	}
 	return value
+}
+
+func effectiveVideoRoute(route *channelRouteContext) string {
+	if route != nil && route.Channel != nil && normalizeChannelVideoAPIStandard(route.Channel.VideoAPIStandard) == model.VideoAPIStandardBinghuo {
+		return model.VideoAPIStandardBinghuo
+	}
+	if route == nil || route.ChannelModel == nil {
+		return "auto"
+	}
+	return normalizeVideoRoute(route.ChannelModel.VideoRoute)
 }
 
 func extractChannelSelection(contentType string, body []byte, path string) ChannelSelection {
@@ -1570,7 +1580,7 @@ func countRequestReferences(payload map[string]interface{}) int {
 
 func isReferenceKey(key string) bool {
 	switch key {
-	case "image", "images", "image_url", "image_urls", "first_image", "first_image_url", "last_image", "last_image_url", "input_reference", "reference_image", "reference_images", "reference_image_urls", "reference_video", "reference_video_url", "reference_video_urls", "video", "video_url", "references", "inline_data", "filedata", "file_data":
+	case "image", "images", "image_url", "image_urls", "first_image", "first_image_url", "last_image", "last_image_url", "start_frame", "end_frame", "input_reference", "reference_image", "reference_images", "reference_image_urls", "reference_video", "reference_videos", "reference_video_url", "reference_video_urls", "reference_audio", "reference_audios", "video", "video_url", "references", "inline_data", "filedata", "file_data":
 		return true
 	default:
 		return false
@@ -1621,7 +1631,7 @@ func countMultipartReferences(body []byte) int {
 }
 
 func hasVideoReference(payload map[string]interface{}) bool {
-	for _, key := range []string{"video", "video_url", "reference_video", "reference_video_url", "reference_video_urls", "input_video"} {
+	for _, key := range []string{"video", "video_url", "reference_video", "reference_videos", "reference_video_url", "reference_video_urls", "input_video"} {
 		if referenceValueCount(payload[key]) > 0 {
 			return true
 		}

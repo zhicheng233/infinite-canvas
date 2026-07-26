@@ -7,6 +7,7 @@ type ChannelInfo struct {
 	ID              uint       `json:"id"`
 	Name            string     `json:"name"`
 	Enabled         bool       `json:"enabled"`
+	VideoAPIStandard string     `json:"video_api_standard"`
 	NewApiChannelID *int       `json:"new_api_channel_id,omitempty"`
 	MetricsBaseUrl  *string    `json:"metrics_base_url,omitempty"`
 	SyncStatus      string     `json:"sync_status"`
@@ -28,6 +29,7 @@ type SaveChannelInput struct {
 	BaseUrl         string  `json:"base_url"`
 	ApiKey          string  `json:"api_key"` // empty means "keep existing"
 	Enabled         *bool   `json:"enabled,omitempty"`
+	VideoAPIStandard *string `json:"video_api_standard,omitempty"`
 	NewApiChannelID *int    `json:"new_api_channel_id,omitempty"`
 	MetricsBaseUrl  *string `json:"metrics_base_url,omitempty"`
 	Remark          string  `json:"remark,omitempty"`

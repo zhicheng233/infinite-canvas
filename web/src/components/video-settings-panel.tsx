@@ -17,7 +17,8 @@ import {
     seedanceResolutionOptions,
 } from "@/lib/seedance-video";
 import { type CanvasTheme } from "@/lib/canvas-theme";
-import { fixedConfiguredVideoDurationForModel, isVideoDurationCustomizable, modelOptionName, normalizeVideoDurationForModel, videoDurationOptionsForModel, type AiConfig } from "@/stores/use-config-store";
+import { binghuoRatioOptions, binghuoResolutionOptions, normalizeBinghuoRatio, normalizeBinghuoReferenceMode, normalizeBinghuoResolution } from "@/lib/binghuo-video";
+import { fixedConfiguredVideoDurationForModel, isVideoDurationCustomizable, modelOptionName, normalizeVideoDurationForModel, videoDurationOptionsForModel, videoRouteForModel, type AiConfig } from "@/stores/use-config-store";
 
 const resolutionOptions = [
     { value: "720", label: "720p" },
@@ -38,7 +39,7 @@ const secondOptions = [6, 10, 12, 16, 20];
 type VideoSettingsPanelProps = {
     config: AiConfig;
     model?: string;
-    onConfigChange: (key: "vquality" | "size" | "videoSeconds" | "videoGenerateAudio" | "videoWatermark", value: string) => void;
+    onConfigChange: (key: "vquality" | "size" | "videoSeconds" | "videoGenerateAudio" | "videoWatermark" | "videoReferenceMode", value: string) => void;
     theme: CanvasTheme;
     showTitle?: boolean;
     className?: string;
@@ -47,6 +48,9 @@ type VideoSettingsPanelProps = {
 export function VideoSettingsPanel({ config, model: selectedModel, onConfigChange, theme, showTitle = true, className = "w-[320px] space-y-4 rounded-2xl px-1 py-0.5" }: VideoSettingsPanelProps) {
     const model = selectedModel || config.videoModel || config.model;
     const resolvedConfig = { ...config, videoModel: model, model };
+    if (videoRouteForModel(resolvedConfig, model) === "binghuo") {
+        return <BinghuoVideoSettingsPanel config={resolvedConfig} model={model} onConfigChange={onConfigChange} theme={theme} showTitle={showTitle} className={className} />;
+    }
     if (isSeedanceVideoConfig(resolvedConfig)) {
         return <SeedanceVideoSettingsPanel config={resolvedConfig} model={model} onConfigChange={onConfigChange} theme={theme} showTitle={showTitle} className={className} />;
     }
@@ -128,6 +132,56 @@ export function VideoSettingsPanel({ config, model: selectedModel, onConfigChang
     );
 }
 
+function BinghuoVideoSettingsPanel({ config, model, onConfigChange, theme, showTitle, className }: VideoSettingsPanelProps) {
+    const resolution = normalizeBinghuoResolution(config.vquality);
+    const ratio = normalizeBinghuoRatio(config.size);
+    const referenceMode = normalizeBinghuoReferenceMode(config.videoReferenceMode);
+    const configuredDurations = videoDurationOptionsForModel(config, model || config.model);
+    const fixedDuration = fixedConfiguredVideoDurationForModel(config, model || config.model);
+    const customizable = isVideoDurationCustomizable(config, model || config.model);
+    const seconds = normalizeVideoDurationForModel(config, model || config.model, config.videoSeconds);
+
+    return (
+        <ImageSettingsTheme theme={theme}>
+            <div className={className} style={{ color: theme.node.text }} onMouseDown={(event) => event.stopPropagation()}>
+                {showTitle ? <div className="text-lg font-semibold">视频设置</div> : null}
+                <SettingGroup title="清晰度" color={theme.node.muted}>
+                    <div className="grid grid-cols-3 gap-2.5">
+                        {binghuoResolutionOptions.map((value) => <OptionPill key={value} selected={resolution === value} theme={theme} onClick={() => onConfigChange("vquality", value)}>{value}</OptionPill>)}
+                    </div>
+                </SettingGroup>
+                <SettingGroup title="比例" color={theme.node.muted}>
+                    <div className="grid grid-cols-4 gap-2.5">
+                        {binghuoRatioOptions.map((value) => (
+                            <button key={value} type="button" className="flex h-[64px] cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border bg-transparent text-sm transition hover:opacity-80" style={{ borderColor: ratio === value ? theme.node.text : theme.node.stroke, color: theme.node.text }} onClick={() => onConfigChange("size", value)}>
+                                <SizePreview width={ratioPreview(value).width} height={ratioPreview(value).height} color={theme.node.text} />
+                                <span>{value}</span>
+                            </button>
+                        ))}
+                    </div>
+                </SettingGroup>
+                <SettingGroup title="时长" color={theme.node.muted}>
+                    <div className="grid grid-cols-3 gap-2.5">
+                        {(configuredDurations.length ? configuredDurations : fixedDuration ? [fixedDuration] : secondOptions).map((value) => <OptionPill key={value} selected={seconds === String(value)} theme={theme} onClick={() => onConfigChange("videoSeconds", String(value))}>{value}s</OptionPill>)}
+                        <NumberInput value={seconds} min={configuredDurations[0] || fixedDuration || 1} max={configuredDurations.at(-1) || fixedDuration || 20} disabled={Boolean(fixedDuration) || (configuredDurations.length > 0 && !customizable)} theme={theme} onChange={(value) => onConfigChange("videoSeconds", value)} />
+                    </div>
+                </SettingGroup>
+                <SettingGroup title="参考图模式" color={theme.node.muted}>
+                    <div className="grid grid-cols-2 gap-2.5">
+                        <OptionPill selected={referenceMode === "reference"} theme={theme} onClick={() => onConfigChange("videoReferenceMode", "reference")}>普通参考图</OptionPill>
+                        <OptionPill selected={referenceMode === "first_last"} theme={theme} onClick={() => onConfigChange("videoReferenceMode", "first_last")}>首尾帧</OptionPill>
+                    </div>
+                </SettingGroup>
+                <SettingGroup title="输出" color={theme.node.muted}>
+                    <div className="grid gap-2 rounded-xl border p-2.5" style={{ borderColor: theme.node.stroke }}>
+                        <SwitchRow label="生成声音" checked={boolConfig(config.videoGenerateAudio, true)} theme={theme} onChange={(checked) => onConfigChange("videoGenerateAudio", String(checked))} />
+                    </div>
+                </SettingGroup>
+            </div>
+        </ImageSettingsTheme>
+    );
+}
+
 function SeedanceVideoSettingsPanel({ config, model: selectedModel, onConfigChange, theme, showTitle, className }: VideoSettingsPanelProps) {
     const model = modelOptionName(selectedModel || config.model || config.videoModel);
     const resolution = normalizeSeedanceResolution(config.vquality, model);
@@ -193,6 +247,8 @@ function SeedanceVideoSettingsPanel({ config, model: selectedModel, onConfigChan
 }
 
 export function videoResolutionLabel(value: string) {
+    const normalized = String(value || "");
+    if (/^(4K|\d+P)$/i.test(normalized)) return normalized.toUpperCase();
     return `${normalizeVideoResolutionValue(value)}p`;
 }
 
@@ -314,6 +370,8 @@ function ratioPreview(ratio: string) {
     if (ratio === "4:3") return { width: 4, height: 3 };
     if (ratio === "3:4") return { width: 3, height: 4 };
     if (ratio === "21:9") return { width: 21, height: 9 };
+    if (ratio === "2:3") return { width: 2, height: 3 };
+    if (ratio === "3:2") return { width: 3, height: 2 };
     if (ratio === "adaptive") return { width: 0, height: 0 };
     return { width: 16, height: 9 };
 }

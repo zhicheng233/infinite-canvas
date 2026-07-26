@@ -158,6 +158,19 @@ test("Auto video inherits the highest-success candidate route and duration metad
     expect(config.modelVideoCustomizable["0::0::omni-fast"]).toBe(true);
 });
 
+test("Binghuo channel standard overrides direct, merge, and Auto video routes", () => {
+    const binghuoChannels = [{ ...channels[0], video_api_standard: "binghuo" as const }, channels[1]];
+    const videoModels = { 1: [{ ...models[1][0], id: 41, model_name: "video-model", capabilities: ["video"], video_route: "seedance" }] };
+    const prices = [{ model: "video-model", credits_per_unit: 1, unit_type: "per_video" }];
+    const auto = { model: "video-model", channels: [{ channel_id: 1, channel_model_id: 41, channel_name: "A", success_rate: 100 }] };
+    useConfigStore.getState().applyServerChannelCatalog(binghuoChannels, videoModels);
+    const direct = buildChannelModelOptions(useConfigStore.getState().serverChannels, videoModels, prices, null, "video", 1, [auto]);
+    const automatic = buildChannelModelOptions(useConfigStore.getState().serverChannels, videoModels, prices, null, "video", 0, [auto]);
+    expect(direct[0].videoRoute).toBe("binghuo");
+    expect(automatic[0].videoRoute).toBe("binghuo");
+    expect(videoRouteForModel(defaultConfig, "merge://1::video-group")).toBe("binghuo");
+});
+
 test("Auto visibility follows usable priced options rather than physical channel count", () => {
     expect(hasUsableAutoChannel("image", { serverChannels: channels, serverChannelModels: models, serverPricing: pricing, serverMetrics: null, autoChannelModels: [] })).toBe(false);
     expect(hasUsableAutoChannel("image", { serverChannels: channels, serverChannelModels: models, serverPricing: pricing, serverMetrics: null, autoChannelModels: [autoModel] })).toBe(false);

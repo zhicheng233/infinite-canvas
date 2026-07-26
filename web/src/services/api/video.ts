@@ -6,7 +6,8 @@ import { notifyCreditBalanceChanged } from "@/constant/credits";
 import { dataUrlToFile, getDataUrlByteSize } from "@/lib/image-utils";
 import { getMediaBlob, uploadMediaFile, type UploadedFile } from "@/services/file-storage";
 import { getImageBlob, imageToDataUrl } from "@/services/image-storage";
-import { uploadTempImage } from "@/services/api/temp-media";
+import { uploadTempImage, uploadTempMedia } from "@/services/api/temp-media";
+import { normalizeBinghuoRatio, normalizeBinghuoReferenceMode, normalizeBinghuoResolution } from "@/lib/binghuo-video";
 import { boolConfig, buildSeedancePromptText, isSeedanceVideoConfig, normalizeSeedanceDuration, normalizeSeedanceRatio, normalizeSeedanceResolution, seedanceVideoReferenceError, SEEDANCE_REFERENCE_LIMITS } from "@/lib/seedance-video";
 import { buildApiUrl, buildProxyApiUrl, modelOptionName, normalizeVideoDurationForModel, readLocalAiCredentials, resolveModelRequestConfig, videoRouteForModel, type AiConfig } from "@/stores/use-config-store";
 import type { ReferenceImage } from "@/types/image";
@@ -57,7 +58,7 @@ type ApiEnvelope<T> = T | { code?: number; data?: T | null; msg?: string };
 type RequestOptions = { signal?: AbortSignal };
 
 export type VideoGenerationResult = { blob?: Blob; url?: string; mimeType?: string };
-export type VideoGenerationTask = { id: string; provider: "openai" | "seedance" | "xai" | "newapi" | "yijia"; model: string; channelId?: number; channelModelId?: number };
+export type VideoGenerationTask = { id: string; provider: "openai" | "seedance" | "xai" | "newapi" | "yijia" | "binghuo"; model: string; channelId?: number; channelModelId?: number };
 export type VideoGenerationTaskState = { status: "pending" } | { status: "completed"; result: VideoGenerationResult } | { status: "failed"; error: string };
 type VideoTaskRouting = Pick<VideoGenerationTask, "model" | "channelId" | "channelModelId">;
 
@@ -115,7 +116,7 @@ export async function createVideoGenerationTask(config: AiConfig, prompt: string
     assertVideoConfig(requestConfig, requestConfig.model);
     const configuredRoute = videoRouteForModel(requestConfig, selectedModel);
     if (configuredRoute !== "auto") {
-        if (configuredRoute !== "seedance" && (videoReferences.length || audioReferences.length)) {
+        if (configuredRoute !== "seedance" && configuredRoute !== "binghuo" && (videoReferences.length || audioReferences.length)) {
             throw new Error("当前视频模型暂不支持参考视频或参考音频，请仅保留参考图片");
         }
         if (configuredRoute === "openai") return createOpenAIVideoTask(requestConfig, selectedModel, prompt, references, options);
@@ -125,6 +126,7 @@ export async function createVideoGenerationTask(config: AiConfig, prompt: string
         if (configuredRoute === "xai") return createXAIVideoTask(requestConfig, selectedModel, prompt, references, options);
         if (configuredRoute === "newapi") return createNewApiVideoTask(requestConfig, selectedModel, prompt, references, options);
         if (configuredRoute === "seedance") return createSeedanceTask(requestConfig, selectedModel, prompt, references, videoReferences, audioReferences, options);
+        if (configuredRoute === "binghuo") return createBinghuoVideoTask(requestConfig, selectedModel, prompt, references, videoReferences, audioReferences, options);
     }
     if (isSeedanceVideoConfig(requestConfig)) {
         return createSeedanceTask(requestConfig, selectedModel, prompt, references, videoReferences, audioReferences, options);
@@ -152,7 +154,7 @@ export async function pollVideoGenerationTask(config: AiConfig, task: VideoGener
     assertVideoConfig(requestConfig, requestConfig.model);
     if (task.provider === "seedance") return pollSeedanceTask(requestConfig, task, options);
     if (task.provider === "xai") return pollXAIVideoTask(requestConfig, task, options);
-    if (task.provider === "newapi") return pollNewApiVideoTask(requestConfig, task, options);
+    if (task.provider === "newapi" || task.provider === "binghuo") return pollNewApiVideoTask(requestConfig, task, options);
     if (task.provider === "yijia") return pollYijiaVideoTask(requestConfig, task, options);
     return pollOpenAIVideoTask(requestConfig, task, options);
 }
@@ -324,6 +326,83 @@ async function createNewApiVideoTask(config: AiConfig, model: string, prompt: st
         return { id: taskId, provider: "newapi", model, ...resolvedTaskRouting(response.headers) };
     } catch (error) {
         throw new Error(readAxiosError(error, "视频任务创建失败"));
+    }
+}
+
+async function createBinghuoVideoTask(config: AiConfig, model: string, prompt: string, references: ReferenceImage[], videoReferences: ReferenceVideo[], audioReferences: ReferenceAudio[], options?: RequestOptions): Promise<VideoGenerationTask> {
+    const mode = normalizeBinghuoReferenceMode(config.videoReferenceMode);
+    if (mode === "first_last" && references.length !== 2) throw new Error("首尾帧模式需要恰好两张参考图，并按首帧、尾帧顺序排列");
+    const payload: Record<string, unknown> = {
+        model: modelOptionName(model),
+        prompt,
+        duration: Number(normalizeVideoSecondsForModel(config, model, config.videoSeconds)),
+        ratio: normalizeBinghuoRatio(config.size),
+        resolution: normalizeBinghuoResolution(config.vquality),
+        generate_audio: boolConfig(config.videoGenerateAudio, true),
+        n: 1,
+    };
+    const images = await Promise.all(references.slice(0, 9).map(resolveBinghuoImageUrl));
+    if (mode === "first_last") {
+        payload.start_frame = [images[0]];
+        payload.end_frame = [images[1]];
+    } else if (images.length) {
+        payload.images = images;
+    }
+    const referenceVideos = await Promise.all(videoReferences.slice(0, 3).map(resolveBinghuoVideoUrl));
+    const referenceAudios = await Promise.all(audioReferences.slice(0, 3).map(resolveBinghuoAudioUrl));
+    if (referenceVideos.length) payload.reference_videos = referenceVideos;
+    if (referenceAudios.length) payload.reference_audios = referenceAudios;
+    try {
+        const response = await axios.post<ApiEnvelope<NewApiVideoTask>>(aiApiUrl(config, "/video/generations", { model }), payload, { headers: aiHeaders(config, "application/json"), signal: options?.signal });
+        const created = unwrapNewApiVideoTask(response.data);
+        const taskId = created.task_id || created.id;
+        if (!taskId) throw new Error("炳火 API 没有返回任务 ID");
+        notifyCreditBalanceChanged();
+        return { id: taskId, provider: "binghuo", model, ...resolvedTaskRouting(response.headers) };
+    } catch (error) {
+        throw new Error(readAxiosError(error, "炳火视频任务创建失败"));
+    }
+}
+
+async function resolveBinghuoImageUrl(image: ReferenceImage) {
+    const direct = String(image.url || image.dataUrl || "").trim();
+    if (isPublicMediaUrl(direct)) return direct;
+    const dataUrl = await imageToDataUrl(image);
+    if (!dataUrl) throw new Error("参考图读取失败，无法上传到临时媒体服务");
+    return uploadBinghuoMedia(dataUrlToFile({ ...image, dataUrl }));
+}
+
+async function resolveBinghuoVideoUrl(video: ReferenceVideo) {
+    if (isPublicMediaUrl(video.url)) return video.url;
+    const blob = await localReferenceBlob(video.url, video.storageKey);
+    if (!blob) throw new Error("参考视频读取失败，无法上传到临时媒体服务");
+    return uploadBinghuoMedia(new File([blob], video.name || "reference.mp4", { type: video.type || blob.type || "video/mp4" }));
+}
+
+async function resolveBinghuoAudioUrl(audio: ReferenceAudio) {
+    if (isPublicMediaUrl(audio.url)) return audio.url;
+    const blob = await localReferenceBlob(audio.url, audio.storageKey);
+    if (!blob) throw new Error("参考音频读取失败，无法上传到临时媒体服务");
+    return uploadBinghuoMedia(new File([blob], audio.name || "reference.mp3", { type: audio.type || blob.type || "audio/mpeg" }));
+}
+
+async function localReferenceBlob(url?: string, storageKey?: string) {
+    if (storageKey) {
+        const stored = await getMediaBlob(storageKey);
+        if (stored) return stored;
+    }
+    if (url?.startsWith("blob:") || url?.startsWith("data:")) return (await fetch(url)).blob();
+    return null;
+}
+
+async function uploadBinghuoMedia(file: File) {
+    try {
+        const result = await uploadTempMedia(file);
+        if (!isPublicMediaUrl(result.url)) throw new Error("临时媒体服务未返回公网 HTTP(S) 地址，请配置 PUBLIC_BASE_URL 后重试");
+        return result.url;
+    } catch (error) {
+        if (error instanceof Error && error.message.includes("公网 HTTP(S)")) throw error;
+        throw new Error("临时媒体上传失败，请检查媒体大小、类型和 PUBLIC_BASE_URL 配置");
     }
 }
 
@@ -809,7 +888,15 @@ async function assertVideoBlob(blob: Blob) {
 }
 
 function isPublicMediaUrl(value: string) {
-    return /^https?:\/\//i.test(value || "");
+    try {
+        const url = new URL(value);
+        const host = url.hostname.toLowerCase();
+        if (url.protocol !== "http:" && url.protocol !== "https:") return false;
+        if (host === "localhost" || host === "::1" || host.endsWith(".local") || /^127\./.test(host) || /^10\./.test(host) || /^192\.168\./.test(host) || /^172\.(1[6-9]|2\d|3[01])\./.test(host)) return false;
+        return true;
+    } catch {
+        return false;
+    }
 }
 
 function delay(ms: number, signal?: AbortSignal) {

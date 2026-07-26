@@ -8,6 +8,22 @@ import (
 	"infinite-canvas-server/model"
 )
 
+func TestValidateVideoAPIStandard(t *testing.T) {
+	binghuo := " binghuo "
+	value, err := validateVideoAPIStandard(&binghuo)
+	if err != nil || value != model.VideoAPIStandardBinghuo {
+		t.Fatalf("unexpected standard value=%q err=%v", value, err)
+	}
+	invalid := "other"
+	if _, err := validateVideoAPIStandard(&invalid); err == nil {
+		t.Fatal("expected invalid video API standard to fail")
+	}
+	value, err = validateVideoAPIStandard(nil)
+	if err != nil || value != model.VideoAPIStandardDefault {
+		t.Fatalf("unexpected default value=%q err=%v", value, err)
+	}
+}
+
 func TestChannelToAdminInfo_MapsRemark(t *testing.T) {
 	channel := &model.Channel{
 		Name:   "test-channel",
@@ -16,6 +32,9 @@ func TestChannelToAdminInfo_MapsRemark(t *testing.T) {
 	info := channelToAdminInfo(channel)
 	if info.Remark != "测试备注" {
 		t.Fatalf("expected Remark='测试备注', got %q", info.Remark)
+	}
+	if info.VideoAPIStandard != model.VideoAPIStandardDefault {
+		t.Fatalf("expected default video API standard, got %q", info.VideoAPIStandard)
 	}
 }
 

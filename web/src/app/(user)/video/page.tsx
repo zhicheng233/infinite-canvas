@@ -15,12 +15,13 @@ import { VideoSettingsPanel, normalizeVideoResolutionValue, normalizeVideoSizeVa
 import { canvasThemes } from "@/lib/canvas-theme";
 import { formatBytes, formatDuration } from "@/lib/image-utils";
 import { boolConfig, isSeedanceVideoConfig, normalizeSeedanceRatio, seedanceReferenceLabel, seedanceVideoReferenceError, seedanceVideoReferenceHint, SEEDANCE_REFERENCE_LIMITS } from "@/lib/seedance-video";
+import { normalizeBinghuoRatio, normalizeBinghuoReferenceMode, normalizeBinghuoResolution } from "@/lib/binghuo-video";
 import { deleteStoredMedia, resolveMediaUrl, uploadMediaFile } from "@/services/file-storage";
 import { deleteGenerationRecords, listGenerationRecords, saveGenerationRecord } from "@/services/api/generation-records";
 import { resolveImageUrl, uploadImage } from "@/services/image-storage";
 import { createVideoGenerationTask, pollVideoGenerationTask, storeGeneratedVideo, type VideoGenerationTask } from "@/services/api/video";
 import { useAssetStore } from "@/stores/use-asset-store";
-import { modelOptionLabel, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
+import { modelOptionLabel, useConfigStore, useEffectiveConfig, videoRouteForModel, type AiConfig } from "@/stores/use-config-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
@@ -65,7 +66,7 @@ type GenerationLog = {
     error?: string;
 };
 
-type GenerationLogConfig = Pick<AiConfig, "model" | "videoModel" | "size" | "vquality" | "videoSeconds" | "videoGenerateAudio" | "videoWatermark">;
+type GenerationLogConfig = Pick<AiConfig, "model" | "videoModel" | "size" | "vquality" | "videoSeconds" | "videoGenerateAudio" | "videoWatermark" | "videoReferenceMode">;
 
 type UpdateAiConfig = <K extends keyof AiConfig>(key: K, value: AiConfig[K]) => void;
 
@@ -97,6 +98,7 @@ export default function VideoPage() {
     const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
 
     const model = effectiveConfig.videoModel || effectiveConfig.model;
+    const imageReferenceMode = videoRouteForModel(effectiveConfig, model) === "binghuo" ? normalizeBinghuoReferenceMode(effectiveConfig.videoReferenceMode) : "reference";
     const canGenerate = Boolean(prompt.trim());
     const creditEstimate = useEstimatedCreditCost(model, 1, { type: "video", seconds: effectiveConfig.videoSeconds, resolution: effectiveConfig.vquality, size: effectiveConfig.size });
     const balance = useUserCreditBalance();
@@ -133,16 +135,13 @@ export default function VideoPage() {
                 return { id: nanoid(), name: file.name, type: video.mimeType, url: video.url, storageKey: video.storageKey, bytes: video.bytes, width: video.width, height: video.height, durationMs: video.durationMs };
             }),
         );
-        const nextAudioReferences = filterAudioReferencesByDuration(
-            audioReferences,
-            await Promise.all(
+        const uploadedAudioReferences = await Promise.all(
                 audioFiles.map(async (file) => {
                     const audio = await uploadMediaFile(file, "audio-reference");
                     return { id: nanoid(), name: file.name, type: audio.mimeType, url: audio.url, storageKey: audio.storageKey, durationMs: audio.durationMs };
                 }),
-            ),
-            message.warning,
         );
+        const nextAudioReferences = videoRouteForModel(effectiveConfig, model) === "seedance" ? filterAudioReferencesByDuration(audioReferences, uploadedAudioReferences, message.warning) : uploadedAudioReferences;
         setReferences((value) => [...value, ...nextReferences].slice(0, SEEDANCE_REFERENCE_LIMITS.images));
         setVideoReferences((value) => [...value, ...nextVideoReferences].slice(0, SEEDANCE_REFERENCE_LIMITS.videos));
         setAudioReferences((value) => [...value, ...nextAudioReferences].slice(0, SEEDANCE_REFERENCE_LIMITS.audios));
@@ -220,7 +219,8 @@ export default function VideoPage() {
             openConfigDialog(true);
             return null;
         }
-        const videoReferenceError = seedanceVideoReferenceError(videoReferences);
+        const route = videoRouteForModel(effectiveConfig, model);
+        const videoReferenceError = route === "seedance" ? seedanceVideoReferenceError(videoReferences) : "";
         if (videoReferenceError) {
             message.error(`${videoReferenceError}。${seedanceVideoReferenceHint}`);
             return null;
@@ -369,6 +369,7 @@ export default function VideoPage() {
         if (log.config.videoSeconds) updateConfig("videoSeconds", log.config.videoSeconds);
         if (log.config.videoGenerateAudio) updateConfig("videoGenerateAudio", log.config.videoGenerateAudio);
         if (log.config.videoWatermark) updateConfig("videoWatermark", log.config.videoWatermark);
+        if (log.config.videoReferenceMode) updateConfig("videoReferenceMode", log.config.videoReferenceMode);
         setResults(log.status === "生成中" ? [{ id: log.id, status: "pending" }] : log.video ? [{ id: log.video.id, status: "success", video: log.video }] : [{ id: log.id, status: "failed", error: log.error || "生成失败" }]);
     };
 
@@ -433,7 +434,7 @@ export default function VideoPage() {
                                     {references.map((item, index) => (
                                         <div key={item.id} className="group relative size-20 shrink-0 overflow-hidden rounded-md border border-stone-200 dark:border-stone-800">
                                             <img src={item.dataUrl} alt={item.name} className="size-full object-cover" />
-                                            <span className="absolute left-1 top-1 rounded bg-black/60 px-1.5 py-0.5 text-[10px] font-medium text-white">{seedanceReferenceLabel("image", index)}</span>
+                                            <span className="absolute left-1 top-1 rounded bg-black/60 px-1.5 py-0.5 text-[10px] font-medium text-white">{imageReferenceMode === "first_last" && index < 2 ? (index === 0 ? "首帧" : "尾帧") : seedanceReferenceLabel("image", index)}</span>
                                             <ReferenceOrderButtons index={index} total={references.length} onMove={(offset) => setReferences((value) => moveListItem(value, index, offset))} />
                                             <button
                                                 type="button"
@@ -868,6 +869,7 @@ function normalizeLogConfig(log: Partial<GenerationLog>): GenerationLogConfig {
         videoSeconds: log.config?.videoSeconds || log.seconds || "",
         videoGenerateAudio: log.config?.videoGenerateAudio || "true",
         videoWatermark: log.config?.videoWatermark || "false",
+        videoReferenceMode: normalizeBinghuoReferenceMode(log.config?.videoReferenceMode),
     };
 }
 
@@ -904,6 +906,7 @@ function buildLog({
         videoSeconds: config.videoSeconds,
         videoGenerateAudio: config.videoGenerateAudio,
         videoWatermark: config.videoWatermark,
+        videoReferenceMode: normalizeBinghuoReferenceMode(config.videoReferenceMode),
     };
     return {
         id: nanoid(),
@@ -928,16 +931,19 @@ function buildLog({
 }
 
 function buildVideoConfig(config: AiConfig, model: string): AiConfig {
-    const seedance = isSeedanceVideoConfig({ ...config, model });
+    const route = videoRouteForModel(config, model);
+    const binghuo = route === "binghuo";
+    const seedance = !binghuo && (route === "seedance" || isSeedanceVideoConfig({ ...config, model }));
     return {
         ...config,
         model,
         videoModel: model,
-        size: seedance ? normalizeSeedanceRatio(config.size) : normalizeVideoSize(config.size),
+        size: binghuo ? normalizeBinghuoRatio(config.size) : seedance ? normalizeSeedanceRatio(config.size) : normalizeVideoSize(config.size),
         videoSeconds: normalizeVideoSeconds(config.videoSeconds),
-        vquality: normalizeResolution(config.vquality),
+        vquality: binghuo ? normalizeBinghuoResolution(config.vquality) : normalizeResolution(config.vquality),
         videoGenerateAudio: String(boolConfig(config.videoGenerateAudio, true)),
         videoWatermark: String(boolConfig(config.videoWatermark, false)),
+        videoReferenceMode: normalizeBinghuoReferenceMode(config.videoReferenceMode),
     };
 }
 

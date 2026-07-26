@@ -20,10 +20,10 @@ func NewTempMediaHandler(service *service.TempMediaService) *TempMediaHandler {
 func (h *TempMediaHandler) UploadImage(c *gin.Context) {
 	file, err := c.FormFile("file")
 	if err != nil {
-		model.Fail(c, 400, "请上传图片文件")
+		model.Fail(c, 400, "请上传媒体文件")
 		return
 	}
-	result, err := h.service.SaveImage(file)
+	result, err := h.service.SaveMedia(file)
 	if err != nil {
 		model.Fail(c, 400, err.Error())
 		return

@@ -20,6 +20,7 @@ export type SaveChannelInput = {
     base_url: string;
     api_key: string;
     enabled?: boolean;
+    video_api_standard?: "default" | "binghuo";
     new_api_channel_id?: number | null;
     metrics_base_url?: string | null;
     remark?: string;

@@ -2,12 +2,18 @@ package model
 
 import "time"
 
+const (
+	VideoAPIStandardDefault = "default"
+	VideoAPIStandardBinghuo = "binghuo"
+)
+
 type Channel struct {
 	BaseModel
 	Name               string     `gorm:"size:100;index" json:"name"`
 	BaseUrl            string     `gorm:"size:500" json:"base_url"`
 	ApiKey             string     `gorm:"size:500" json:"-"`
 	Enabled            bool       `gorm:"index;default:true" json:"enabled"`
+	VideoAPIStandard   string     `gorm:"size:20;default:default" json:"video_api_standard"`
 	NewApiChannelID    *int       `json:"new_api_channel_id,omitempty"`
 	NewApiChannelIDVal string     `gorm:"size:100" json:"new_api_channel_id_val"`
 	MetricsBaseUrl     *string    `gorm:"size:500" json:"metrics_base_url,omitempty"`

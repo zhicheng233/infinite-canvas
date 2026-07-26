@@ -8,6 +8,7 @@ export type ChannelInfo = {
     id: number;
     name: string;
     enabled: boolean;
+    video_api_standard?: "default" | "binghuo";
     new_api_channel_id?: number | null;
     metrics_base_url?: string | null;
     sync_status: string;

@@ -12,6 +12,7 @@ export type ModelChannel = {
     id: number;
     name: string;
     enabled: boolean;
+    videoApiStandard?: "default" | "binghuo";
 };
 
 export type ServerChannelModel = ChannelModelInfo;
@@ -57,6 +58,7 @@ export type AiConfig = {
     vquality: string;
     videoGenerateAudio: string;
     videoWatermark: string;
+    videoReferenceMode: "reference" | "first_last";
     systemPrompt: string;
     models: string[];
     imageModels: string[];
@@ -97,10 +99,10 @@ const LOCAL_AI_CREDENTIALS_KEY = "infinite-canvas:local_ai_credentials";
 export type ModelCapability = "image" | "video" | "text" | "audio";
 export type ModelRouteCapability = "image" | "image_generate" | "image_edit" | "video";
 export type ImageRouteMode = "auto" | "generations" | "edits" | "chat" | "banana";
-export type VideoRouteMode = "auto" | "openai" | "veo_json" | "waninter" | "yijia" | "xai" | "newapi" | "seedance";
+export type VideoRouteMode = "auto" | "openai" | "veo_json" | "waninter" | "yijia" | "xai" | "newapi" | "seedance" | "binghuo";
 const CHANNEL_MODEL_SEPARATOR = "::";
 const IMAGE_ROUTE_VALUES = new Set<string>(["generations", "edits", "chat", "banana"]);
-const VIDEO_ROUTE_VALUES = new Set<string>(["openai", "veo_json", "waninter", "yijia", "xai", "newapi", "seedance"]);
+const VIDEO_ROUTE_VALUES = new Set<string>(["openai", "veo_json", "waninter", "yijia", "xai", "newapi", "seedance", "binghuo"]);
 
 export const defaultConfig: AiConfig = {
     imageChannelId: null,
@@ -120,6 +122,7 @@ export const defaultConfig: AiConfig = {
     vquality: "720",
     videoGenerateAudio: "true",
     videoWatermark: "false",
+    videoReferenceMode: "reference",
     systemPrompt: "",
     models: ["gpt-image-2", "grok-imagine-video", "gpt-5.5", "gpt-4o-mini-tts"],
     imageModels: ["gpt-image-2"],
@@ -402,7 +405,7 @@ export const useConfigStore = create<ConfigStore>()(
             applyServerCatalogSnapshot: (requestId, snapshot) =>
                 set((state) => {
                     if (requestId !== state.serverCatalogRequestId) return state;
-                    const serverChannels = normalizeServerChannels(snapshot.channels);
+                    const serverChannels = normalizeServerChannels(snapshot.channels.map((channel) => ({ ...channel, videoApiStandard: channel.video_api_standard })));
                     const serverChannelModels = normalizeServerChannelModels(snapshot.channelModels, serverChannels);
                     latestServerChannels = serverChannels;
                     return {
@@ -462,7 +465,7 @@ export const useConfigStore = create<ConfigStore>()(
                 }),
             applyServerChannelCatalog: (channels, channelModels) =>
                 set((state) => {
-                    const serverChannels = normalizeServerChannels(channels);
+                    const serverChannels = normalizeServerChannels(channels.map((channel) => ({ ...channel, videoApiStandard: channel.video_api_standard })));
                     const serverChannelModels = normalizeServerChannelModels(channelModels, serverChannels);
                     latestServerChannels = serverChannels;
                     return {
@@ -539,6 +542,7 @@ export const useConfigStore = create<ConfigStore>()(
                         vquality: config.vquality || "720",
                         videoGenerateAudio: config.videoGenerateAudio || "true",
                         videoWatermark: config.videoWatermark || "false",
+                        videoReferenceMode: config.videoReferenceMode === "first_last" ? "first_last" : "reference",
                         canvasImageCount: config.canvasImageCount || "1",
                         imageModels: Array.isArray(persistedConfig.imageModels) ? normalizeModelList(config.imageModels) : filterModelsByCapability(models, "image"),
                         videoModels: Array.isArray(persistedConfig.videoModels) ? normalizeModelList(config.videoModels) : filterModelsByCapability(models, "video"),
@@ -570,6 +574,7 @@ export function createModelChannel(channel?: Partial<ModelChannel>): ModelChanne
         id: toNullableChannelId(channel?.id) || 0,
         name: channel?.name?.trim() || "新渠道",
         enabled: channel?.enabled !== false,
+        videoApiStandard: channel?.videoApiStandard === "binghuo" ? "binghuo" : "default",
     };
 }
 
@@ -676,6 +681,11 @@ export function imageEditRouteForModel(config: Pick<AiConfig, "modelRoutes">, va
 }
 
 export function videoRouteForModel(config: Pick<AiConfig, "modelRoutes">, value: string) {
+    const merge = parseMergeModelValue(value);
+    if (merge && latestServerChannels.find((channel) => channel.id === merge.channelId)?.videoApiStandard === "binghuo") return "binghuo";
+    const decoded = decodeChannelModel(value);
+    const channelId = toNullableChannelId(decoded?.channelId);
+    if (channelId && latestServerChannels.find((channel) => channel.id === channelId)?.videoApiStandard === "binghuo") return "binghuo";
     return modelRouteForCapability(config, "video", value) as VideoRouteMode;
 }
 
@@ -754,7 +764,7 @@ export function buildChannelModelOptions(
                         metricsStatus: bestChannel ? "ok" : "unavailable",
                         imageGenerateRoute: "auto",
                         imageEditRoute: "auto",
-                        videoRoute: capability === "video" ? bestModel?.video_route || "auto" : "auto",
+                        videoRoute: capability === "video" ? effectiveChannelVideoRoute(channels, bestChannel.channel_id, bestModel?.video_route) : "auto",
                         videoDurations: capability === "video" ? bestModel?.video_durations || [] : [],
                         videoCustomizable: capability === "video" ? Boolean(bestModel?.video_customizable) : false,
                         sortOrder: 0,
@@ -796,7 +806,7 @@ export function buildChannelModelOptions(
             metricsStatus,
             imageGenerateRoute: model.image_generate_route || "auto",
             imageEditRoute: model.image_edit_route || "auto",
-            videoRoute: model.video_route || "auto",
+            videoRoute: effectiveChannelVideoRoute(channels, model.channel_id, model.video_route),
             videoDurations: model.video_durations || [],
             videoCustomizable: model.video_customizable,
             sortOrder: model.sort_order,
@@ -832,7 +842,7 @@ export function buildChannelModelOptions(
                 metricsStatus: bestMetricsStatus,
                 imageGenerateRoute: "auto",
                 imageEditRoute: "auto",
-                videoRoute: "auto",
+                videoRoute: channels.find((channel) => channel.id === channelId)?.videoApiStandard === "binghuo" ? "binghuo" : "auto",
                 videoDurations: [],
                 videoCustomizable: false,
                 sortOrder: -1,
@@ -939,6 +949,10 @@ function normalizeServerChannels(channels?: ModelChannel[]) {
     );
 }
 
+function effectiveChannelVideoRoute(channels: ModelChannel[], channelId: number, modelRoute?: string) {
+    return channels.find((channel) => channel.id === channelId)?.videoApiStandard === "binghuo" ? "binghuo" : modelRoute || "auto";
+}
+
 function normalizeServerChannelModels(items: Record<number, ChannelModelInfo[]>, channels: ModelChannel[]) {
     const enabledChannels = new Set(channels.map((channel) => channel.id));
     return Object.fromEntries(
@@ -990,7 +1004,8 @@ function applyChannelScopedSelections(config: AiConfig, channels: ModelChannel[]
         const option = encodeChannelModelIdentity(model.channel_id, model.id, model.model_name);
         if (model.image_generate_route && model.image_generate_route !== "auto") next.modelRoutes[modelRouteKey("image_generate", option)] = model.image_generate_route;
         if (model.image_edit_route && model.image_edit_route !== "auto") next.modelRoutes[modelRouteKey("image_edit", option)] = model.image_edit_route;
-        if (model.video_route && model.video_route !== "auto") next.modelRoutes[modelRouteKey("video", option)] = model.video_route;
+        const videoRoute = effectiveChannelVideoRoute(channels, model.channel_id, model.video_route);
+        if (videoRoute !== "auto") next.modelRoutes[modelRouteKey("video", option)] = videoRoute;
         if (model.video_durations.length) next.modelVideoDurations[option] = model.video_durations;
         if (model.video_customizable) next.modelVideoCustomizable[option] = true;
     }

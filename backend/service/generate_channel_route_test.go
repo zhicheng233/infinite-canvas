@@ -570,6 +570,35 @@ func TestAutoVideoRouteFiltersCandidatesAndReturnsResolvedIdentity(t *testing.T)
 	}
 }
 
+func TestAutoBinghuoVideoRouteOnlyUsesBinghuoChannels(t *testing.T) {
+	regular := NewFakeUpstreamServer(t, func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`{"status":"processing"}`)) })
+	defer regular.Close()
+	binghuo := NewFakeUpstreamServer(t, func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`{"status":"processing"}`)) })
+	defer binghuo.Close()
+
+	svc := newRouteTestGenerateService()
+	svc.autoChannelService = fakeAutoChannelModelAggregator{items: []AggregatedModel{{Model: "video-model", Channels: []AggregatedChannelRef{
+		{ChannelID: 1, ChannelModelID: 71, SuccessRate: 100},
+		{ChannelID: 2, ChannelModelID: 72, SuccessRate: 90},
+	}}}}
+	svc.channelRepo = fakeChannelReader{items: map[uint]*model.Channel{
+		1: {BaseModel: model.BaseModel{ID: 1}, BaseUrl: regular.URL(), Enabled: true, VideoAPIStandard: model.VideoAPIStandardDefault},
+		2: {BaseModel: model.BaseModel{ID: 2}, BaseUrl: binghuo.URL(), Enabled: true, VideoAPIStandard: model.VideoAPIStandardBinghuo},
+	}}
+	svc.modelRepo = fakeChannelModelReader{items: map[uint]*model.ChannelModel{
+		71: {BaseModel: model.BaseModel{ID: 71}, ChannelID: 1, ModelName: "video-model", Capabilities: `["video"]`, VideoRoute: "newapi", Enabled: true},
+		72: {BaseModel: model.BaseModel{ID: 72}, ChannelID: 2, ModelName: "video-model", Capabilities: `["video"]`, VideoRoute: "openai", Enabled: true},
+	}}
+
+	result, err := svc.proxyWithAutoFailover(1, 1, http.MethodGet, "video", "/video/generations/task", "", nil, "video-model", "binghuo")
+	if err != nil || result.ResolvedChannelID != 2 {
+		t.Fatalf("unexpected result=%#v err=%v", result, err)
+	}
+	if len(regular.Requests()) != 0 || len(binghuo.Requests()) != 1 {
+		t.Fatalf("request crossed standards: regular=%d binghuo=%d", len(regular.Requests()), len(binghuo.Requests()))
+	}
+}
+
 func TestStripChannelIdentityBeforeUpstream(t *testing.T) {
 	body := stripJSONChannelIdentity("application/json", []byte(`{"model":"same-model","channel_id":1,"channel_model_id":11}`))
 	if string(body) != `{"model":"same-model"}` {

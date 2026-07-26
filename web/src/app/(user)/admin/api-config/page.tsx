@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Alert, App, Button, Card, Checkbox, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Switch, Tabs, Popover, Popconfirm, Tooltip } from "antd";
+import { Alert, App, Button, Card, Checkbox, Form, Input, InputNumber, Modal, Segmented, Select, Space, Table, Tag, Switch, Tabs, Popover, Popconfirm, Tooltip } from "antd";
 import { Settings, Plus, RefreshCw, Lock, X, Play, Save } from "lucide-react";
 import type { ColumnsType } from "antd/es/table";
 
@@ -343,11 +343,12 @@ export default function AdminApiConfigPage() {
                 new_api_channel_id: channel.new_api_channel_id || undefined,
                 metrics_base_url: channel.metrics_base_url || undefined,
                 enabled: channel.enabled,
+                video_api_standard: channel.video_api_standard || "default",
                 remark: channel.remark ?? "",
             });
         } else {
             channelForm.resetFields();
-            channelForm.setFieldsValue({ enabled: true });
+            channelForm.setFieldsValue({ enabled: true, video_api_standard: "default" });
         }
         setIsChannelModalOpen(true);
     };
@@ -362,6 +363,7 @@ export default function AdminApiConfigPage() {
                     new_api_channel_id: values.new_api_channel_id != null ? Number(values.new_api_channel_id) : null,
                     metrics_base_url: values.metrics_base_url || undefined,
                     enabled: values.enabled,
+                    video_api_standard: values.video_api_standard,
                     remark: values.remark || "",
                 };
                 if (values.api_key) {
@@ -375,6 +377,7 @@ export default function AdminApiConfigPage() {
                     base_url: values.base_url,
                     api_key: values.api_key || "",
                     enabled: values.enabled,
+                    video_api_standard: values.video_api_standard,
                     new_api_channel_id: values.new_api_channel_id != null ? Number(values.new_api_channel_id) : null,
                     metrics_base_url: values.metrics_base_url || undefined,
                     remark: values.remark || "",
@@ -639,6 +642,8 @@ export default function AdminApiConfigPage() {
         try {
             const result = await testApiModel({
                 model: testingModel.model_name,
+                channel_id: selectedChannel.id,
+                channel_model_id: testingModel.id,
                 generation: testGeneration,
             });
             setTestResult(result);
@@ -737,6 +742,13 @@ export default function AdminApiConfigPage() {
         { title: "ID", dataIndex: "id", key: "id", width: 70 },
         { title: "渠道名称", dataIndex: "name", key: "name", width: 150 },
         { title: "接口地址", dataIndex: "base_url", key: "base_url", width: 250, ellipsis: true },
+        {
+            title: "视频标准",
+            dataIndex: "video_api_standard",
+            key: "video_api_standard",
+            width: 130,
+            render: (value: ChannelAdminInfo["video_api_standard"]) => value === "binghuo" ? <Tag color="volcano">炳火 API</Tag> : <Tag>默认</Tag>,
+        },
         {
             title: "API Key",
             dataIndex: "has_key",
@@ -962,7 +974,7 @@ export default function AdminApiConfigPage() {
                     configItems.push(`修图: ${record.image_edit_route || "auto"}`);
                 }
                 if (record.capabilities.includes("video")) {
-                    configItems.push(`视频: ${record.video_route || "auto"}`);
+                    configItems.push(selectedChannel?.video_api_standard === "binghuo" ? "视频: binghuo（渠道覆盖）" : `视频: ${record.video_route || "auto"}`);
                     if (record.video_durations?.length) {
                         configItems.push(`时长: [${record.video_durations.join(",")}]`);
                     }
@@ -1220,6 +1232,9 @@ export default function AdminApiConfigPage() {
                     <Form.Item name="new_api_channel_id" label="New-API 渠道映射 ID (可选)" extra="对应 New-API 系统中该渠道 of ID，用于拉取指标数据">
                         <InputNumber min={0} className="w-full" placeholder="例如: 5" disabled={!isSuperAdmin} />
                     </Form.Item>
+                    <Form.Item name="video_api_standard" label="视频 API 标准">
+                        <Segmented block options={[{ label: "默认标准", value: "default" }, { label: "炳火 API 标准", value: "binghuo" }]} disabled={!isSuperAdmin} />
+                    </Form.Item>
                     <Form.Item name="metrics_base_url" label="指标服务地址 (可选)" extra="为空则使用渠道 BaseUrl + /api。配置旧版 New-API 时可留空。">
                         <Input placeholder="https://old-api.example.com" disabled={!isSuperAdmin} />
                     </Form.Item>
@@ -1341,8 +1356,9 @@ export default function AdminApiConfigPage() {
                     {editingModel?.capabilities.includes("video") && (
                         <>
                             <Form.Item name="video_route" label="视频生成接口路由">
-                                <Select options={videoRouteOptions} disabled={!isSuperAdmin} />
+                                <Select options={videoRouteOptions} disabled={!isSuperAdmin || selectedChannel?.video_api_standard === "binghuo"} />
                             </Form.Item>
+                            {selectedChannel?.video_api_standard === "binghuo" ? <Alert className="mb-4" type="info" showIcon message="该渠道使用炳火 API 标准，模型视频路由暂不生效。" /> : null}
                             <Form.Item name="video_durations" label="可选视频时长 (逗号分隔)" help="多个时长用半角逗号分隔，例如: 5,10">
                                 <Input placeholder="如: 5,10" disabled={!isSuperAdmin} />
                             </Form.Item>
