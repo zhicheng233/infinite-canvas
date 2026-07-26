@@ -216,6 +216,60 @@ describe("video aspect ratio routing", () => {
         expect(fetchMock.mock.calls[0][1].headers["x-webdav-target"]).toBe("https://upstream.test/v1/videos/task_123/content");
     });
 
+    it("uses Binghuo result_url first and skips the backend proxy for signed video links", async () => {
+        const mp4Header = new Uint8Array([0, 0, 0, 24, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6f, 0x6d]);
+        const get = jest.spyOn(axios, "get").mockResolvedValueOnce({
+            data: { status: "succeeded", result_url: "https://cdn.example.com/result.mp4?sig=1", url: "https://cdn.example.com/fallback.mp4?sig=2" },
+        });
+        const fetchMock = jest.fn().mockResolvedValue(new Response(new Blob([mp4Header], { type: "application/octet-stream" }), { status: 200 }));
+        Object.defineProperty(globalThis, "fetch", { configurable: true, value: fetchMock });
+
+        const state = await pollVideoGenerationTask(videoConfig("binghuo"), {
+            id: "task_binghuo",
+            provider: "binghuo",
+            model: "0::0::video-model",
+            channelId: 2,
+            channelModelId: 62,
+        });
+
+        expect(state.status).toBe("completed");
+        expect(get).toHaveBeenCalledTimes(1);
+        expect(fetchMock.mock.calls[0][1].headers["x-webdav-target"]).toBe("https://cdn.example.com/result.mp4?sig=1");
+        if (state.status === "completed") expect(state.result.blob?.type).toBe("video/mp4");
+    });
+
+    it("falls back to direct playback when the Next.js proxy cannot download a signed video link", async () => {
+        const resultUrl = "https://cdn.example.com/result.mp4?sig=1";
+        jest.spyOn(axios, "get").mockResolvedValueOnce({ data: { status: "succeeded", result_url: resultUrl } });
+        Object.defineProperty(globalThis, "fetch", { configurable: true, value: jest.fn().mockResolvedValue(new Response("bad gateway", { status: 502 })) });
+
+        const state = await pollVideoGenerationTask(videoConfig("binghuo"), {
+            id: "task_binghuo",
+            provider: "binghuo",
+            model: "0::0::video-model",
+            channelId: 2,
+            channelModelId: 62,
+        });
+
+        expect(state.status).toBe("completed");
+        if (state.status === "completed") expect(state.result).toEqual({ url: resultUrl, mimeType: "video/mp4" });
+    });
+
+    it("keeps Binghuo failed task error strings", async () => {
+        const upstreamError = "视频生成失败：该模型不支持真人脸 / 真实人物照片作为参考图，请更换为非真人参考图。";
+        jest.spyOn(axios, "get").mockResolvedValueOnce({ data: { status: "failed", error: upstreamError } });
+
+        const state = await pollVideoGenerationTask(videoConfig("binghuo"), {
+            id: "task_binghuo",
+            provider: "binghuo",
+            model: "0::0::video-model",
+            channelId: 2,
+            channelModelId: 62,
+        });
+
+        expect(state).toEqual({ status: "failed", error: upstreamError });
+    });
+
     it("fails instead of returning an unverified remote video URL", async () => {
         jest.spyOn(axios, "get")
             .mockResolvedValueOnce({ data: { status: "completed", url: "https://upstream.test/v1/videos/task_123/content" } })

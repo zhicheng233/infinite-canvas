@@ -45,7 +45,7 @@ type NewApiVideoTask = {
         video_url?: string;
     } | null;
     video?: { url?: string; duration?: number } | null;
-    error?: { code?: string | number; message?: string } | null;
+    error?: string | { code?: string | number; message?: string } | null;
     data?: NewApiVideoTask | null;
 };
 type SeedanceTask = {
@@ -56,6 +56,8 @@ type SeedanceTask = {
 };
 type ApiEnvelope<T> = T | { code?: number; data?: T | null; msg?: string };
 type RequestOptions = { signal?: AbortSignal };
+
+class ExplicitVideoDownloadError extends Error {}
 
 export type VideoGenerationResult = { blob?: Blob; url?: string; mimeType?: string };
 export type VideoGenerationTask = { id: string; provider: "openai" | "seedance" | "xai" | "newapi" | "yijia" | "binghuo"; model: string; channelId?: number; channelModelId?: number };
@@ -437,7 +439,7 @@ async function pollXAIVideoTask(config: AiConfig, task: VideoGenerationTask, opt
             return { status: "completed", result: await videoResultFromUrl(config, url, options, task) };
         }
         if (status === "failed" || status === "cancelled" || status === "error") {
-            return { status: "failed", error: state.error?.message || "视频生成失败" };
+            return { status: "failed", error: videoTaskErrorMessage(state.error) || state.message || "视频生成失败" };
         }
         return { status: "pending" };
     } catch (error) {
@@ -577,7 +579,7 @@ async function resolveSeedanceAudioUrl(audio: ReferenceAudio) {
 
 async function videoResultFromUrl(config: AiConfig, url: string, options?: RequestOptions, task?: VideoGenerationTask): Promise<VideoGenerationResult> {
     try {
-        return { blob: await fetchVideoBlob(config, url, options, task) };
+        return await fetchVideoResult(config, url, options, task);
     } catch (error) {
         if (axios.isCancel(error) || options?.signal?.aborted) throw error;
         throw error;
@@ -598,24 +600,33 @@ async function resolveVideoTaskResult(config: AiConfig, state: Partial<NewApiVid
     return null;
 }
 
-async function fetchVideoBlob(config: AiConfig, url: string, options?: RequestOptions, task?: VideoGenerationTask) {
+async function fetchVideoResult(config: AiConfig, url: string, options?: RequestOptions, task?: VideoGenerationTask): Promise<VideoGenerationResult> {
     const errors: string[] = [];
-    if (isLoggedIn()) {
-        const proxyPath = toProxyableVideoPath(url);
-        if (proxyPath) {
-            try {
-                return await readAxiosVideoBlob(axios.get<Blob>(aiApiUrl(config, proxyPath, task), { headers: aiHeaders(config), signal: options?.signal, responseType: "blob" }));
-            } catch (error) {
-                if (axios.isCancel(error) || options?.signal?.aborted) throw error;
-                errors.push(errorMessage(error));
-            }
+    const target = toProxyableVideoPath(url);
+    if (!target) throw new Error("视频成片地址不是 HTTP(S) URL");
+    if (isLoggedIn() && shouldUseBackendVideoProxy(target)) {
+        try {
+            return { blob: await readAxiosVideoBlob(axios.get<Blob>(aiApiUrl(config, target, task), { headers: aiHeaders(config), signal: options?.signal, responseType: "blob" })) };
+        } catch (error) {
+            if (axios.isCancel(error) || options?.signal?.aborted) throw error;
+            errors.push(errorMessage(error));
         }
     }
     try {
-        return await fetchVideoBlobViaNextProxy(url, options);
+        return { blob: await fetchVideoBlobViaNextProxy(target, options) };
     } catch (error) {
         if (options?.signal?.aborted) throw error;
-        errors.push(errorMessage(error));
+        if (!shouldUseBackendVideoProxy(target)) {
+            try {
+                assertDownloadErrorCanFallback(error);
+                return { url: target, mimeType: "video/mp4" };
+            } catch (fallbackError) {
+                if (options?.signal?.aborted) throw fallbackError;
+                errors.push(errorMessage(fallbackError));
+            }
+        } else {
+            errors.push(errorMessage(error));
+        }
     }
     throw new Error(`视频成片下载失败，请检查上游成片地址或代理配置${errors.length ? `：${errors.filter(Boolean).join("；")}` : ""}`);
 }
@@ -649,6 +660,18 @@ async function fetchVideoBlobViaNextProxy(url: string, options?: RequestOptions)
     const blob = await response.blob();
     if (!response.ok) throw new Error(`Next.js 代理下载失败（${response.status}）`);
     return normalizeVideoBlob(blob);
+}
+
+function shouldUseBackendVideoProxy(url: string) {
+    try {
+        return /\/v1\/videos\/[^/]+\/content$/i.test(new URL(url).pathname);
+    } catch {
+        return false;
+    }
+}
+
+function assertDownloadErrorCanFallback(error: unknown) {
+    if (error instanceof ExplicitVideoDownloadError) throw error;
 }
 
 function assertVideoConfig(config: AiConfig, model: string) {
@@ -802,13 +825,13 @@ function unwrapNewApiVideoTask(payload: ApiEnvelope<NewApiVideoTask>) {
 
 function readVideoTaskUrls(state: Partial<NewApiVideoTask>) {
     const urls = [
+        state.result_url,
         state.url,
         state.video_url,
-        state.result_url,
-        state.video?.url,
+        state.metadata?.result_url,
         state.metadata?.url,
         state.metadata?.video_url,
-        state.metadata?.result_url,
+        state.video?.url,
         ...(state.output || []),
         ...(state.metadata?.result_urls || []),
         state.original_watermarked_video_url,
@@ -827,7 +850,7 @@ function normalizeNewApiVideoTask(payload: NewApiVideoTask) {
         id: payload.id || payload.task_id || nested?.id || nested?.task_id,
         task_id: payload.task_id || nested?.task_id,
         status: nestedStatus || status || payload.status || nested?.status,
-        url: payload.url || payload.video_url || payload.result_url || nested?.url || nested?.video_url || nested?.result_url,
+        url: payload.result_url || payload.url || payload.video_url || nested?.result_url || nested?.url || nested?.video_url,
         video_url: payload.video_url || nested?.video_url,
         result_url: payload.result_url || nested?.result_url,
         output: payload.output?.length ? payload.output : nested?.output,
@@ -857,15 +880,21 @@ function unwrapEnvelope<T>(payload: ApiEnvelope<T>, emptyMessage: string): T {
 
 function readEnvelopeMessage(payload: unknown) {
     if (!payload || typeof payload !== "object") return "";
-    const value = payload as { msg?: string; message?: string; error?: { message?: string } };
-    return value.msg || value.message || value.error?.message || "";
+    const value = payload as { msg?: string; message?: string; error?: string | { message?: string } };
+    return value.msg || value.message || videoTaskErrorMessage(value.error);
+}
+
+function videoTaskErrorMessage(error: unknown) {
+    if (typeof error === "string") return error;
+    if (error && typeof error === "object" && "message" in error) return String((error as { message?: unknown }).message || "");
+    return "";
 }
 
 function readAxiosError(error: unknown, fallback: string) {
     if (axios.isCancel(error)) return "请求已取消";
-    if (axios.isAxiosError<{ error?: { message?: string }; msg?: string; code?: number }>(error)) {
+    if (axios.isAxiosError<{ error?: string | { message?: string }; msg?: string; code?: number }>(error)) {
         const responseData = error.response?.data;
-        return responseData?.msg || responseData?.error?.message || statusMessage(error.response?.status, fallback);
+        return responseData?.msg || videoTaskErrorMessage(responseData?.error) || statusMessage(error.response?.status, fallback);
     }
     if (error instanceof DOMException && error.name === "AbortError") return "请求已取消";
     return error instanceof Error ? error.message : fallback;
@@ -929,14 +958,15 @@ async function assertNotVideoErrorBlob(blob: Blob) {
     const type = blob.type.toLowerCase();
     const shouldParse = type.includes("json") || type.startsWith("text/") || (await blobLooksLikeJSON(blob));
     if (!shouldParse) return;
-    let payload: { code?: number; msg?: string; error?: { message?: string } };
+    let payload: { code?: number; msg?: string; message?: string; error?: string | { message?: string } };
     try {
-        payload = JSON.parse(await blob.text()) as { code?: number; msg?: string; error?: { message?: string } };
+        payload = JSON.parse(await blob.text()) as { code?: number; msg?: string; message?: string; error?: string | { message?: string } };
     } catch {
         return;
     }
-    if (typeof payload.code === "number" && payload.code !== 0) throw new Error(payload.msg || "视频下载失败");
-    if (payload.error?.message) throw new Error(payload.error.message);
+    const message = payload.msg || payload.message || videoTaskErrorMessage(payload.error);
+    if (typeof payload.code === "number" && payload.code !== 0) throw new ExplicitVideoDownloadError(message || "视频下载失败");
+    if (message) throw new ExplicitVideoDownloadError(message);
 }
 
 async function blobLooksLikeJSON(blob: Blob) {
