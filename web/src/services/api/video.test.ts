@@ -173,4 +173,22 @@ describe("video aspect ratio routing", () => {
         expect(query.get("channel_model_id")).toBe("62");
         expect(query.get("routing_model")).toBe("video-model");
     });
+
+    it("normalizes binary MP4 downloads to a playable video MIME type", async () => {
+        const mp4Header = new Uint8Array([0, 0, 0, 24, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6f, 0x6d]);
+        jest.spyOn(axios, "get")
+            .mockResolvedValueOnce({ data: { status: "completed", url: "https://upstream.test/v1/videos/task_123/content" } })
+            .mockResolvedValueOnce({ data: new Blob([mp4Header], { type: "application/octet-stream" }) });
+
+        const state = await pollVideoGenerationTask(videoConfig("waninter"), {
+            id: "task_123",
+            provider: "openai",
+            model: "0::0::video-model",
+            channelId: 2,
+            channelModelId: 62,
+        });
+
+        expect(state.status).toBe("completed");
+        if (state.status === "completed") expect(state.result.blob?.type).toBe("video/mp4");
+    });
 });

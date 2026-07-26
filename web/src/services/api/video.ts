@@ -160,7 +160,7 @@ export async function pollVideoGenerationTask(config: AiConfig, task: VideoGener
 }
 
 export async function storeGeneratedVideo(result: VideoGenerationResult): Promise<UploadedFile> {
-    if (result.blob) return uploadMediaFile(result.blob, "video");
+    if (result.blob) return uploadMediaFile(await normalizeVideoBlob(result.blob), "video");
     if (result.url) return { url: result.url, storageKey: "", bytes: 0, mimeType: result.mimeType || "video/mp4" };
     throw new Error("视频接口没有返回可播放的视频");
 }
@@ -418,8 +418,7 @@ async function pollOpenAIVideoTask(config: AiConfig, task: VideoGenerationTask, 
             const result = await resolveVideoTaskResult(config, video as NewApiVideoTask, options, task);
             if (result) return { status: "completed", result };
             const content = await axios.get<Blob>(aiApiUrl(config, `/videos/${task.id}/content`, task), { headers: aiHeaders(config), responseType: "blob", signal: options?.signal });
-            await assertVideoBlob(content.data);
-            return { status: "completed", result: { blob: content.data } };
+            return { status: "completed", result: { blob: await normalizeVideoBlob(content.data) } };
         }
         if (status === "failed" || status === "cancelled" || status === "error") return { status: "failed", error: video.error?.message || "视频生成失败" };
         return { status: "pending" };
@@ -579,8 +578,7 @@ async function resolveSeedanceAudioUrl(audio: ReferenceAudio) {
 async function videoResultFromUrl(config: AiConfig, url: string, options?: RequestOptions, task?: VideoGenerationTask): Promise<VideoGenerationResult> {
     try {
         const response = await fetchVideoBlob(config, url, options, task);
-        await assertVideoBlob(response.data);
-        return { blob: response.data };
+        return { blob: await normalizeVideoBlob(response.data) };
     } catch (error) {
         if (axios.isCancel(error) || options?.signal?.aborted) throw error;
         if (requiresAuthenticatedVideoContent(url)) throw error;
@@ -875,8 +873,32 @@ function ratioValue(value: string) {
     return width / height;
 }
 
-async function assertVideoBlob(blob: Blob) {
-    if (!blob.type.includes("json")) return;
+async function normalizeVideoBlob(blob: Blob) {
+    const detected = await detectVideoMimeType(blob);
+    if (detected) return blob.type === detected ? blob : blob.slice(0, blob.size, detected);
+    const type = blob.type.toLowerCase().split(";")[0].trim();
+    if (type.startsWith("video/")) return blob;
+    await assertNotVideoErrorBlob(blob);
+    if (!type || type === "application/octet-stream" || type === "binary/octet-stream") {
+        throw new Error("视频下载结果不是可识别的视频格式，请检查上游返回的成片地址和 Content-Type");
+    }
+    throw new Error(`视频下载结果不是可播放的视频类型：${type}`);
+}
+
+async function detectVideoMimeType(blob: Blob) {
+    const bytes = new Uint8Array(await blob.slice(0, Math.min(blob.size, 64)).arrayBuffer());
+    if (bytes.length >= 12 && ascii(bytes, 4, 8) === "ftyp") return "video/mp4";
+    if (bytes.length >= 4 && bytes[0] === 0x1a && bytes[1] === 0x45 && bytes[2] === 0xdf && bytes[3] === 0xa3) return "video/webm";
+    return "";
+}
+
+function ascii(bytes: Uint8Array, start: number, end: number) {
+    return String.fromCharCode(...bytes.slice(start, end));
+}
+
+async function assertNotVideoErrorBlob(blob: Blob) {
+    const type = blob.type.toLowerCase();
+    if (!type.includes("json") && !type.startsWith("text/")) return;
     let payload: { code?: number; msg?: string; error?: { message?: string } };
     try {
         payload = JSON.parse(await blob.text()) as { code?: number; msg?: string; error?: { message?: string } };
