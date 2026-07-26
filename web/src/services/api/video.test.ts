@@ -7,6 +7,7 @@ import { createVideoGenerationTask, pollVideoGenerationTask } from "./video";
 const originalWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
 const originalLocalStorage = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
 const originalCustomEvent = Object.getOwnPropertyDescriptor(globalThis, "CustomEvent");
+const originalFetch = Object.getOwnPropertyDescriptor(globalThis, "fetch");
 
 function memoryStorage() {
     const values = new Map<string, string>();
@@ -51,6 +52,7 @@ afterEach(() => {
         ["window", originalWindow],
         ["localStorage", originalLocalStorage],
         ["CustomEvent", originalCustomEvent],
+        ["fetch", originalFetch],
     ] as const) {
         if (descriptor) Object.defineProperty(globalThis, key, descriptor);
         else Reflect.deleteProperty(globalThis, key);
@@ -190,5 +192,44 @@ describe("video aspect ratio routing", () => {
 
         expect(state.status).toBe("completed");
         if (state.status === "completed") expect(state.result.blob?.type).toBe("video/mp4");
+    });
+
+    it("falls back to the Next.js proxy when the backend proxy returns a non-video body", async () => {
+        const mp4Header = new Uint8Array([0, 0, 0, 24, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6f, 0x6d]);
+        jest.spyOn(axios, "get")
+            .mockResolvedValueOnce({ data: { status: "completed", url: "https://upstream.test/v1/videos/task_123/content" } })
+            .mockResolvedValueOnce({ data: new Blob([JSON.stringify({ code: 500, msg: "proxy failed" })], { type: "application/json" }) });
+        const fetchMock = jest.fn().mockResolvedValue(new Response(new Blob([mp4Header], { type: "application/octet-stream" }), { status: 200 }));
+        Object.defineProperty(globalThis, "fetch", { configurable: true, value: fetchMock });
+
+        const state = await pollVideoGenerationTask(videoConfig("waninter"), {
+            id: "task_123",
+            provider: "openai",
+            model: "0::0::video-model",
+            channelId: 2,
+            channelModelId: 62,
+        });
+
+        expect(state.status).toBe("completed");
+        if (state.status === "completed") expect(state.result.blob?.type).toBe("video/mp4");
+        expect(fetchMock.mock.calls[0][0]).toBe("/webdav-proxy");
+        expect(fetchMock.mock.calls[0][1].headers["x-webdav-target"]).toBe("https://upstream.test/v1/videos/task_123/content");
+    });
+
+    it("fails instead of returning an unverified remote video URL", async () => {
+        jest.spyOn(axios, "get")
+            .mockResolvedValueOnce({ data: { status: "completed", url: "https://upstream.test/v1/videos/task_123/content" } })
+            .mockResolvedValueOnce({ data: new Blob([JSON.stringify({ code: 500, msg: "proxy failed" })], { type: "application/json" }) });
+        Object.defineProperty(globalThis, "fetch", { configurable: true, value: jest.fn().mockResolvedValue(new Response("bad gateway", { status: 502 })) });
+
+        await expect(
+            pollVideoGenerationTask(videoConfig("waninter"), {
+                id: "task_123",
+                provider: "openai",
+                model: "0::0::video-model",
+                channelId: 2,
+                channelModelId: 62,
+            }),
+        ).rejects.toThrow("视频成片下载失败");
     });
 });

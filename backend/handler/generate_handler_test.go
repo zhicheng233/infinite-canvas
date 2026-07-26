@@ -23,3 +23,20 @@ func TestChannelSelectionAndResolvedHeaders(t *testing.T) {
 		t.Fatalf("missing resolved channel headers: %#v", recorder.Header())
 	}
 }
+
+func TestProxyResponseContentTypeDetectsVideo(t *testing.T) {
+	mp4 := []byte{0, 0, 0, 24, 'f', 't', 'y', 'p', 'i', 's', 'o', 'm'}
+	if got := proxyResponseContentType("application/octet-stream", mp4); got != "video/mp4" {
+		t.Fatalf("proxyResponseContentType mp4 = %q", got)
+	}
+
+	webm := []byte{0x1a, 0x45, 0xdf, 0xa3}
+	if got := proxyResponseContentType("", webm); got != "video/webm" {
+		t.Fatalf("proxyResponseContentType webm = %q", got)
+	}
+
+	jsonType := "application/json"
+	if got := proxyResponseContentType(jsonType, []byte(`{"code":500}`)); got != jsonType {
+		t.Fatalf("proxyResponseContentType json = %q", got)
+	}
+}

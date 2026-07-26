@@ -577,34 +577,47 @@ async function resolveSeedanceAudioUrl(audio: ReferenceAudio) {
 
 async function videoResultFromUrl(config: AiConfig, url: string, options?: RequestOptions, task?: VideoGenerationTask): Promise<VideoGenerationResult> {
     try {
-        const response = await fetchVideoBlob(config, url, options, task);
-        return { blob: await normalizeVideoBlob(response.data) };
+        return { blob: await fetchVideoBlob(config, url, options, task) };
     } catch (error) {
         if (axios.isCancel(error) || options?.signal?.aborted) throw error;
-        if (requiresAuthenticatedVideoContent(url)) throw error;
-        return { url, mimeType: "video/mp4" };
+        throw error;
     }
 }
 
 async function resolveVideoTaskResult(config: AiConfig, state: Partial<NewApiVideoTask>, options?: RequestOptions, task?: VideoGenerationTask) {
+    let lastError: unknown;
     for (const url of readVideoTaskUrls(state)) {
         try {
             return await videoResultFromUrl(config, url, options, task);
-        } catch {
+        } catch (error) {
+            lastError = error;
             continue;
         }
     }
+    if (lastError) throw lastError;
     return null;
 }
 
 async function fetchVideoBlob(config: AiConfig, url: string, options?: RequestOptions, task?: VideoGenerationTask) {
+    const errors: string[] = [];
     if (isLoggedIn()) {
         const proxyPath = toProxyableVideoPath(url);
         if (proxyPath) {
-            return axios.get<Blob>(aiApiUrl(config, proxyPath, task), { headers: aiHeaders(config), signal: options?.signal, responseType: "blob" });
+            try {
+                return await readAxiosVideoBlob(axios.get<Blob>(aiApiUrl(config, proxyPath, task), { headers: aiHeaders(config), signal: options?.signal, responseType: "blob" }));
+            } catch (error) {
+                if (axios.isCancel(error) || options?.signal?.aborted) throw error;
+                errors.push(errorMessage(error));
+            }
         }
     }
-    return axios.get<Blob>(url, { responseType: "blob", signal: options?.signal });
+    try {
+        return await fetchVideoBlobViaNextProxy(url, options);
+    } catch (error) {
+        if (options?.signal?.aborted) throw error;
+        errors.push(errorMessage(error));
+    }
+    throw new Error(`视频成片下载失败，请检查上游成片地址或代理配置${errors.length ? `：${errors.filter(Boolean).join("；")}` : ""}`);
 }
 
 function toProxyableVideoPath(url: string) {
@@ -617,13 +630,25 @@ function toProxyableVideoPath(url: string) {
     }
 }
 
-function requiresAuthenticatedVideoContent(url: string) {
-    try {
-        const target = new URL(url);
-        return /\/v1\/videos\/[^/]+\/content$/i.test(target.pathname);
-    } catch {
-        return false;
-    }
+async function readAxiosVideoBlob(request: Promise<{ data: Blob }>) {
+    const response = await request;
+    return normalizeVideoBlob(response.data);
+}
+
+async function fetchVideoBlobViaNextProxy(url: string, options?: RequestOptions) {
+    const target = toProxyableVideoPath(url);
+    if (!target) throw new Error("视频成片地址不是 HTTP(S) URL");
+    const response = await fetch("/webdav-proxy", {
+        method: "POST",
+        headers: {
+            "x-webdav-target": target,
+            "x-webdav-method": "GET",
+        },
+        signal: options?.signal,
+    });
+    const blob = await response.blob();
+    if (!response.ok) throw new Error(`Next.js 代理下载失败（${response.status}）`);
+    return normalizeVideoBlob(blob);
 }
 
 function assertVideoConfig(config: AiConfig, model: string) {
@@ -846,6 +871,10 @@ function readAxiosError(error: unknown, fallback: string) {
     return error instanceof Error ? error.message : fallback;
 }
 
+function errorMessage(error: unknown) {
+    return error instanceof Error ? error.message : String(error || "未知错误");
+}
+
 function statusMessage(status: number | undefined, fallback: string) {
     if (status === 401 || status === 403) return "鉴权失败，请检查 API Key、套餐权限或模型权限";
     if (status === 429) return "请求被限流或额度不足，请稍后重试";
@@ -887,7 +916,7 @@ async function normalizeVideoBlob(blob: Blob) {
 
 async function detectVideoMimeType(blob: Blob) {
     const bytes = new Uint8Array(await blob.slice(0, Math.min(blob.size, 64)).arrayBuffer());
-    if (bytes.length >= 12 && ascii(bytes, 4, 8) === "ftyp") return "video/mp4";
+    if (bytes.length >= 12 && ascii(bytes, 4, 8) === "ftyp") return ascii(bytes, 8, 12) === "qt  " ? "video/quicktime" : "video/mp4";
     if (bytes.length >= 4 && bytes[0] === 0x1a && bytes[1] === 0x45 && bytes[2] === 0xdf && bytes[3] === 0xa3) return "video/webm";
     return "";
 }
@@ -898,7 +927,8 @@ function ascii(bytes: Uint8Array, start: number, end: number) {
 
 async function assertNotVideoErrorBlob(blob: Blob) {
     const type = blob.type.toLowerCase();
-    if (!type.includes("json") && !type.startsWith("text/")) return;
+    const shouldParse = type.includes("json") || type.startsWith("text/") || (await blobLooksLikeJSON(blob));
+    if (!shouldParse) return;
     let payload: { code?: number; msg?: string; error?: { message?: string } };
     try {
         payload = JSON.parse(await blob.text()) as { code?: number; msg?: string; error?: { message?: string } };
@@ -907,6 +937,12 @@ async function assertNotVideoErrorBlob(blob: Blob) {
     }
     if (typeof payload.code === "number" && payload.code !== 0) throw new Error(payload.msg || "视频下载失败");
     if (payload.error?.message) throw new Error(payload.error.message);
+}
+
+async function blobLooksLikeJSON(blob: Blob) {
+    const preview = await blob.slice(0, Math.min(blob.size, 64)).text();
+    const first = preview.trimStart()[0];
+    return first === "{" || first === "[";
 }
 
 function isPublicMediaUrl(value: string) {

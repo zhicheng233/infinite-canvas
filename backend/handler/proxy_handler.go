@@ -52,9 +52,8 @@ func (h *ProxyHandler) Proxy(c *gin.Context) {
 		}
 	}
 	respContentType := result.Headers.Get("Content-Type")
-	if respContentType == "" {
-		respContentType = "application/octet-stream"
-	}
+	respContentType = proxyResponseContentType(respContentType, result.Body)
+	c.Header("Content-Type", respContentType)
 	c.Data(result.StatusCode, respContentType, result.Body)
 }
 
@@ -87,9 +86,8 @@ func (h *ProxyHandler) ProxyGet(c *gin.Context) {
 		}
 	}
 	respContentType := result.Headers.Get("Content-Type")
-	if respContentType == "" {
-		respContentType = "application/octet-stream"
-	}
+	respContentType = proxyResponseContentType(respContentType, result.Body)
+	c.Header("Content-Type", respContentType)
 	c.Data(result.StatusCode, respContentType, result.Body)
 }
 
@@ -122,8 +120,33 @@ func (h *ProxyHandler) ProxyGetPath(c *gin.Context) {
 		}
 	}
 	respContentType := result.Headers.Get("Content-Type")
-	if respContentType == "" {
-		respContentType = "application/octet-stream"
-	}
+	respContentType = proxyResponseContentType(respContentType, result.Body)
+	c.Header("Content-Type", respContentType)
 	c.Data(result.StatusCode, respContentType, result.Body)
+}
+
+func proxyResponseContentType(contentType string, body []byte) string {
+	normalized := strings.ToLower(strings.TrimSpace(strings.Split(contentType, ";")[0]))
+	if normalized == "" || normalized == "application/octet-stream" || normalized == "binary/octet-stream" {
+		if detected := detectVideoContentType(body); detected != "" {
+			return detected
+		}
+		if contentType == "" {
+			return "application/octet-stream"
+		}
+	}
+	return contentType
+}
+
+func detectVideoContentType(body []byte) string {
+	if len(body) >= 12 && string(body[4:8]) == "ftyp" {
+		if string(body[8:12]) == "qt  " {
+			return "video/quicktime"
+		}
+		return "video/mp4"
+	}
+	if len(body) >= 4 && body[0] == 0x1a && body[1] == 0x45 && body[2] == 0xdf && body[3] == 0xa3 {
+		return "video/webm"
+	}
+	return ""
 }
