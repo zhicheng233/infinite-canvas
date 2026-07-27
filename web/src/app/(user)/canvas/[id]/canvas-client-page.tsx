@@ -6,7 +6,7 @@ import { useParams, useRouter } from "next/navigation";
 import { Bot, Home, ImageIcon, Images, List, Menu, Music2, Plus, Redo2, Settings2, Trash2, Undo2, Upload, Video } from "lucide-react";
 import { saveAs } from "file-saver";
 
-import { beautifyVideoError, isBalanceError, extractErrorDetail } from "@/lib/error-helper";
+import { beautifyVideoError, formatVideoGenerationError, isBalanceError, extractErrorDetail } from "@/lib/error-helper";
 import { requestEdit, requestGeneration, requestImageQuestion } from "@/services/api/image";
 import { requestAudioGeneration, storeGeneratedAudio } from "@/services/api/audio";
 import { requestVideoGeneration, storeGeneratedVideo } from "@/services/api/video";
@@ -2397,6 +2397,14 @@ function InfiniteCanvasPage() {
                 );
             } catch (error) {
                 if (isGenerationCanceled(error)) return;
+                if (mode === "video") {
+                    const formatted = formatVideoGenerationError(error);
+                    message.error(formatted.message);
+                    setNodes((prev) =>
+                        prev.map((node) => (node.id === nodeId || pendingChildIds.includes(node.id) ? (node.id === nodeId && !markSourceStatus ? node : { ...node, metadata: { ...node.metadata, status: NODE_STATUS_ERROR, errorDetails: formatted.message } }) : node)),
+                    );
+                    return;
+                }
                 const rawDetail = extractErrorDetail(error);
                 const friendlyMsg = error instanceof Error ? error.message : "生成失败";
                 let errorDetails = beautifyVideoError(friendlyMsg);
@@ -2535,6 +2543,12 @@ function InfiniteCanvasPage() {
                 );
             } catch (error) {
                 if (isGenerationCanceled(error)) return;
+                if (node.type === CanvasNodeType.Video) {
+                    const formatted = formatVideoGenerationError(error);
+                    message.error(formatted.message);
+                    setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_ERROR, errorDetails: formatted.message } } : item)));
+                    return;
+                }
                 const rawDetail = extractErrorDetail(error);
                 const friendlyMsg = error instanceof Error ? error.message : "生成失败";
                 let errorDetails = beautifyVideoError(friendlyMsg);

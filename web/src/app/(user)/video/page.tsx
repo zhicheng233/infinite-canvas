@@ -10,7 +10,7 @@ import { AssetPickerModal, type InsertAssetPayload } from "@/app/(user)/canvas/c
 import { ModelPicker } from "@/components/model-picker";
 import { PromptSelectDialog } from "@/components/prompts/prompt-select-dialog";
 import { creditEstimateButtonText, CreditCostHint, CreditHelpActions, isInsufficientCreditError, useEstimatedCreditCost, useUserCreditBalance } from "@/constant/credits";
-import { beautifyVideoError, extractErrorDetail, isBalanceError } from "@/lib/error-helper";
+import { formatVideoGenerationError } from "@/lib/error-helper";
 import { VideoSettingsPanel, normalizeVideoResolutionValue, normalizeVideoSizeValue, videoSizeLabel } from "@/components/video-settings-panel";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { formatBytes, formatDuration } from "@/lib/image-utils";
@@ -182,14 +182,8 @@ export default function VideoPage() {
             await saveLog(log);
             void pollGenerationLog(log, snapshot.config);
         } catch (error) {
-            const msg = error instanceof Error ? error.message : "生成失败";
-            const rawDetail = extractErrorDetail(error);
-            const errorMessage = beautifyVideoError(msg);
-            let displayError = errorMessage;
-            if (rawDetail && !isBalanceError(msg)) {
-                displayError = `${errorMessage}\n\n上游错误详情：${rawDetail}`;
-            }
-            setResults([{ id: nanoid(), status: "failed", error: displayError, rawDetail: rawDetail && !isBalanceError(msg) ? rawDetail : undefined }]);
+            const formatted = formatVideoGenerationError(error);
+            setResults([{ id: nanoid(), status: "failed", error: formatted.message, rawDetail: formatted.rawDetail }]);
             await saveLog(
                 buildLog({
                     prompt: snapshot.text,
@@ -200,10 +194,10 @@ export default function VideoPage() {
                     audioReferences: snapshot.audioReferences,
                     durationMs: performance.now() - batchStartedAt,
                     status: "失败",
-                    error: displayError,
+                    error: formatted.message,
                 }),
             );
-            message.error(errorMessage);
+            message.error(formatted.message);
             setRunning(false);
         }
     };
@@ -337,16 +331,10 @@ export default function VideoPage() {
                 await delay(log.task.provider === "seedance" ? 5000 : 2500);
             }
         } catch (error) {
-            const msg = error instanceof Error ? error.message : "生成失败";
-            const rawDetail = extractErrorDetail(error);
-            const errorMessage = beautifyVideoError(msg);
-            let displayError = errorMessage;
-            if (rawDetail && !isBalanceError(msg)) {
-                displayError = `${errorMessage}\n\n上游错误详情：${rawDetail}`;
-            }
-            setResults([{ id: log.id, status: "failed", error: displayError, rawDetail: rawDetail && !isBalanceError(msg) ? rawDetail : undefined }]);
-            await saveLog({ ...log, status: "失败", durationMs: Date.now() - log.createdAt, error: displayError });
-            message.error(errorMessage);
+            const formatted = formatVideoGenerationError(error);
+            setResults([{ id: log.id, status: "failed", error: formatted.message, rawDetail: formatted.rawDetail }]);
+            await saveLog({ ...log, status: "失败", durationMs: Date.now() - log.createdAt, error: formatted.message });
+            message.error(formatted.message);
         } finally {
             activeLogIdsRef.current.delete(log.id);
             if (!activeLogIdsRef.current.size) {
