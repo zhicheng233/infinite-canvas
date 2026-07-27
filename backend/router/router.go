@@ -8,12 +8,13 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func Setup(r *gin.Engine, authService *service.AuthService, authHandler *handler.AuthHandler, adminHandler *handler.AdminHandler, userHandler *handler.UserHandler, creditHandler *handler.CreditHandler, generateHandler *handler.GenerateHandler, apiConfigHandler *handler.ApiConfigHandler, proxyHandler *handler.ProxyHandler, canvasHandler *handler.CanvasHandler, generationRecordHandler *handler.GenerationRecordHandler, rechargeHandler *handler.RechargeHandler, captchaHandler *handler.CaptchaHandler, tempMediaHandler *handler.TempMediaHandler, channelStatusHandler *handler.ChannelStatusHandler, channelHandler *handler.ChannelHandler, channelModelHandler *handler.ChannelModelHandler, metricsHandler *handler.MetricsHandler, webhookHandler *handler.WebhookHandler, mergeGroupHandler *handler.MergeGroupHandler) {
+func Setup(r *gin.Engine, authService *service.AuthService, authHandler *handler.AuthHandler, adminHandler *handler.AdminHandler, userHandler *handler.UserHandler, creditHandler *handler.CreditHandler, generateHandler *handler.GenerateHandler, apiConfigHandler *handler.ApiConfigHandler, proxyHandler *handler.ProxyHandler, canvasHandler *handler.CanvasHandler, generationRecordHandler *handler.GenerationRecordHandler, rechargeHandler *handler.RechargeHandler, captchaHandler *handler.CaptchaHandler, tempMediaHandler *handler.TempMediaHandler, channelStatusHandler *handler.ChannelStatusHandler, channelHandler *handler.ChannelHandler, channelModelHandler *handler.ChannelModelHandler, metricsHandler *handler.MetricsHandler, webhookHandler *handler.WebhookHandler, mergeGroupHandler *handler.MergeGroupHandler, siteAnnouncementHandler *handler.SiteAnnouncementHandler) {
 	r.Use(middleware.Cors())
 
 	api := r.Group("/backend-api")
 	api.GET("/media/tmp/:filename", tempMediaHandler.Serve)
 	api.GET("/channel-status", channelStatusHandler.GetChannelStatus)
+	api.GET("/announcement", siteAnnouncementHandler.Public)
 
 	api.GET("/auth/captcha", captchaHandler.Generate)
 	api.POST("/auth/register", authHandler.Register)
@@ -103,6 +104,8 @@ func Setup(r *gin.Engine, authService *service.AuthService, authHandler *handler
 			superAdmin.POST("/admin/channels/:id/merge-groups/auto", mergeGroupHandler.AutoCreate)
 			superAdmin.GET("/admin/metrics-config", metricsHandler.GetConfig)
 			superAdmin.POST("/admin/metrics-config", metricsHandler.SaveConfig)
+			superAdmin.GET("/admin/announcement", siteAnnouncementHandler.AdminGet)
+			superAdmin.POST("/admin/announcement", siteAnnouncementHandler.AdminSave)
 
 			superAdmin.GET("/admin/webhook/config", webhookHandler.ListConfig)
 			superAdmin.PUT("/admin/webhook/config", webhookHandler.SaveConfig)

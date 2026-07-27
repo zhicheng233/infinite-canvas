@@ -8,6 +8,7 @@ import { App, ConfigProvider } from "antd";
 import zhCN from "antd/locale/zh_CN";
 
 import { ClientRootInit } from "@/components/layout/client-root-init";
+import { GlobalAnnouncementDialog } from "@/components/layout/global-announcement-dialog";
 import { getAntThemeConfig } from "@/lib/app-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
 
@@ -36,6 +37,7 @@ export function AppProviders({ children }: { children: ReactNode }) {
                 <App>
                     <QueryClientProvider client={queryClient}>
                         <ClientRootInit>{children}</ClientRootInit>
+                        <GlobalAnnouncementDialog />
                     </QueryClientProvider>
                 </App>
             </ProConfigProvider>

@@ -114,6 +114,16 @@ API Key 仅用于后端代理调用，按 `API_KEY_ENCRYPTION_KEY` 配置加密�
 
 该地址仅由后端请求，不保存或发送渠道 API Key，也不向普通用户暴露配置值。
 
+## site_announcements 表
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | uint | 主键 |
+| enabled | bool | 是否启用全局公告 |
+| title | string(100) | 公告标题 |
+| content | text | 公告正文 |
+| version | int | 公告版本；公告内容、标题或启用状态更新时递增，用于前端“不再弹出直到更新” |
+
 ## canvas_projects 表
 
 | 字段 | 类型 | 说明 |

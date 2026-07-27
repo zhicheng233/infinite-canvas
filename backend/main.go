@@ -40,6 +40,7 @@ func main() {
 		&model.ModelMergeGroup{},
 		&model.WebhookConfig{},
 		&model.WebhookLog{},
+		&model.SiteAnnouncement{},
 	); err != nil {
 		log.Fatalf("failed to migrate: %v", err)
 	}
@@ -57,6 +58,7 @@ func main() {
 	metricsConfigRepo := repository.NewMetricsConfigRepo(db)
 	webhookRepo := repository.NewWebhookRepo(db)
 	mergeGroupRepo := repository.NewMergeGroupRepo(db)
+	siteAnnouncementRepo := repository.NewSiteAnnouncementRepo(db)
 
 	captchaService := service.NewCaptchaService()
 
@@ -73,6 +75,7 @@ func main() {
 	onDemandRepairService := service.NewOnDemandRepairService(cfg.OnDemandRepairURL, cfg.OnDemandRepairUser, cfg.OnDemandRepairPass, cfg.OnDemandRepairTimeoutSeconds)
 	autoChannelService := service.NewAutoChannelService(db, channelRepo, channelModelRepo)
 	webhookService := service.NewWebhookService(webhookRepo)
+	siteAnnouncementService := service.NewSiteAnnouncementService(siteAnnouncementRepo)
 	generateService := service.NewGenerateService(apiConfigRepo, creditService, creditRepo, modelCallLogService, cfg.ApiKeyEncryptKey, onDemandRepairService, channelService, channelRepo, channelModelRepo, mergeGroupRepo, db, autoChannelService, webhookService)
 	tempMediaService := service.NewTempMediaService(cfg)
 	channelStatusService := service.NewChannelStatusService(modelCallLogRepo, apiConfigRepo)
@@ -97,9 +100,10 @@ func main() {
 	metricsHandler := handler.NewMetricsHandler(metricsService)
 	webhookHandler := handler.NewWebhookHandler(webhookService)
 	mergeGroupHandler := handler.NewMergeGroupHandler(mergeGroupService)
+	siteAnnouncementHandler := handler.NewSiteAnnouncementHandler(siteAnnouncementService)
 
 	r := gin.Default()
-	router.Setup(r, authService, authHandler, adminHandler, userHandler, creditHandler, generateHandler, apiConfigHandler, proxyHandler, canvasHandler, generationRecordHandler, rechargeHandler, captchaHandler, tempMediaHandler, channelStatusHandler, channelHandler, channelModelHandler, metricsHandler, webhookHandler, mergeGroupHandler)
+	router.Setup(r, authService, authHandler, adminHandler, userHandler, creditHandler, generateHandler, apiConfigHandler, proxyHandler, canvasHandler, generationRecordHandler, rechargeHandler, captchaHandler, tempMediaHandler, channelStatusHandler, channelHandler, channelModelHandler, metricsHandler, webhookHandler, mergeGroupHandler, siteAnnouncementHandler)
 
 	log.Printf("Server starting on port %s", cfg.Port)
 	if err := r.Run(":" + cfg.Port); err != nil {
