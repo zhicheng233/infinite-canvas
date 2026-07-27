@@ -60,6 +60,13 @@ describe("formatVideoGenerationError", () => {
     expect(formatted.message).toContain("添加 1 张参考图后重试");
   });
 
+  test("shows proxied upstream image-to-video reference guidance", () => {
+    const formatted = formatVideoGenerationError(new ApiError("上游请求失败", `{"ok":false,"error":"视频生成失败：该模型为图生视频，必须提供 1 张参考图（reference_images / image）。"}`));
+    expect(formatted.message).toContain("视频生成失败：该模型为图生视频，必须提供 1 张参考图");
+    expect(formatted.message).toContain("添加 1 张参考图后重试");
+    expect(formatted.rawDetail).toBeUndefined();
+  });
+
   test("shows upstream route unavailable guidance", () => {
     const formatted = formatVideoGenerationError(new Error(`{"ok":false,"error":"视频生成失败：该模型线路暂时不可用，请稍后重试或改用其它模型。"}`));
     expect(formatted.message).toContain("视频生成失败：该模型线路暂时不可用");

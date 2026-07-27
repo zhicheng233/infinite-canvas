@@ -54,7 +54,7 @@ type SeedanceTask = {
     error?: { code?: string; message?: string } | null;
     content?: { video_url?: string; last_frame_url?: string } | null;
 };
-type ApiEnvelope<T> = T | { code?: number; data?: T | null; msg?: string };
+type ApiEnvelope<T> = T | { code?: number | string; ok?: boolean; data?: T | null; msg?: string; message?: string; error?: string | { message?: string }; error_detail?: string };
 type RequestOptions = { signal?: AbortSignal };
 
 class ExplicitVideoDownloadError extends Error {}
@@ -457,7 +457,7 @@ async function pollNewApiVideoTask(config: AiConfig, task: VideoGenerationTask, 
             return { status: "failed", error: "视频生成成功但没有返回可播放的视频地址" };
         }
         if (status === "failed" || status === "cancelled" || status === "error") {
-            return { status: "failed", error: state.error?.message || "视频生成失败" };
+            return { status: "failed", error: videoTaskErrorMessage(state.error) || state.message || "视频生成失败" };
         }
         return { status: "pending" };
     } catch (error) {
@@ -870,31 +870,54 @@ function normalizeTaskStatus(value?: string, success?: boolean) {
 
 function unwrapEnvelope<T>(payload: ApiEnvelope<T>, emptyMessage: string): T {
     if (!payload) throw new Error(emptyMessage);
-    if (typeof payload === "object" && "code" in payload && typeof payload.code === "number") {
-        if (payload.code !== 0) throw new Error(payload.msg || "请求失败");
-        if (!payload.data) throw new Error(emptyMessage);
-        return payload.data;
+    if (typeof payload === "object") {
+        const envelope = payload as ApiEnvelope<T>;
+        if ("ok" in envelope && envelope.ok === false) {
+            throw new Error(readEnvelopeMessage(envelope) || emptyMessage);
+        }
+        if ("code" in envelope && typeof envelope.code === "number") {
+            if (envelope.code !== 0) throw new Error(readEnvelopeMessage(envelope) || "请求失败");
+            if (!envelope.data) throw new Error(emptyMessage);
+            return envelope.data;
+        }
     }
     return payload as T;
 }
 
 function readEnvelopeMessage(payload: unknown) {
     if (!payload || typeof payload !== "object") return "";
-    const value = payload as { msg?: string; message?: string; error?: string | { message?: string } };
-    return value.msg || value.message || videoTaskErrorMessage(value.error);
+    const value = payload as { error_detail?: unknown; error?: unknown; msg?: unknown; message?: unknown };
+    return videoTaskErrorMessage(value.error_detail) || videoTaskErrorMessage(value.error) || videoTaskErrorMessage(value.msg) || videoTaskErrorMessage(value.message);
 }
 
-function videoTaskErrorMessage(error: unknown) {
-    if (typeof error === "string") return error;
-    if (error && typeof error === "object" && "message" in error) return String((error as { message?: unknown }).message || "");
+function videoTaskErrorMessage(error: unknown, depth = 0): string {
+    if (depth > 4 || error == null) return "";
+    if (typeof error === "string") {
+        const text = error.trim();
+        if (!text) return "";
+        if (text.startsWith("{") || text.startsWith("[")) {
+            try {
+                return videoTaskErrorMessage(JSON.parse(text), depth + 1) || text;
+            } catch {
+                return text;
+            }
+        }
+        return text;
+    }
+    if (typeof error !== "object") return "";
+    const value = error as Record<string, unknown>;
+    for (const key of ["error_detail", "error", "message", "msg", "detail"]) {
+        const message = videoTaskErrorMessage(value[key], depth + 1);
+        if (message) return message;
+    }
     return "";
 }
 
 function readAxiosError(error: unknown, fallback: string) {
     if (axios.isCancel(error)) return "请求已取消";
-    if (axios.isAxiosError<{ error?: string | { message?: string }; msg?: string; code?: number }>(error)) {
+    if (axios.isAxiosError<ApiEnvelope<unknown>>(error)) {
         const responseData = error.response?.data;
-        return responseData?.msg || videoTaskErrorMessage(responseData?.error) || statusMessage(error.response?.status, fallback);
+        return readEnvelopeMessage(responseData) || statusMessage(error.response?.status, fallback);
     }
     if (error instanceof DOMException && error.name === "AbortError") return "请求已取消";
     return error instanceof Error ? error.message : fallback;
