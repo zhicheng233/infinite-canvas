@@ -51,12 +51,6 @@ func (h *GenerateHandler) handleProxy(c *gin.Context, fn proxyFunc) {
 		return
 	}
 
-	for key, values := range result.Headers {
-		for _, value := range values {
-			c.Header(key, value)
-		}
-	}
-
 	c.Header("X-Credits-Cost", itoa(result.Cost))
 	c.Header("X-Credits-Balance", itoa(result.Balance))
 	writeResolvedChannelHeaders(c, result)
@@ -68,6 +62,7 @@ func (h *GenerateHandler) handleProxy(c *gin.Context, fn proxyFunc) {
 			return
 		}
 	}
+	copyProxyResponseHeaders(c, result.Headers)
 	c.Data(result.StatusCode, result.Headers.Get("Content-Type"), result.Body)
 }
 
@@ -109,6 +104,27 @@ func writeResolvedChannelHeaders(c *gin.Context, result *service.ProxyResult) {
 	}
 	if result.ResolvedChannelModelID > 0 {
 		c.Header("X-Resolved-Channel-Model-ID", itoa(int(result.ResolvedChannelModelID)))
+	}
+}
+
+func copyProxyResponseHeaders(c *gin.Context, headers http.Header) {
+	for key, values := range headers {
+		if !shouldCopyProxyHeader(key) {
+			continue
+		}
+		for _, value := range values {
+			c.Header(key, value)
+		}
+	}
+}
+
+func shouldCopyProxyHeader(key string) bool {
+	switch http.CanonicalHeaderKey(key) {
+	case "Connection", "Keep-Alive", "Proxy-Authenticate", "Proxy-Authorization", "Te", "Trailer", "Transfer-Encoding", "Upgrade",
+		"Content-Length", "Content-Encoding":
+		return false
+	default:
+		return true
 	}
 }
 

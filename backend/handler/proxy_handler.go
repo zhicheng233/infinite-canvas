@@ -35,11 +35,6 @@ func (h *ProxyHandler) Proxy(c *gin.Context) {
 		return
 	}
 
-	for key, values := range result.Headers {
-		for _, value := range values {
-			c.Header(key, value)
-		}
-	}
 	c.Header("X-Credits-Cost", itoa(result.Cost))
 	c.Header("X-Credits-Balance", itoa(result.Balance))
 	writeResolvedChannelHeaders(c, result)
@@ -51,6 +46,7 @@ func (h *ProxyHandler) Proxy(c *gin.Context) {
 			return
 		}
 	}
+	copyProxyResponseHeaders(c, result.Headers)
 	respContentType := result.Headers.Get("Content-Type")
 	respContentType = proxyResponseContentType(respContentType, result.Body)
 	c.Header("Content-Type", respContentType)
@@ -71,11 +67,6 @@ func (h *ProxyHandler) ProxyGet(c *gin.Context) {
 		return
 	}
 
-	for key, values := range result.Headers {
-		for _, value := range values {
-			c.Header(key, value)
-		}
-	}
 	writeResolvedChannelHeaders(c, result)
 
 	if result.StatusCode >= http.StatusBadRequest {
@@ -85,6 +76,7 @@ func (h *ProxyHandler) ProxyGet(c *gin.Context) {
 			return
 		}
 	}
+	copyProxyResponseHeaders(c, result.Headers)
 	respContentType := result.Headers.Get("Content-Type")
 	respContentType = proxyResponseContentType(respContentType, result.Body)
 	c.Header("Content-Type", respContentType)
@@ -105,11 +97,6 @@ func (h *ProxyHandler) ProxyGetPath(c *gin.Context) {
 		return
 	}
 
-	for key, values := range result.Headers {
-		for _, value := range values {
-			c.Header(key, value)
-		}
-	}
 	writeResolvedChannelHeaders(c, result)
 
 	if result.StatusCode >= http.StatusBadRequest {
@@ -119,6 +106,7 @@ func (h *ProxyHandler) ProxyGetPath(c *gin.Context) {
 			return
 		}
 	}
+	copyProxyResponseHeaders(c, result.Headers)
 	respContentType := result.Headers.Get("Content-Type")
 	respContentType = proxyResponseContentType(respContentType, result.Body)
 	c.Header("Content-Type", respContentType)

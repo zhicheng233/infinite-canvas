@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"net/http"
 	"net/http/httptest"
 	"testing"
 
@@ -21,6 +22,32 @@ func TestChannelSelectionAndResolvedHeaders(t *testing.T) {
 	writeResolvedChannelHeaders(context, &service.ProxyResult{ResolvedChannelID: 2, ResolvedChannelModelID: 62})
 	if recorder.Header().Get("X-Resolved-Channel-ID") != "2" || recorder.Header().Get("X-Resolved-Channel-Model-ID") != "62" {
 		t.Fatalf("missing resolved channel headers: %#v", recorder.Header())
+	}
+}
+
+func TestCopyProxyResponseHeadersSkipsBodyManagedHeaders(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	headers := http.Header{
+		"Content-Length":    []string{"99"},
+		"Content-Encoding":  []string{"gzip"},
+		"Transfer-Encoding": []string{"chunked"},
+		"X-Upstream-Trace":  []string{"trace-1"},
+	}
+
+	copyProxyResponseHeaders(context, headers)
+
+	if recorder.Header().Get("Content-Length") != "" {
+		t.Fatalf("Content-Length should not be copied: %#v", recorder.Header())
+	}
+	if recorder.Header().Get("Content-Encoding") != "" {
+		t.Fatalf("Content-Encoding should not be copied: %#v", recorder.Header())
+	}
+	if recorder.Header().Get("Transfer-Encoding") != "" {
+		t.Fatalf("Transfer-Encoding should not be copied: %#v", recorder.Header())
+	}
+	if recorder.Header().Get("X-Upstream-Trace") != "trace-1" {
+		t.Fatalf("custom upstream header not copied: %#v", recorder.Header())
 	}
 }
 
