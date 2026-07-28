@@ -31,7 +31,7 @@ func (r *ModelCallLogRepo) List(tenantID uint, query ModelCallLogQuery) ([]model
 	}
 	if query.Keyword != "" {
 		keyword := "%" + strings.TrimSpace(query.Keyword) + "%"
-		base = base.Where("error_message LIKE ? OR error_body LIKE ? OR path LIKE ? OR username LIKE ?", keyword, keyword, keyword, keyword)
+		base = base.Where("error_message LIKE ? OR error_body LIKE ? OR path LIKE ? OR username LIKE ? OR upstream_url LIKE ? OR request_content_type LIKE ? OR request_body LIKE ?", keyword, keyword, keyword, keyword, keyword, keyword, keyword)
 	}
 	base.Count(&total)
 
@@ -49,7 +49,7 @@ func (r *ModelCallLogRepo) List(tenantID uint, query ModelCallLogQuery) ([]model
 	}
 	if query.Keyword != "" {
 		keyword := "%" + strings.TrimSpace(query.Keyword) + "%"
-		q = q.Where("error_message LIKE ? OR error_body LIKE ? OR path LIKE ? OR username LIKE ?", keyword, keyword, keyword, keyword)
+		q = q.Where("error_message LIKE ? OR error_body LIKE ? OR path LIKE ? OR username LIKE ? OR upstream_url LIKE ? OR request_content_type LIKE ? OR request_body LIKE ?", keyword, keyword, keyword, keyword, keyword, keyword, keyword)
 	}
 	err := q.Offset((query.Page - 1) * query.PageSize).Limit(query.PageSize).Order("model_call_logs.id DESC").Find(&items).Error
 	return items, total, err
@@ -60,7 +60,7 @@ func (r *ModelCallLogRepo) ListSince(tenantID uint, since time.Time, limit int) 
 	if limit <= 0 {
 		limit = 500
 	}
-	err := r.db.Select("model_call_logs.*, channels.name as channel_name").
+	err := r.db.Select("model_call_logs.id, model_call_logs.created_at, model_call_logs.tenant_id, model_call_logs.user_id, model_call_logs.username, model_call_logs.display_name, model_call_logs.generation, model_call_logs.model, model_call_logs.method, model_call_logs.path, model_call_logs.status_code, model_call_logs.error_message, model_call_logs.is_success, model_call_logs.response_time, model_call_logs.channel_id, model_call_logs.channel_model_id, channels.name as channel_name").
 		Joins("LEFT JOIN channels ON channels.id = model_call_logs.channel_id").
 		Where("model_call_logs.tenant_id = ? AND model_call_logs.created_at >= ?", tenantID, since).
 		Order("model_call_logs.id DESC").

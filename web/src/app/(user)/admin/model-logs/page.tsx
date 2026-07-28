@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { App, Button, Card, Col, Empty, Form, Input, InputNumber, Modal, Row, Select, Space, Statistic, Table, Tag, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import { Activity, AlertTriangle, Clock3, RotateCcw, Search, TrendingUp } from "lucide-react";
+import { Activity, AlertTriangle, Clock3, Copy, RotateCcw, Search, TrendingUp } from "lucide-react";
 
 import { getModelHealth, listModelCallLogs, type ModelCallLogItem, type ModelHealthSummary } from "@/services/api/admin";
 
@@ -53,6 +53,19 @@ export default function AdminModelLogsPage() {
     const [healthLoading, setHealthLoading] = useState(false);
     const [selected, setSelected] = useState<ModelCallLogItem | null>(null);
     const [pagination, setPagination] = useState({ current: 1, pageSize: 20, total: 0 });
+
+    const copyText = async (value: string, label: string) => {
+        if (!value) {
+            message.warning(`${label}为空`);
+            return;
+        }
+        try {
+            await navigator.clipboard.writeText(value);
+            message.success(`${label}已复制`);
+        } catch {
+            message.error(`${label}复制失败`);
+        }
+    };
 
     const fetchLogs = useCallback(
         async (page = pagination.current, pageSize = pagination.pageSize) => {
@@ -318,12 +331,50 @@ export default function AdminModelLogsPage() {
                                 {selected.error_message || "-"}
                             </div>
                         </div>
-                        <pre className="max-h-[360px] overflow-auto rounded-lg bg-stone-950 p-3 text-xs text-stone-100">{formatErrorBody(selected.error_body)}</pre>
+                        <div className="rounded-lg border border-stone-200 p-3 dark:border-stone-800">
+                            <div className="mb-2 flex items-center justify-between gap-2">
+                                <div className="font-medium">上游请求</div>
+                                <Button size="small" icon={<Copy className="size-3" />} onClick={() => copyText(selected.request_body, "请求体")}>
+                                    复制请求体
+                                </Button>
+                            </div>
+                            <div className="mb-2 grid gap-2 text-sm md:grid-cols-2">
+                                <div>
+                                    <Text type="secondary">状态：</Text>
+                                    {selected.request_sent ? "已向上游发送" : "未向上游发送"}
+                                </div>
+                                <div>
+                                    <Text type="secondary">Content-Type：</Text>
+                                    {selected.request_content_type || "-"}
+                                </div>
+                                <div className="md:col-span-2">
+                                    <Text type="secondary">URL：</Text>
+                                    <span className="break-all font-mono text-xs">{selected.upstream_url || "-"}</span>
+                                </div>
+                            </div>
+                            {selected.request_body_truncated ? <Tag color="orange">请求体已脱敏或截断</Tag> : null}
+                            <pre className="mt-2 max-h-[300px] overflow-auto rounded-lg bg-stone-950 p-3 text-xs text-stone-100">{formatRequestBody(selected.request_body, selected.request_sent)}</pre>
+                        </div>
+                        <div className="rounded-lg border border-stone-200 p-3 dark:border-stone-800">
+                            <div className="mb-2 flex items-center justify-between gap-2">
+                                <div className="font-medium">错误响应体</div>
+                                <Button size="small" icon={<Copy className="size-3" />} onClick={() => copyText(formatErrorBody(selected.error_body), "错误响应体")}>
+                                    复制响应体
+                                </Button>
+                            </div>
+                            <pre className="max-h-[300px] overflow-auto rounded-lg bg-stone-950 p-3 text-xs text-stone-100">{formatErrorBody(selected.error_body)}</pre>
+                        </div>
                     </div>
                 ) : null}
             </Modal>
         </div>
     );
+}
+
+function formatRequestBody(value: string, requestSent: boolean) {
+    if (!requestSent) return "未向上游发送请求";
+    if (!value) return "无请求体";
+    return formatErrorBody(value);
 }
 
 function formatErrorBody(value: string) {

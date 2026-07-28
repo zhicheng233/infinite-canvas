@@ -2,22 +2,27 @@ package model
 
 type ModelCallLog struct {
 	BaseModel
-	TenantID       uint   `gorm:"index;not null" json:"tenant_id"`
-	UserID         uint   `gorm:"index;not null" json:"user_id"`
-	Username       string `gorm:"size:64" json:"username"`
-	DisplayName    string `gorm:"size:64" json:"display_name"`
-	Generation     string `gorm:"size:20;index" json:"generation"`
-	Model          string `gorm:"size:100;index" json:"model"`
-	Method         string `gorm:"size:10" json:"method"`
-	Path           string `gorm:"size:255;index" json:"path"`
-	StatusCode     int    `gorm:"index" json:"status_code"`
-	ErrorMessage   string `gorm:"size:500" json:"error_message"`
-	ErrorBody      string `gorm:"type:longtext" json:"error_body"`
-	IsSuccess      bool   `gorm:"index:idx_success_time;default:0" json:"is_success"`
-	ResponseTime   int    `gorm:"default:0" json:"response_time_ms"`
-	ChannelID      *uint  `gorm:"index" json:"channel_id,omitempty"`
-	ChannelModelID *uint  `gorm:"index" json:"channel_model_id,omitempty"`
-	ChannelName    string `gorm:"column:channel_name;->;-:migration" json:"channel_name,omitempty"`
+	TenantID             uint   `gorm:"index;not null" json:"tenant_id"`
+	UserID               uint   `gorm:"index;not null" json:"user_id"`
+	Username             string `gorm:"size:64" json:"username"`
+	DisplayName          string `gorm:"size:64" json:"display_name"`
+	Generation           string `gorm:"size:20;index" json:"generation"`
+	Model                string `gorm:"size:100;index" json:"model"`
+	Method               string `gorm:"size:10" json:"method"`
+	Path                 string `gorm:"size:255;index" json:"path"`
+	StatusCode           int    `gorm:"index" json:"status_code"`
+	ErrorMessage         string `gorm:"size:500" json:"error_message"`
+	ErrorBody            string `gorm:"type:longtext" json:"error_body"`
+	UpstreamURL          string `gorm:"size:1000" json:"upstream_url"`
+	RequestContentType   string `gorm:"size:255" json:"request_content_type"`
+	RequestBody          string `gorm:"type:longtext" json:"request_body"`
+	RequestBodyTruncated bool   `gorm:"default:false" json:"request_body_truncated"`
+	RequestSent          bool   `gorm:"default:false;index" json:"request_sent"`
+	IsSuccess            bool   `gorm:"index:idx_success_time;default:0" json:"is_success"`
+	ResponseTime         int    `gorm:"default:0" json:"response_time_ms"`
+	ChannelID            *uint  `gorm:"index" json:"channel_id,omitempty"`
+	ChannelModelID       *uint  `gorm:"index" json:"channel_model_id,omitempty"`
+	ChannelName          string `gorm:"column:channel_name;->;-:migration" json:"channel_name,omitempty"`
 }
 
 func (ModelCallLog) TableName() string { return "model_call_logs" }

@@ -17,17 +17,22 @@ type ModelCallLogService struct {
 }
 
 type ModelCallLogInput struct {
-	TenantID       uint
-	UserID         uint
-	Generation     string
-	Model          string
-	Method         string
-	Path           string
-	StatusCode     int
-	ErrorMessage   string
-	ErrorBody      []byte
-	ChannelID      *uint
-	ChannelModelID *uint
+	TenantID             uint
+	UserID               uint
+	Generation           string
+	Model                string
+	Method               string
+	Path                 string
+	StatusCode           int
+	ErrorMessage         string
+	ErrorBody            []byte
+	UpstreamURL          string
+	RequestContentType   string
+	RequestBody          string
+	RequestBodyTruncated bool
+	RequestSent          bool
+	ChannelID            *uint
+	ChannelModelID       *uint
 }
 
 type ModelHealthSummary struct {
@@ -111,19 +116,24 @@ func (s *ModelCallLogService) RecordFailure(input ModelCallLogInput) {
 		}
 	}
 	if err := s.repo.Create(&model.ModelCallLog{
-		TenantID:       input.TenantID,
-		UserID:         input.UserID,
-		Username:       username,
-		DisplayName:    displayName,
-		Generation:     cleanShort(input.Generation, 20),
-		Model:          cleanShort(input.Model, 100),
-		Method:         cleanShort(strings.ToUpper(input.Method), 10),
-		Path:           cleanShort(cleanPath(input.Path), 255),
-		StatusCode:     input.StatusCode,
-		ErrorMessage:   buildModelCallErrorSummary(input.StatusCode, input.ErrorBody, input.ErrorMessage),
-		ErrorBody:      truncateString(string(input.ErrorBody), 10000),
-		ChannelID:      input.ChannelID,
-		ChannelModelID: input.ChannelModelID,
+		TenantID:             input.TenantID,
+		UserID:               input.UserID,
+		Username:             username,
+		DisplayName:          displayName,
+		Generation:           cleanShort(input.Generation, 20),
+		Model:                cleanShort(input.Model, 100),
+		Method:               cleanShort(strings.ToUpper(input.Method), 10),
+		Path:                 cleanShort(cleanPath(input.Path), 255),
+		StatusCode:           input.StatusCode,
+		ErrorMessage:         buildModelCallErrorSummary(input.StatusCode, input.ErrorBody, input.ErrorMessage),
+		ErrorBody:            truncateString(string(input.ErrorBody), 10000),
+		UpstreamURL:          cleanShort(input.UpstreamURL, 1000),
+		RequestContentType:   cleanShort(input.RequestContentType, 255),
+		RequestBody:          truncateString(input.RequestBody, 20000),
+		RequestBodyTruncated: input.RequestBodyTruncated,
+		RequestSent:          input.RequestSent,
+		ChannelID:            input.ChannelID,
+		ChannelModelID:       input.ChannelModelID,
 	}); err != nil {
 		log.Printf("record model call failure failed: %v", err)
 	}

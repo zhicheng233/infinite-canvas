@@ -13,6 +13,8 @@ import (
 	_ "image/png"
 	"io"
 	"log"
+	"mime"
+	"mime/multipart"
 	"net/http"
 	"net/url"
 	"sort"
@@ -26,7 +28,11 @@ import (
 	"infinite-canvas-server/repository"
 )
 
-const maxVideoReferenceImageBase64Chars = 460 * 1024
+const (
+	maxVideoReferenceImageBase64Chars = 460 * 1024
+	maxLoggedRequestBodyChars         = 20000
+	maxLoggedRequestStringChars       = 2000
+)
 
 type GenerateService struct {
 	apiConfigRepo      *repository.ApiConfigRepo
@@ -105,6 +111,14 @@ type upstreamCallResult struct {
 	Body           []byte
 	Headers        http.Header
 	ResponseTimeMs int
+}
+
+type modelCallRequestSnapshot struct {
+	UpstreamURL   string
+	ContentType   string
+	Body          string
+	BodyTruncated bool
+	Sent          bool
 }
 
 type ChannelSelection struct {
@@ -301,22 +315,23 @@ func (s *GenerateService) proxyWithAutoFailover(tenantID, userID uint, method, c
 			}
 		}
 
+		requestSnapshot := buildModelCallRequestSnapshot(route, method, path, contentType, body)
 		upstream, err := s.doUpstreamRequest(method, route.Channel.BaseUrl, route.ApiKey, path, contentType, body)
 		if err != nil {
-			s.recordModelFailureWithRoute(tenantID, userID, capability, modelName, method, path, 0, nil, err.Error(), route)
+			s.recordModelFailureWithRouteAndRequest(tenantID, userID, capability, modelName, method, path, 0, nil, err.Error(), route, requestSnapshot)
 			lastErr = err
 			continue
 		}
 
 		alertStatus, alertMessage := s.handleUpstreamWebhookAlert(tenantID, modelName, upstream.Body, route)
 		if alertStatus != "" {
-			s.recordModelFailureWithRoute(tenantID, userID, capability, modelName, method, path, upstream.StatusCode, upstream.Body, "", route)
+			s.recordModelFailureWithRouteAndRequest(tenantID, userID, capability, modelName, method, path, upstream.StatusCode, upstream.Body, "", route, requestSnapshot)
 			lastErr = errors.New(alertMessage)
 			continue
 		}
 
 		if upstream.StatusCode >= 400 {
-			s.recordModelFailureWithRoute(tenantID, userID, capability, modelName, method, path, upstream.StatusCode, upstream.Body, "", route)
+			s.recordModelFailureWithRouteAndRequest(tenantID, userID, capability, modelName, method, path, upstream.StatusCode, upstream.Body, "", route, requestSnapshot)
 			lastErr = fmt.Errorf("上游返回 %d", upstream.StatusCode)
 			continue
 		}
@@ -614,6 +629,237 @@ func stripJSONChannelIdentity(contentType string, body []byte) []byte {
 	return updated
 }
 
+func buildModelCallRequestSnapshot(route *channelRouteContext, method, path, contentType string, body []byte) *modelCallRequestSnapshot {
+	if route == nil || route.Channel == nil {
+		return nil
+	}
+	requestBody, truncated := formatLoggedRequestBody(contentType, body)
+	return &modelCallRequestSnapshot{
+		UpstreamURL:   sanitizeLoggedUpstreamURL(buildUpstreamURL(route.Channel.BaseUrl, path)),
+		ContentType:   strings.TrimSpace(contentType),
+		Body:          requestBody,
+		BodyTruncated: truncated,
+		Sent:          true,
+	}
+}
+
+func sanitizeLoggedUpstreamURL(rawURL string) string {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return truncateString(rawURL, 1000)
+	}
+	parsed.User = nil
+	values := parsed.Query()
+	for key := range values {
+		if isSensitiveLogKey(key) {
+			values.Set(key, "[redacted]")
+		}
+	}
+	parsed.RawQuery = values.Encode()
+	return truncateString(parsed.String(), 1000)
+}
+
+func formatLoggedRequestBody(contentType string, body []byte) (string, bool) {
+	if len(body) == 0 {
+		return "", false
+	}
+	mediaType, params, err := mime.ParseMediaType(strings.TrimSpace(contentType))
+	if err != nil {
+		mediaType = strings.ToLower(strings.TrimSpace(strings.Split(contentType, ";")[0]))
+		params = map[string]string{}
+	}
+	mediaType = strings.ToLower(mediaType)
+	var text string
+	var truncated bool
+	switch {
+	case mediaType == "application/json" || strings.HasSuffix(mediaType, "+json"):
+		text, truncated = formatLoggedJSONBody(body)
+	case mediaType == "multipart/form-data":
+		text, truncated = formatLoggedMultipartBody(params["boundary"], body)
+	case mediaType == "application/x-www-form-urlencoded":
+		text, truncated = formatLoggedFormBody(body)
+	case isTextRequestBody(mediaType, body):
+		text, truncated = truncateLoggedText(string(body), maxLoggedRequestBodyChars)
+	default:
+		text = fmt.Sprintf("[binary body omitted, %d bytes]", len(body))
+	}
+	text, finalTruncated := truncateLoggedText(text, maxLoggedRequestBodyChars)
+	return text, truncated || finalTruncated
+}
+
+func formatLoggedJSONBody(body []byte) (string, bool) {
+	var payload interface{}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return truncateLoggedText(string(body), maxLoggedRequestBodyChars)
+	}
+	sanitized, truncated := sanitizeLoggedJSONValue(payload)
+	encoded, err := json.MarshalIndent(sanitized, "", "  ")
+	if err != nil {
+		return truncateLoggedText(string(body), maxLoggedRequestBodyChars)
+	}
+	text, finalTruncated := truncateLoggedText(string(encoded), maxLoggedRequestBodyChars)
+	return text, truncated || finalTruncated
+}
+
+func sanitizeLoggedJSONValue(value interface{}) (interface{}, bool) {
+	switch typed := value.(type) {
+	case map[string]interface{}:
+		result := make(map[string]interface{}, len(typed))
+		truncated := false
+		for key, item := range typed {
+			if isSensitiveLogKey(key) {
+				result[key] = "[redacted]"
+				truncated = true
+				continue
+			}
+			next, nextTruncated := sanitizeLoggedJSONValue(item)
+			result[key] = next
+			truncated = truncated || nextTruncated
+		}
+		return result, truncated
+	case []interface{}:
+		result := make([]interface{}, len(typed))
+		truncated := false
+		for index, item := range typed {
+			next, nextTruncated := sanitizeLoggedJSONValue(item)
+			result[index] = next
+			truncated = truncated || nextTruncated
+		}
+		return result, truncated
+	case string:
+		return sanitizeLoggedString(typed)
+	default:
+		return typed, false
+	}
+}
+
+func sanitizeLoggedString(value string) (string, bool) {
+	text := strings.TrimSpace(value)
+	if text == "" {
+		return value, false
+	}
+	if strings.HasPrefix(strings.ToLower(text), "data:") {
+		return fmt.Sprintf("[data url omitted, %d chars]", len([]rune(value))), true
+	}
+	if looksLikeLongBase64(text) {
+		return fmt.Sprintf("[base64 omitted, %d chars]", len([]rune(value))), true
+	}
+	return truncateLoggedText(value, maxLoggedRequestStringChars)
+}
+
+func looksLikeLongBase64(value string) bool {
+	if len(value) < 200 || strings.ContainsAny(value, " \r\n\t:/?&") {
+		return false
+	}
+	for _, ch := range value {
+		if (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '+' || ch == '/' || ch == '=' || ch == '-' || ch == '_' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func formatLoggedMultipartBody(boundary string, body []byte) (string, bool) {
+	if boundary == "" {
+		return fmt.Sprintf("[multipart body omitted, missing boundary, %d bytes]", len(body)), true
+	}
+	reader := multipart.NewReader(bytes.NewReader(body), boundary)
+	lines := []string{}
+	truncated := false
+	for {
+		part, err := reader.NextPart()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return fmt.Sprintf("[multipart body omitted, parse failed, %d bytes]", len(body)), true
+		}
+		name := part.FormName()
+		filename := part.FileName()
+		partContentType := part.Header.Get("Content-Type")
+		partBody, _ := io.ReadAll(part)
+		if filename != "" {
+			lines = append(lines, fmt.Sprintf("%s: [file filename=%q content_type=%q size=%d bytes]", name, filename, partContentType, len(partBody)))
+			truncated = true
+			continue
+		}
+		value, valueTruncated := sanitizeLoggedString(string(partBody))
+		lines = append(lines, fmt.Sprintf("%s: %s", name, value))
+		truncated = truncated || valueTruncated
+	}
+	return strings.Join(lines, "\n"), truncated
+}
+
+func formatLoggedFormBody(body []byte) (string, bool) {
+	values, err := url.ParseQuery(string(body))
+	if err != nil {
+		return truncateLoggedText(string(body), maxLoggedRequestBodyChars)
+	}
+	result := map[string]interface{}{}
+	truncated := false
+	for key, items := range values {
+		if isSensitiveLogKey(key) {
+			result[key] = "[redacted]"
+			truncated = true
+			continue
+		}
+		if len(items) == 1 {
+			value, valueTruncated := sanitizeLoggedString(items[0])
+			result[key] = value
+			truncated = truncated || valueTruncated
+		} else {
+			array := make([]interface{}, len(items))
+			for index, item := range items {
+				value, valueTruncated := sanitizeLoggedString(item)
+				array[index] = value
+				truncated = truncated || valueTruncated
+			}
+			result[key] = array
+		}
+	}
+	encoded, err := json.MarshalIndent(result, "", "  ")
+	if err != nil {
+		return truncateLoggedText(string(body), maxLoggedRequestBodyChars)
+	}
+	text, finalTruncated := truncateLoggedText(string(encoded), maxLoggedRequestBodyChars)
+	return text, truncated || finalTruncated
+}
+
+func isTextRequestBody(mediaType string, body []byte) bool {
+	if mediaType == "application/octet-stream" || mediaType == "binary/octet-stream" || strings.HasPrefix(mediaType, "image/") || strings.HasPrefix(mediaType, "video/") || strings.HasPrefix(mediaType, "audio/") {
+		return false
+	}
+	if strings.HasPrefix(mediaType, "text/") || strings.Contains(mediaType, "xml") {
+		return true
+	}
+	for _, b := range body {
+		if b == 0 {
+			return false
+		}
+	}
+	return true
+}
+
+func isSensitiveLogKey(key string) bool {
+	lower := strings.ToLower(strings.TrimSpace(key))
+	return strings.Contains(lower, "api_key") ||
+		strings.Contains(lower, "apikey") ||
+		strings.Contains(lower, "token") ||
+		strings.Contains(lower, "secret") ||
+		strings.Contains(lower, "password") ||
+		strings.Contains(lower, "authorization") ||
+		lower == "key"
+}
+
+func truncateLoggedText(value string, limit int) (string, bool) {
+	runes := []rune(value)
+	if len(runes) <= limit {
+		return value, false
+	}
+	return string(runes[:limit]) + fmt.Sprintf("\n[truncated, %d chars omitted]", len(runes)-limit), true
+}
+
 func (s *GenerateService) doUpstreamRequest(method, baseURL, apiKey, path, contentType string, body []byte) (*upstreamCallResult, error) {
 	url := buildUpstreamURL(baseURL, path)
 	var reqBody io.Reader
@@ -713,9 +959,10 @@ func (s *GenerateService) proxy(tenantID, userID uint, genType, path, contentTyp
 		return nil, err
 	}
 
+	requestSnapshot := buildModelCallRequestSnapshot(route, http.MethodPost, path, contentType, body)
 	upstream, err := s.doUpstreamRequest(http.MethodPost, route.Channel.BaseUrl, route.ApiKey, path, contentType, body)
 	if err != nil {
-		s.recordModelFailureWithRoute(tenantID, userID, genType, modelName, http.MethodPost, path, 0, nil, err.Error(), route)
+		s.recordModelFailureWithRouteAndRequest(tenantID, userID, genType, modelName, http.MethodPost, path, 0, nil, err.Error(), route, requestSnapshot)
 		if retry, ok := s.repairAndRetryUpstream(tenantID, userID, genType, modelName, http.MethodPost, path, contentType, body, 0, nil, err.Error(), route); ok {
 			upstream = retry
 		} else {
@@ -733,7 +980,7 @@ func (s *GenerateService) proxy(tenantID, userID uint, genType, path, contentTyp
 	}
 
 	if upstream.StatusCode >= 400 {
-		s.recordModelFailureWithRoute(tenantID, userID, genType, modelName, http.MethodPost, path, upstream.StatusCode, respBytes, "", route)
+		s.recordModelFailureWithRouteAndRequest(tenantID, userID, genType, modelName, http.MethodPost, path, upstream.StatusCode, respBytes, "", route, requestSnapshot)
 		if retry, ok := s.repairAndRetryUpstream(tenantID, userID, genType, modelName, http.MethodPost, path, contentType, body, upstream.StatusCode, respBytes, "", route); ok {
 			upstream = retry
 			respBytes = upstream.Body
@@ -747,7 +994,7 @@ func (s *GenerateService) proxy(tenantID, userID uint, genType, path, contentTyp
 	alertStatus, alertMessage := s.handleUpstreamWebhookAlert(tenantID, modelName, respBytes, route)
 	if alertStatus != "" {
 		if upstream.StatusCode < 400 {
-			s.recordModelFailureWithRoute(tenantID, userID, genType, modelName, http.MethodPost, path, upstream.StatusCode, respBytes, alertMessage, route)
+			s.recordModelFailureWithRouteAndRequest(tenantID, userID, genType, modelName, http.MethodPost, path, upstream.StatusCode, respBytes, alertMessage, route, requestSnapshot)
 		}
 		return nil, errors.New(alertMessage)
 	}
@@ -921,9 +1168,10 @@ func (s *GenerateService) ProxyRaw(tenantID, userID uint, method, path, contentT
 		}
 	}
 
+	requestSnapshot := buildModelCallRequestSnapshot(route, method, path, contentType, body)
 	upstream, err := s.doUpstreamRequest(method, route.Channel.BaseUrl, route.ApiKey, path, contentType, body)
 	if err != nil {
-		s.recordModelFailureWithRoute(tenantID, userID, chargeType, modelName, method, path, 0, nil, err.Error(), route)
+		s.recordModelFailureWithRouteAndRequest(tenantID, userID, chargeType, modelName, method, path, 0, nil, err.Error(), route, requestSnapshot)
 		return nil, fmt.Errorf("上游 API 请求失败: %v", err)
 	}
 	respBytes := upstream.Body
@@ -935,7 +1183,7 @@ func (s *GenerateService) ProxyRaw(tenantID, userID uint, method, path, contentT
 	}
 
 	if upstream.StatusCode >= 400 && chargeType != "" {
-		s.recordModelFailureWithRoute(tenantID, userID, chargeType, modelName, method, path, upstream.StatusCode, respBytes, "", route)
+		s.recordModelFailureWithRouteAndRequest(tenantID, userID, chargeType, modelName, method, path, upstream.StatusCode, respBytes, "", route, requestSnapshot)
 	}
 	alertStatus, alertMessage := s.handleUpstreamWebhookAlert(tenantID, modelName, respBytes, route)
 	if alertStatus == WebhookStatusUserQuotaInsufficient {
@@ -943,7 +1191,7 @@ func (s *GenerateService) ProxyRaw(tenantID, userID uint, method, path, contentT
 	}
 	if alertStatus == WebhookStatusModelUnavailable && strings.ToUpper(strings.TrimSpace(method)) != http.MethodGet {
 		if upstream.StatusCode < 400 {
-			s.recordModelFailureWithRoute(tenantID, userID, chargeType, modelName, method, path, upstream.StatusCode, respBytes, alertMessage, route)
+			s.recordModelFailureWithRouteAndRequest(tenantID, userID, chargeType, modelName, method, path, upstream.StatusCode, respBytes, alertMessage, route, requestSnapshot)
 		}
 		return nil, errors.New(alertMessage)
 	}
@@ -952,7 +1200,7 @@ func (s *GenerateService) ProxyRaw(tenantID, userID uint, method, path, contentT
 			if modelName == "" {
 				modelName = responseModel
 			}
-			s.recordModelFailureWithRoute(tenantID, userID, chargeType, modelName, method, path, upstream.StatusCode, respBytes, message, route)
+			s.recordModelFailureWithRouteAndRequest(tenantID, userID, chargeType, modelName, method, path, upstream.StatusCode, respBytes, message, route, requestSnapshot)
 			// Refund credits deducted on the initial POST since the async task actually failed
 			if cost == 0 {
 				recalculatedCost := s.recalculateGenerationCost(tenantID, pricingChannelID, chargeType, modelName)
@@ -1068,9 +1316,10 @@ func (s *GenerateService) ProxyRawWithRepair(tenantID, userID uint, method, path
 		}
 	}
 
+	requestSnapshot := buildModelCallRequestSnapshot(route, method, path, contentType, body)
 	upstream, err := s.doUpstreamRequest(method, route.Channel.BaseUrl, route.ApiKey, path, contentType, body)
 	if err != nil {
-		s.recordModelFailureWithRoute(tenantID, userID, generation, modelName, method, path, 0, nil, err.Error(), route)
+		s.recordModelFailureWithRouteAndRequest(tenantID, userID, generation, modelName, method, path, 0, nil, err.Error(), route, requestSnapshot)
 		if retry, ok := s.repairAndRetryUpstream(tenantID, userID, generation, modelName, method, path, contentType, body, 0, nil, err.Error(), route); ok {
 			upstream = retry
 		} else {
@@ -1089,7 +1338,7 @@ func (s *GenerateService) ProxyRawWithRepair(tenantID, userID uint, method, path
 	}
 
 	if upstream.StatusCode >= 400 && generation != "" {
-		s.recordModelFailureWithRoute(tenantID, userID, generation, modelName, method, path, upstream.StatusCode, respBytes, "", route)
+		s.recordModelFailureWithRouteAndRequest(tenantID, userID, generation, modelName, method, path, upstream.StatusCode, respBytes, "", route, requestSnapshot)
 		if retry, ok := s.repairAndRetryUpstream(tenantID, userID, generation, modelName, method, path, contentType, body, upstream.StatusCode, respBytes, "", route); ok {
 			upstream = retry
 			respBytes = upstream.Body
@@ -1107,7 +1356,7 @@ func (s *GenerateService) ProxyRawWithRepair(tenantID, userID uint, method, path
 	}
 	if alertStatus == WebhookStatusModelUnavailable && strings.ToUpper(strings.TrimSpace(method)) != http.MethodGet {
 		if upstream.StatusCode < 400 {
-			s.recordModelFailureWithRoute(tenantID, userID, generation, modelName, method, path, upstream.StatusCode, respBytes, alertMessage, route)
+			s.recordModelFailureWithRouteAndRequest(tenantID, userID, generation, modelName, method, path, upstream.StatusCode, respBytes, alertMessage, route, requestSnapshot)
 		}
 		return nil, errors.New(alertMessage)
 	}
@@ -1117,7 +1366,7 @@ func (s *GenerateService) ProxyRawWithRepair(tenantID, userID uint, method, path
 			if modelName == "" {
 				modelName = responseModel
 			}
-			s.recordModelFailureWithRoute(tenantID, userID, generation, modelName, method, path, upstream.StatusCode, respBytes, message, route)
+			s.recordModelFailureWithRouteAndRequest(tenantID, userID, generation, modelName, method, path, upstream.StatusCode, respBytes, message, route, requestSnapshot)
 			requestContext := buildRepairRequestContext(generation, method, path, "application/json", respBytes)
 			s.triggerOnDemandRepairAsync(generation, modelName, message, requestContext)
 			// Refund credits deducted on the initial POST since the async task actually failed
@@ -1210,9 +1459,10 @@ func (s *GenerateService) repairAndRetryUpstream(tenantID, userID uint, generati
 	if result == nil || !result.Repaired {
 		return nil, false
 	}
+	requestSnapshot := buildModelCallRequestSnapshot(route, method, path, contentType, body)
 	retry, err := s.doUpstreamRequest(method, route.Channel.BaseUrl, route.ApiKey, path, contentType, body)
 	if err != nil {
-		s.recordModelFailureWithRoute(tenantID, userID, generation, modelName, method, path, 0, nil, err.Error(), route)
+		s.recordModelFailureWithRouteAndRequest(tenantID, userID, generation, modelName, method, path, 0, nil, err.Error(), route, requestSnapshot)
 		log.Printf("retry after on-demand repair failed generation=%s model=%s: %v", generation, modelName, err)
 		return nil, false
 	}
@@ -1660,6 +1910,10 @@ func (s *GenerateService) recordModelFailureWithAutoSelection(tenantID, userID u
 }
 
 func (s *GenerateService) recordModelFailureWithRoute(tenantID, userID uint, genType, modelName, method, path string, statusCode int, body []byte, fallback string, route *channelRouteContext) {
+	s.recordModelFailureWithRouteAndRequest(tenantID, userID, genType, modelName, method, path, statusCode, body, fallback, route, nil)
+}
+
+func (s *GenerateService) recordModelFailureWithRouteAndRequest(tenantID, userID uint, genType, modelName, method, path string, statusCode int, body []byte, fallback string, route *channelRouteContext, request *modelCallRequestSnapshot) {
 	if s.logService == nil {
 		return
 	}
@@ -1672,7 +1926,7 @@ func (s *GenerateService) recordModelFailureWithRoute(tenantID, userID uint, gen
 		channelID = route.ChannelID
 		channelModelID = route.ChannelModelID
 	}
-	s.logService.RecordFailure(ModelCallLogInput{
+	input := ModelCallLogInput{
 		TenantID:       tenantID,
 		UserID:         userID,
 		Generation:     genType,
@@ -1684,7 +1938,15 @@ func (s *GenerateService) recordModelFailureWithRoute(tenantID, userID uint, gen
 		ErrorBody:      body,
 		ChannelID:      channelID,
 		ChannelModelID: channelModelID,
-	})
+	}
+	if request != nil {
+		input.UpstreamURL = request.UpstreamURL
+		input.RequestContentType = request.ContentType
+		input.RequestBody = request.Body
+		input.RequestBodyTruncated = request.BodyTruncated
+		input.RequestSent = request.Sent
+	}
+	s.logService.RecordFailure(input)
 }
 
 func routeIdentityFromSelection(selection ChannelSelection, includeAuto bool) *channelRouteContext {

@@ -112,6 +112,11 @@ export type ModelCallLogItem = {
     status_code: number;
     error_message: string;
     error_body: string;
+    upstream_url: string;
+    request_content_type: string;
+    request_body: string;
+    request_body_truncated: boolean;
+    request_sent: boolean;
     created_at: string;
     channel_id?: number;
     channel_model_id?: number;

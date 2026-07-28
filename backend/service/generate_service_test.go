@@ -7,6 +7,7 @@ import (
 	"image"
 	"image/color"
 	"image/png"
+	"mime/multipart"
 	"net/http"
 	"strings"
 	"testing"
@@ -87,6 +88,56 @@ func TestGetProxyCostByGenerationSkipsGetPolling(t *testing.T) {
 	cost, generation, _, err := svc.getProxyCostByGeneration(1, 1, http.MethodGet, "video", "", nil, "omni-fast")
 	if err != nil || cost != 0 || generation != "video" || pricing.calls != 0 {
 		t.Fatalf("cost=%d generation=%q pricingCalls=%d err=%v", cost, generation, pricing.calls, err)
+	}
+}
+
+func TestFormatLoggedRequestBodySanitizesJSON(t *testing.T) {
+	largeBase64 := strings.Repeat("a", 240)
+	body := []byte(`{"model":"bh2.0","prompt":"hello","api_key":"secret","image":"data:image/png;base64,aaaa","nested":{"token":"abc","b64":"` + largeBase64 + `"},"ratio":"9:16"}`)
+	text, truncated := formatLoggedRequestBody("application/json", body)
+
+	if !strings.Contains(text, `"ratio": "9:16"`) || !strings.Contains(text, `"model": "bh2.0"`) {
+		t.Fatalf("missing useful json fields: %s", text)
+	}
+	if strings.Contains(text, "secret") || strings.Contains(text, "data:image/png;base64,aaaa") || strings.Contains(text, largeBase64) {
+		t.Fatalf("sensitive or large data leaked: %s", text)
+	}
+	if !strings.Contains(text, "[redacted]") || !strings.Contains(text, "[data url omitted") || !strings.Contains(text, "[base64 omitted") || !truncated {
+		t.Fatalf("expected redaction and truncation marker: truncated=%v body=%s", truncated, text)
+	}
+}
+
+func TestFormatLoggedRequestBodySummarizesMultipart(t *testing.T) {
+	var buffer bytes.Buffer
+	writer := multipart.NewWriter(&buffer)
+	_ = writer.WriteField("model", "video-model")
+	file, err := writer.CreateFormFile("image", "ref.png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = file.Write([]byte("fake-image-bytes"))
+	_ = writer.Close()
+
+	text, truncated := formatLoggedRequestBody(writer.FormDataContentType(), buffer.Bytes())
+	if !strings.Contains(text, "model: video-model") || !strings.Contains(text, `image: [file filename="ref.png"`) {
+		t.Fatalf("unexpected multipart summary: %s", text)
+	}
+	if strings.Contains(text, "fake-image-bytes") || !truncated {
+		t.Fatalf("multipart file content should be omitted: truncated=%v body=%s", truncated, text)
+	}
+}
+
+func TestBuildModelCallRequestSnapshotSanitizesURL(t *testing.T) {
+	route := &channelRouteContext{Channel: &model.Channel{BaseUrl: "https://user:pass@example.com"}}
+	snapshot := buildModelCallRequestSnapshot(route, http.MethodPost, "/video/generations?token=abc&keep=1", "application/json", []byte(`{"model":"m"}`))
+	if snapshot == nil || !snapshot.Sent {
+		t.Fatalf("missing request snapshot: %#v", snapshot)
+	}
+	if strings.Contains(snapshot.UpstreamURL, "user:pass") || strings.Contains(snapshot.UpstreamURL, "token=abc") {
+		t.Fatalf("upstream url was not sanitized: %s", snapshot.UpstreamURL)
+	}
+	if !strings.Contains(snapshot.UpstreamURL, "token=%5Bredacted%5D") || !strings.Contains(snapshot.Body, `"model": "m"`) {
+		t.Fatalf("unexpected request snapshot: %#v", snapshot)
 	}
 }
 
