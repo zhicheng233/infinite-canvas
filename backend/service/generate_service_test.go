@@ -91,23 +91,17 @@ func TestGetProxyCostByGenerationSkipsGetPolling(t *testing.T) {
 	}
 }
 
-func TestFormatLoggedRequestBodySanitizesJSON(t *testing.T) {
+func TestFormatRawLoggedRequestBodyKeepsJSON(t *testing.T) {
 	largeBase64 := strings.Repeat("a", 240)
 	body := []byte(`{"model":"bh2.0","prompt":"hello","api_key":"secret","image":"data:image/png;base64,aaaa","nested":{"token":"abc","b64":"` + largeBase64 + `"},"ratio":"9:16"}`)
-	text, truncated := formatLoggedRequestBody("application/json", body)
+	text := formatRawLoggedRequestBody(body)
 
-	if !strings.Contains(text, `"ratio": "9:16"`) || !strings.Contains(text, `"model": "bh2.0"`) {
-		t.Fatalf("missing useful json fields: %s", text)
-	}
-	if strings.Contains(text, "secret") || strings.Contains(text, "data:image/png;base64,aaaa") || strings.Contains(text, largeBase64) {
-		t.Fatalf("sensitive or large data leaked: %s", text)
-	}
-	if !strings.Contains(text, "[redacted]") || !strings.Contains(text, "[data url omitted") || !strings.Contains(text, "[base64 omitted") || !truncated {
-		t.Fatalf("expected redaction and truncation marker: truncated=%v body=%s", truncated, text)
+	if text != string(body) {
+		t.Fatalf("request body was changed: %s", text)
 	}
 }
 
-func TestFormatLoggedRequestBodySummarizesMultipart(t *testing.T) {
+func TestFormatRawLoggedRequestBodyKeepsTextMultipart(t *testing.T) {
 	var buffer bytes.Buffer
 	writer := multipart.NewWriter(&buffer)
 	_ = writer.WriteField("model", "video-model")
@@ -118,12 +112,17 @@ func TestFormatLoggedRequestBodySummarizesMultipart(t *testing.T) {
 	_, _ = file.Write([]byte("fake-image-bytes"))
 	_ = writer.Close()
 
-	text, truncated := formatLoggedRequestBody(writer.FormDataContentType(), buffer.Bytes())
-	if !strings.Contains(text, "model: video-model") || !strings.Contains(text, `image: [file filename="ref.png"`) {
-		t.Fatalf("unexpected multipart summary: %s", text)
+	text := formatRawLoggedRequestBody(buffer.Bytes())
+	if !strings.Contains(text, "video-model") || !strings.Contains(text, `filename="ref.png"`) || !strings.Contains(text, "fake-image-bytes") {
+		t.Fatalf("multipart request body was not kept: %s", text)
 	}
-	if strings.Contains(text, "fake-image-bytes") || !truncated {
-		t.Fatalf("multipart file content should be omitted: truncated=%v body=%s", truncated, text)
+}
+
+func TestFormatRawLoggedRequestBodyEncodesBinary(t *testing.T) {
+	body := []byte{0xff, 0x00, 0x01, 0xfe}
+	text := formatRawLoggedRequestBody(body)
+	if !strings.HasPrefix(text, "[base64 encoded raw request body]\n") || !strings.Contains(text, base64.StdEncoding.EncodeToString(body)) {
+		t.Fatalf("binary request body was not preserved as base64: %q", text)
 	}
 }
 
@@ -136,7 +135,7 @@ func TestBuildModelCallRequestSnapshotSanitizesURL(t *testing.T) {
 	if strings.Contains(snapshot.UpstreamURL, "user:pass") || strings.Contains(snapshot.UpstreamURL, "token=abc") {
 		t.Fatalf("upstream url was not sanitized: %s", snapshot.UpstreamURL)
 	}
-	if !strings.Contains(snapshot.UpstreamURL, "token=%5Bredacted%5D") || !strings.Contains(snapshot.Body, `"model": "m"`) {
+	if !strings.Contains(snapshot.UpstreamURL, "token=%5Bredacted%5D") || snapshot.Body != `{"model":"m"}` || snapshot.BodyTruncated {
 		t.Fatalf("unexpected request snapshot: %#v", snapshot)
 	}
 }

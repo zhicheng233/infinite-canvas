@@ -102,13 +102,14 @@ func (s *GenerateService) TestModel(tenantID, userID uint, input ModelTestInput)
 		req.Header.Set("Content-Type", testReq.ContentType)
 	}
 	req.Header.Set("Authorization", "Bearer "+route.ApiKey)
+	requestSnapshot := buildModelCallRequestSnapshot(route, testReq.Method, testReq.Path, testReq.ContentType, testReq.Body)
 
 	startTime := time.Now()
 	resp, err := s.httpClient.Do(req)
 	responseTimeMs := int(time.Since(startTime).Milliseconds())
 	if err != nil {
 		message := fmt.Sprintf("上游 API 请求失败: %v", err)
-		s.recordModelFailureWithRoute(tenantID, userID, testReq.Generation, modelName, testReq.Method, testReq.Path, 0, nil, message, route)
+		s.recordModelFailureWithRouteAndRequest(tenantID, userID, testReq.Generation, modelName, testReq.Method, testReq.Path, 0, nil, message, route, requestSnapshot)
 		return &ModelTestResult{
 			Success:        false,
 			Model:          modelName,
@@ -125,7 +126,7 @@ func (s *GenerateService) TestModel(tenantID, userID uint, input ModelTestInput)
 
 	respBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		s.recordModelFailureWithRoute(tenantID, userID, testReq.Generation, modelName, testReq.Method, testReq.Path, resp.StatusCode, nil, err.Error(), route)
+		s.recordModelFailureWithRouteAndRequest(tenantID, userID, testReq.Generation, modelName, testReq.Method, testReq.Path, resp.StatusCode, nil, err.Error(), route, requestSnapshot)
 		return nil, err
 	}
 	if resp.StatusCode < 400 {
@@ -147,13 +148,13 @@ func (s *GenerateService) TestModel(tenantID, userID uint, input ModelTestInput)
 		ResponseBody:   responseSnippet(resp.Header.Get("Content-Type"), respBytes),
 	}
 	if result.Success {
-		s.recordModelSuccessWithRoute(tenantID, userID, testReq.Generation, modelName, testReq.Method, testReq.Path, resp.StatusCode, responseTimeMs, route)
+		s.recordModelSuccessWithRouteAndRequest(tenantID, userID, testReq.Generation, modelName, testReq.Method, testReq.Path, resp.StatusCode, responseTimeMs, route, requestSnapshot)
 	} else {
 		result.ErrorMessage = alertMessage
 		if result.ErrorMessage == "" {
 			result.ErrorMessage = buildModelCallErrorSummary(resp.StatusCode, respBytes, "")
 		}
-		s.recordModelFailureWithRoute(tenantID, userID, testReq.Generation, modelName, testReq.Method, testReq.Path, resp.StatusCode, respBytes, "", route)
+		s.recordModelFailureWithRouteAndRequest(tenantID, userID, testReq.Generation, modelName, testReq.Method, testReq.Path, resp.StatusCode, respBytes, "", route, requestSnapshot)
 	}
 	return result, nil
 }

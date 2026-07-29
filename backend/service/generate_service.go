@@ -21,6 +21,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"gorm.io/gorm"
 
@@ -336,7 +337,7 @@ func (s *GenerateService) proxyWithAutoFailover(tenantID, userID uint, method, c
 			continue
 		}
 
-		s.recordModelSuccessWithRoute(tenantID, userID, capability, modelName, method, path, upstream.StatusCode, upstream.ResponseTimeMs, route)
+		s.recordModelSuccessWithRouteAndRequest(tenantID, userID, capability, modelName, method, path, upstream.StatusCode, upstream.ResponseTimeMs, route, requestSnapshot)
 
 		if cost > 0 {
 			metadata, note := buildCreditSpendDetail(chargeType, modelName, path, pricingResult)
@@ -633,14 +634,23 @@ func buildModelCallRequestSnapshot(route *channelRouteContext, method, path, con
 	if route == nil || route.Channel == nil {
 		return nil
 	}
-	requestBody, truncated := formatLoggedRequestBody(contentType, body)
 	return &modelCallRequestSnapshot{
 		UpstreamURL:   sanitizeLoggedUpstreamURL(buildUpstreamURL(route.Channel.BaseUrl, path)),
 		ContentType:   strings.TrimSpace(contentType),
-		Body:          requestBody,
-		BodyTruncated: truncated,
+		Body:          formatRawLoggedRequestBody(body),
+		BodyTruncated: false,
 		Sent:          true,
 	}
+}
+
+func formatRawLoggedRequestBody(body []byte) string {
+	if len(body) == 0 {
+		return ""
+	}
+	if utf8.Valid(body) {
+		return string(body)
+	}
+	return "[base64 encoded raw request body]\n" + base64.StdEncoding.EncodeToString(body)
 }
 
 func sanitizeLoggedUpstreamURL(rawURL string) string {
@@ -1006,7 +1016,7 @@ func (s *GenerateService) proxy(tenantID, userID uint, genType, path, contentTyp
 		}, nil
 	}
 
-	s.recordModelSuccessWithRoute(tenantID, userID, genType, modelName, http.MethodPost, path, upstream.StatusCode, upstream.ResponseTimeMs, route)
+	s.recordModelSuccessWithRouteAndRequest(tenantID, userID, genType, modelName, http.MethodPost, path, upstream.StatusCode, upstream.ResponseTimeMs, route, requestSnapshot)
 
 	if cost > 0 {
 		metadata, note := buildCreditSpendDetail(genType, pricingModel, path, pricingResult)
@@ -1212,10 +1222,10 @@ func (s *GenerateService) ProxyRaw(tenantID, userID uint, method, path, contentT
 				}
 			}
 		} else if chargeType != "" && modelName != "" {
-			s.recordModelSuccessWithRoute(tenantID, userID, chargeType, modelName, method, path, upstream.StatusCode, upstream.ResponseTimeMs, route)
+			s.recordModelSuccessWithRouteAndRequest(tenantID, userID, chargeType, modelName, method, path, upstream.StatusCode, upstream.ResponseTimeMs, route, requestSnapshot)
 		}
 	} else if upstream.StatusCode < 400 && chargeType != "" && modelName != "" {
-		s.recordModelSuccessWithRoute(tenantID, userID, chargeType, modelName, method, path, upstream.StatusCode, upstream.ResponseTimeMs, route)
+		s.recordModelSuccessWithRouteAndRequest(tenantID, userID, chargeType, modelName, method, path, upstream.StatusCode, upstream.ResponseTimeMs, route, requestSnapshot)
 	}
 
 	if upstream.StatusCode < 400 && cost > 0 {
@@ -1380,10 +1390,10 @@ func (s *GenerateService) ProxyRawWithRepair(tenantID, userID uint, method, path
 				}
 			}
 		} else if generation != "" && modelName != "" {
-			s.recordModelSuccessWithRoute(tenantID, userID, generation, modelName, method, path, upstream.StatusCode, upstream.ResponseTimeMs, route)
+			s.recordModelSuccessWithRouteAndRequest(tenantID, userID, generation, modelName, method, path, upstream.StatusCode, upstream.ResponseTimeMs, route, requestSnapshot)
 		}
 	} else if upstream.StatusCode < 400 && generation != "" && modelName != "" {
-		s.recordModelSuccessWithRoute(tenantID, userID, generation, modelName, method, path, upstream.StatusCode, upstream.ResponseTimeMs, route)
+		s.recordModelSuccessWithRouteAndRequest(tenantID, userID, generation, modelName, method, path, upstream.StatusCode, upstream.ResponseTimeMs, route, requestSnapshot)
 	}
 
 	if upstream.StatusCode < 400 && cost > 0 {
@@ -1972,6 +1982,10 @@ func (s *GenerateService) recordModelSuccess(tenantID, userID uint, genType, mod
 }
 
 func (s *GenerateService) recordModelSuccessWithRoute(tenantID, userID uint, genType, modelName, method, path string, statusCode, responseTimeMs int, route *channelRouteContext) {
+	s.recordModelSuccessWithRouteAndRequest(tenantID, userID, genType, modelName, method, path, statusCode, responseTimeMs, route, nil)
+}
+
+func (s *GenerateService) recordModelSuccessWithRouteAndRequest(tenantID, userID uint, genType, modelName, method, path string, statusCode, responseTimeMs int, route *channelRouteContext, request *modelCallRequestSnapshot) {
 	if s.logService == nil {
 		return
 	}
@@ -1984,7 +1998,7 @@ func (s *GenerateService) recordModelSuccessWithRoute(tenantID, userID uint, gen
 		channelID = route.ChannelID
 		channelModelID = route.ChannelModelID
 	}
-	s.logService.RecordSuccess(ModelCallLogInput{
+	input := ModelCallLogInput{
 		TenantID:       tenantID,
 		UserID:         userID,
 		Generation:     genType,
@@ -1994,7 +2008,15 @@ func (s *GenerateService) recordModelSuccessWithRoute(tenantID, userID uint, gen
 		StatusCode:     statusCode,
 		ChannelID:      channelID,
 		ChannelModelID: channelModelID,
-	}, responseTimeMs)
+	}
+	if request != nil {
+		input.UpstreamURL = request.UpstreamURL
+		input.RequestContentType = request.ContentType
+		input.RequestBody = request.Body
+		input.RequestBodyTruncated = request.BodyTruncated
+		input.RequestSent = request.Sent
+	}
+	s.logService.RecordSuccess(input, responseTimeMs)
 }
 
 func generationTypeFromPath(path string) string {

@@ -14,7 +14,7 @@ const menuItems = [
     { key: "/admin", icon: <LayoutDashboard className="size-4" />, label: "管理概览" },
     { key: "/admin/users", icon: <Users className="size-4" />, label: "用户管理" },
     { key: "/admin/api-config", icon: <Settings className="size-4" />, label: "API 与模型配置" },
-    { key: "/admin/model-logs", icon: <AlertTriangle className="size-4" />, label: "模型失败日志" },
+    { key: "/admin/model-logs", icon: <AlertTriangle className="size-4" />, label: "模型调用日志" },
     { key: "/admin/recharge", icon: <CreditCard className="size-4" />, label: "积分充值" },
     { key: "/admin/transactions", icon: <ReceiptText className="size-4" />, label: "积分流水" },
 ];

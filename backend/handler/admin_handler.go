@@ -273,6 +273,7 @@ func (h *AdminHandler) ListModelCallLogs(c *gin.Context) {
 		Model:      c.Query("model"),
 		Generation: c.Query("generation"),
 		Keyword:    c.Query("keyword"),
+		Status:     c.DefaultQuery("status", "failure"),
 	})
 	if err != nil {
 		model.Fail(c, 500, err.Error())

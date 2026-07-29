@@ -24,6 +24,12 @@ const generationOptions = [
     { label: "文本", value: "text" },
 ];
 
+const statusOptions = [
+    { label: "失败日志", value: "failure" },
+    { label: "成功日志", value: "success" },
+    { label: "全部日志", value: "all" },
+];
+
 type ChannelIdentity = {
     channel_id?: number | null;
     channel_name?: string | null;
@@ -42,6 +48,7 @@ type FilterValues = {
     generation?: string;
     keyword?: string;
     userId?: number;
+    status?: string;
 };
 
 export default function AdminModelLogsPage() {
@@ -79,11 +86,12 @@ export default function AdminModelLogsPage() {
                     generation: values.generation,
                     keyword: values.keyword?.trim(),
                     userId: values.userId,
+                    status: values.status,
                 });
                 setLogs(data.items || []);
                 setPagination({ current: data.page, pageSize: data.page_size, total: data.total });
             } catch (err: any) {
-                message.error(err?.message || "获取模型失败日志失败");
+                message.error(err?.message || "获取模型调用日志失败");
             } finally {
                 setLoading(false);
             }
@@ -164,11 +172,11 @@ export default function AdminModelLogsPage() {
             ),
         },
         {
-            title: "状态",
+            title: "结果",
             dataIndex: "status_code",
             key: "status_code",
-            width: 90,
-            render: (value: number) => <Tag color={value >= 500 || value === 0 ? "red" : "orange"}>{value || "本地"}</Tag>,
+            width: 110,
+            render: (value: number, record) => <Tag color={record.is_success ? "green" : value >= 500 || value === 0 ? "red" : "orange"}>{record.is_success ? `成功 ${value || ""}` : value || "本地"}</Tag>,
         },
         {
             title: "错误",
@@ -195,9 +203,9 @@ export default function AdminModelLogsPage() {
                 <div>
                     <Title level={4} className="!mb-1 flex items-center gap-2">
                         <AlertTriangle className="size-5 text-amber-500" />
-                        模型失败日志
+                        模型调用日志
                     </Title>
-                    <Text type="secondary">仅记录失败调用，用于排查上游模型、计费和用户请求问题。</Text>
+                    <Text type="secondary">可查询成功和失败调用，并查看实际发送给上游的请求体。</Text>
                 </div>
             </div>
 
@@ -251,7 +259,10 @@ export default function AdminModelLogsPage() {
                 )}
             </Card>
 
-            <Form form={form} layout="inline" className="mb-4 gap-y-3" initialValues={{ generation: "" }} onFinish={() => fetchLogs(1, pagination.pageSize)}>
+            <Form form={form} layout="inline" className="mb-4 gap-y-3" initialValues={{ generation: "", status: "failure" }} onFinish={() => fetchLogs(1, pagination.pageSize)}>
+                <Form.Item name="status" label="状态">
+                    <Select options={statusOptions} className="!w-32" />
+                </Form.Item>
                 <Form.Item name="model" label="模型">
                     <Input allowClear placeholder="模型名" className="!w-52" />
                 </Form.Item>
@@ -291,12 +302,12 @@ export default function AdminModelLogsPage() {
                 pagination={{
                     ...pagination,
                     showSizeChanger: true,
-                    showTotal: (total) => `共 ${total} 条失败日志`,
+                    showTotal: (total) => `共 ${total} 条日志`,
                     onChange: (page, pageSize) => fetchLogs(page, pageSize),
                 }}
             />
 
-            <Modal title="失败详情" open={Boolean(selected)} footer={null} width={760} onCancel={() => setSelected(null)}>
+            <Modal title="调用详情" open={Boolean(selected)} footer={null} width={760} onCancel={() => setSelected(null)}>
                 {selected ? (
                     <div className="space-y-3">
                         <div className="grid gap-2 text-sm md:grid-cols-2">
@@ -317,7 +328,8 @@ export default function AdminModelLogsPage() {
                                 {generationLabels[selected.generation] || selected.generation || "-"}
                             </div>
                             <div>
-                                <Text type="secondary">状态：</Text>
+                                <Text type="secondary">结果：</Text>
+                                <Tag color={selected.is_success ? "green" : "red"}>{selected.is_success ? "成功" : "失败"}</Tag>
                                 {selected.status_code || "本地错误"}
                             </div>
                             <div className="md:col-span-2">
@@ -326,10 +338,12 @@ export default function AdminModelLogsPage() {
                                     {selected.method} {selected.path}
                                 </span>
                             </div>
-                            <div className="md:col-span-2">
-                                <Text type="secondary">错误：</Text>
-                                {selected.error_message || "-"}
-                            </div>
+                            {!selected.is_success ? (
+                                <div className="md:col-span-2">
+                                    <Text type="secondary">错误：</Text>
+                                    {selected.error_message || "-"}
+                                </div>
+                            ) : null}
                         </div>
                         <div className="rounded-lg border border-stone-200 p-3 dark:border-stone-800">
                             <div className="mb-2 flex items-center justify-between gap-2">
@@ -352,18 +366,21 @@ export default function AdminModelLogsPage() {
                                     <span className="break-all font-mono text-xs">{selected.upstream_url || "-"}</span>
                                 </div>
                             </div>
-                            {selected.request_body_truncated ? <Tag color="orange">请求体已脱敏或截断</Tag> : null}
+                            {selected.request_body_truncated ? <Tag color="orange">请求体已截断</Tag> : null}
+                            {isBase64RawRequestBody(selected.request_body) ? <Tag color="blue">二进制请求体已完整 base64 编码</Tag> : null}
                             <pre className="mt-2 max-h-[300px] overflow-auto rounded-lg bg-stone-950 p-3 text-xs text-stone-100">{formatRequestBody(selected.request_body, selected.request_sent)}</pre>
                         </div>
-                        <div className="rounded-lg border border-stone-200 p-3 dark:border-stone-800">
-                            <div className="mb-2 flex items-center justify-between gap-2">
-                                <div className="font-medium">错误响应体</div>
-                                <Button size="small" icon={<Copy className="size-3" />} onClick={() => copyText(formatErrorBody(selected.error_body), "错误响应体")}>
-                                    复制响应体
-                                </Button>
+                        {!selected.is_success ? (
+                            <div className="rounded-lg border border-stone-200 p-3 dark:border-stone-800">
+                                <div className="mb-2 flex items-center justify-between gap-2">
+                                    <div className="font-medium">错误响应体</div>
+                                    <Button size="small" icon={<Copy className="size-3" />} onClick={() => copyText(formatErrorBody(selected.error_body), "错误响应体")}>
+                                        复制响应体
+                                    </Button>
+                                </div>
+                                <pre className="max-h-[300px] overflow-auto rounded-lg bg-stone-950 p-3 text-xs text-stone-100">{formatErrorBody(selected.error_body)}</pre>
                             </div>
-                            <pre className="max-h-[300px] overflow-auto rounded-lg bg-stone-950 p-3 text-xs text-stone-100">{formatErrorBody(selected.error_body)}</pre>
-                        </div>
+                        ) : null}
                     </div>
                 ) : null}
             </Modal>
@@ -374,7 +391,11 @@ export default function AdminModelLogsPage() {
 function formatRequestBody(value: string, requestSent: boolean) {
     if (!requestSent) return "未向上游发送请求";
     if (!value) return "无请求体";
-    return formatErrorBody(value);
+    return value;
+}
+
+function isBase64RawRequestBody(value: string) {
+    return value.startsWith("[base64 encoded raw request body]\n");
 }
 
 function formatErrorBody(value: string) {

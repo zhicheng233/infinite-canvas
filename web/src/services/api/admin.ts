@@ -117,6 +117,7 @@ export type ModelCallLogItem = {
     request_body: string;
     request_body_truncated: boolean;
     request_sent: boolean;
+    is_success: boolean;
     created_at: string;
     channel_id?: number;
     channel_model_id?: number;
@@ -130,7 +131,7 @@ export type ModelCallLogResult = {
     page_size: number;
 };
 
-export async function listModelCallLogs(params: { page?: number; pageSize?: number; userId?: number; model?: string; generation?: string; keyword?: string }) {
+export async function listModelCallLogs(params: { page?: number; pageSize?: number; userId?: number; model?: string; generation?: string; keyword?: string; status?: string }) {
     const res = await apiClient.get("/model-call-logs", {
         params: {
             page: params.page || 1,
@@ -139,6 +140,7 @@ export async function listModelCallLogs(params: { page?: number; pageSize?: numb
             model: params.model || undefined,
             generation: params.generation || undefined,
             keyword: params.keyword || undefined,
+            status: params.status || undefined,
         },
     });
     return res.data.data as ModelCallLogResult;

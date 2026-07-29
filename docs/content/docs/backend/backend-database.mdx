@@ -168,8 +168,8 @@ API Key 仅用于后端代理调用，按 `API_KEY_ENCRYPTION_KEY` 配置加密�
 | error_body | longtext | 上游错误响应体 |
 | upstream_url | string(1000) | 实际请求上游 URL，已隐藏 URL 用户信息并脱敏敏感 query |
 | request_content_type | string(255) | 实际发送给上游的 Content-Type |
-| request_body | longtext | 脱敏并截断后的上游请求体快照 |
-| request_body_truncated | bool | 请求体快照是否发生脱敏或截断 |
+| request_body | longtext | 实际发送给上游的完整请求体；非 UTF-8 二进制会完整 base64 编码保存 |
+| request_body_truncated | bool | 请求体是否被截断；当前完整保存时通常为 false |
 | request_sent | bool | 是否已经向上游发起请求；本地校验或计费前失败为 false |
 
 管理后台模型健康概览基于该表统计近 24 小时、近 7 天失败量和 Top 失败模型。

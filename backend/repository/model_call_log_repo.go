@@ -19,7 +19,8 @@ func (r *ModelCallLogRepo) Create(log *model.ModelCallLog) error {
 func (r *ModelCallLogRepo) List(tenantID uint, query ModelCallLogQuery) ([]model.ModelCallLog, int64, error) {
 	var items []model.ModelCallLog
 	var total int64
-	base := r.db.Model(&model.ModelCallLog{}).Where("tenant_id = ? AND is_success = ?", tenantID, false)
+	base := r.db.Model(&model.ModelCallLog{}).Where("tenant_id = ?", tenantID)
+	base = applyModelCallLogStatusFilter(base, query.Status)
 	if query.UserID > 0 {
 		base = base.Where("user_id = ?", query.UserID)
 	}
@@ -36,8 +37,9 @@ func (r *ModelCallLogRepo) List(tenantID uint, query ModelCallLogQuery) ([]model
 	base.Count(&total)
 
 	q := r.db.Select("model_call_logs.*, channels.name as channel_name").
-		Where("tenant_id = ? AND is_success = ?", tenantID, false).
+		Where("tenant_id = ?", tenantID).
 		Joins("LEFT JOIN channels ON channels.id = model_call_logs.channel_id")
+	q = applyModelCallLogStatusFilter(q, query.Status)
 	if query.UserID > 0 {
 		q = q.Where("user_id = ?", query.UserID)
 	}
@@ -53,6 +55,17 @@ func (r *ModelCallLogRepo) List(tenantID uint, query ModelCallLogQuery) ([]model
 	}
 	err := q.Offset((query.Page - 1) * query.PageSize).Limit(query.PageSize).Order("model_call_logs.id DESC").Find(&items).Error
 	return items, total, err
+}
+
+func applyModelCallLogStatusFilter(q *gorm.DB, status string) *gorm.DB {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "success":
+		return q.Where("is_success = ?", true)
+	case "all":
+		return q
+	default:
+		return q.Where("is_success = ?", false)
+	}
 }
 
 func (r *ModelCallLogRepo) ListSince(tenantID uint, since time.Time, limit int) ([]model.ModelCallLog, error) {
@@ -76,4 +89,5 @@ type ModelCallLogQuery struct {
 	Model      string
 	Generation string
 	Keyword    string
+	Status     string
 }
