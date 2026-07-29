@@ -97,8 +97,8 @@ describe("video aspect ratio routing", () => {
             } else if (route === "seedance") {
                 expect(body).toMatchObject({ ratio: "9:16" });
             } else {
-                expect(body).toMatchObject({ ratio: "9:16", resolution: "720P", generate_audio: false, n: 1 });
-                for (const field of ["size", "width", "height", "aspect_ratio", "image"]) expect(body).not.toHaveProperty(field);
+                expect(body).toMatchObject({ ratio: "9:16", aspect_ratio: "9:16", resolution: "720P", generate_audio: false, n: 1 });
+                for (const field of ["size", "width", "height", "image"]) expect(body).not.toHaveProperty(field);
             }
         }
     });

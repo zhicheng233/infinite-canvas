@@ -329,11 +329,13 @@ async function createNewApiVideoTask(config: AiConfig, model: string, prompt: st
 async function createBinghuoVideoTask(config: AiConfig, model: string, prompt: string, references: ReferenceImage[], videoReferences: ReferenceVideo[], audioReferences: ReferenceAudio[], options?: RequestOptions): Promise<VideoGenerationTask> {
     const mode = normalizeBinghuoReferenceMode(config.videoReferenceMode);
     if (mode === "first_last" && references.length !== 2) throw new Error("首尾帧模式需要恰好两张参考图，并按首帧、尾帧顺序排列");
+    const ratio = normalizeBinghuoRatio(config.size);
     const payload: Record<string, unknown> = {
         model: modelOptionName(model),
         prompt,
         duration: Number(normalizeVideoSecondsForModel(config, model, config.videoSeconds)),
-        ratio: normalizeBinghuoRatio(config.size),
+        ratio,
+        aspect_ratio: ratio,
         resolution: normalizeBinghuoResolution(config.vquality),
         generate_audio: boolConfig(config.videoGenerateAudio, true),
         n: 1,
