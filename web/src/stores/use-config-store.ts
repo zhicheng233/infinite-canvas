@@ -680,13 +680,15 @@ export function imageEditRouteForModel(config: Pick<AiConfig, "modelRoutes">, va
     return (config.modelRoutes?.[modelRouteKey("image_edit", model)] || config.modelRoutes?.[modelRouteKey("image", model)] || "auto") as ImageRouteMode;
 }
 
-export function videoRouteForModel(config: Pick<AiConfig, "modelRoutes">, value: string) {
+export function videoRouteForModel(config: Pick<AiConfig, "modelRoutes"> & Partial<Pick<AiConfig, "videoChannelId" | "channelModelId">>, value: string) {
     const merge = parseMergeModelValue(value);
     if (merge && latestServerChannels.find((channel) => channel.id === merge.channelId)?.videoApiStandard === "binghuo") return "binghuo";
     const decoded = decodeChannelModel(value);
     const channelId = toNullableChannelId(decoded?.channelId);
     if (channelId && latestServerChannels.find((channel) => channel.id === channelId)?.videoApiStandard === "binghuo") return "binghuo";
-    return modelRouteForCapability(config, "video", value) as VideoRouteMode;
+    const explicitRoute = modelRouteForCapability(config, "video", value) as VideoRouteMode;
+    if (explicitRoute !== "auto") return explicitRoute;
+    return resolvedPhysicalVideoRoute(config, value) || "auto";
 }
 
 export function modelOptionLabel(config: AiConfig, value: string) {
@@ -968,6 +970,24 @@ function resolveChannelModel(channelId: number | null, modelName: string, modelI
     if (!channelId) return null;
     const models = useConfigStore.getState().serverChannelModels[channelId] || [];
     return models.find((model) => (!modelId || model.id === modelId) && model.model_name === modelName) || null;
+}
+
+function resolvedPhysicalVideoRoute(config: Pick<AiConfig, "modelRoutes"> & Partial<Pick<AiConfig, "videoChannelId" | "channelModelId">>, value: string): VideoRouteMode | "" {
+    const rawModel = modelOptionName(value).trim();
+    if (!rawModel) return "";
+    const decoded = decodeChannelModel(value);
+    const channelId = toNullableChannelId(decoded?.channelId) ?? toNullableChannelId(config.videoChannelId);
+    if (!channelId) return "";
+    const channel = latestServerChannels.find((item) => item.id === channelId);
+    if (channel?.videoApiStandard === "binghuo") return "binghuo";
+    const channelModel =
+        resolveChannelModel(channelId, rawModel, decoded?.channelModelId) ||
+        resolveChannelModel(channelId, rawModel, config.channelModelId) ||
+        resolveChannelModel(channelId, rawModel);
+    if (!channelModel) return "";
+    const encoded = encodeChannelModelIdentity(channelModel.channel_id, channelModel.id, channelModel.model_name);
+    const route = (config.modelRoutes?.[modelRouteKey("video", encoded)] || effectiveChannelVideoRoute(latestServerChannels, channelModel.channel_id, channelModel.video_route)) as VideoRouteMode;
+    return route === "auto" ? "" : route;
 }
 
 function findChannelModelById(modelId: number): ServerChannelModel | null {

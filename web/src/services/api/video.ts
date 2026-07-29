@@ -282,6 +282,7 @@ async function createYijiaVideoTask(config: AiConfig, model: string, prompt: str
         model: modelOptionName(model),
         prompt,
         size: normalizeVideoSize(config.size) || "1280x720",
+        input_reference: "",
         seconds: normalizeVideoSecondsForModel(config, model, config.videoSeconds),
         n: 1,
         watermark: boolConfig(config.videoWatermark, false),

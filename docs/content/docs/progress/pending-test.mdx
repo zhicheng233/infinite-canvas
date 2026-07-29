@@ -21,7 +21,7 @@ description: 已实现但需要用户测试确认的变更
 - [ ] 超级管理员可在管理概览配置全局公告；启用后用户访问时弹出，勾选“本次更新前不再弹出”后同版本不再弹，公告更新后应再次弹出。
 - [ ] 管理员在 `/admin/model-logs` 失败详情中可查看已脱敏截断的实际上游请求 URL、Content-Type 和请求体；本地校验失败应显示未向上游发送，请求体关键词可被筛选命中。
 - [ ] 管理员在 `/admin/model-logs` 可查看模型失败日志，失败渠道应显示渠道名或渠道 ID，并可按模型、用户、类型和关键词筛选。
-- [ ] 视频模型路由选择 `yijia` 后，应按 `/v1/videos` JSON 格式提交 URL `input_reference`、`seconds`、`watermark` 等字段。
+- [ ] 视频模型路由选择 `yijia` 后，应按 `/v1/videos` JSON 格式提交 `size` 和字符串 `input_reference`；旧画布节点或原始模型名也不得误走 multipart `input_reference[]`、`resolution_name`、`preset` 请求。
 - [ ] 管理员在 `/admin/api-config` 可为每个视频模型单独配置可选时长；前台视频时长面板应只显示后台允许的选项。
 - [ ] 管理员在 `/admin/api-config` 可为每个图片模型分别配置“文生图接口”和“图生图接口”。
 - [ ] 旧的 `model_routes.image:<model>` 配置仍会兼容为图生图接口，无需手工改库即可继续使用。

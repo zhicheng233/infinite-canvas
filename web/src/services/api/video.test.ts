@@ -1,7 +1,7 @@
 import axios from "axios";
 import { afterEach, beforeEach, describe, expect, it, jest } from "bun:test";
 
-import { defaultConfig } from "@/stores/use-config-store";
+import { defaultConfig, useConfigStore } from "@/stores/use-config-store";
 import { createVideoGenerationTask, pollVideoGenerationTask } from "./video";
 
 const originalWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
@@ -48,6 +48,8 @@ beforeEach(() => {
 
 afterEach(() => {
     jest.restoreAllMocks();
+    useConfigStore.getState().invalidateServerCatalogRefresh();
+    useConfigStore.setState({ config: defaultConfig });
     for (const [key, descriptor] of [
         ["window", originalWindow],
         ["localStorage", originalLocalStorage],
@@ -66,7 +68,7 @@ describe("video aspect ratio routing", () => {
             headers: { "x-resolved-channel-id": "2", "x-resolved-channel-model-id": "62" },
         });
 
-        for (const route of ["openai", "veo_json", "waninter", "xai", "newapi", "seedance", "binghuo"] as const) {
+        for (const route of ["openai", "veo_json", "waninter", "yijia", "xai", "newapi", "seedance", "binghuo"] as const) {
             post.mockClear();
             const task = await createVideoGenerationTask(videoConfig(route), "test prompt");
             const [requestUrl, body] = post.mock.calls[0];
@@ -77,6 +79,11 @@ describe("video aspect ratio routing", () => {
             if (route === "openai") {
                 expect((body as FormData).get("size")).toBe("720x1280");
                 expect((body as FormData).get("aspect_ratio")).toBeNull();
+            } else if (route === "yijia") {
+                expect(typeof (body as { get?: unknown }).get).toBe("undefined");
+                expect(body).toMatchObject({ size: "720x1280", input_reference: "" });
+                expect(body).not.toHaveProperty("resolution_name");
+                expect(body).not.toHaveProperty("preset");
             } else if (route === "veo_json" || route === "xai") {
                 expect(body).toMatchObject({ aspect_ratio: "9:16" });
             } else if (route === "waninter") {
@@ -90,6 +97,53 @@ describe("video aspect ratio routing", () => {
                 for (const field of ["size", "width", "height", "aspect_ratio", "image"]) expect(body).not.toHaveProperty(field);
             }
         }
+    });
+
+    it("uses yijia JSON when a raw model resolves to a selected yijia channel model", async () => {
+        useConfigStore.getState().applyServerChannelCatalog(
+            [{ id: 7, name: "Yijia", enabled: true, video_api_standard: "default" }],
+            {
+                7: [
+                    {
+                        id: 77,
+                        channel_id: 7,
+                        model_name: "omni_flash",
+                        capabilities: ["video"],
+                        enabled: true,
+                        image_generate_route: "auto",
+                        image_edit_route: "auto",
+                        video_route: "yijia",
+                        video_durations: [],
+                        video_customizable: false,
+                        sort_order: 0,
+                    },
+                ],
+            },
+        );
+        const post = jest.spyOn(axios, "post").mockResolvedValue({ data: { id: "task_yijia" }, headers: {} });
+        const config = {
+            ...defaultConfig,
+            model: "omni_flash",
+            videoModel: "omni_flash",
+            videoModels: ["omni_flash"],
+            videoChannelId: 7,
+            channelModelId: 77,
+            size: "720x1280",
+            modelRoutes: {},
+        };
+
+        await createVideoGenerationTask(config, "生成视频");
+
+        const [requestUrl, body, requestConfig] = post.mock.calls[0];
+        const query = new URL(String(requestUrl)).searchParams;
+        const headers = (requestConfig?.headers || {}) as Record<string, string>;
+        expect(query.get("channel_id")).toBe("7");
+        expect(query.get("channel_model_id")).toBe("77");
+        expect(headers["Content-Type"]).toBe("application/json");
+        expect(typeof (body as { get?: unknown }).get).toBe("undefined");
+        expect(body).toMatchObject({ model: "omni_flash", prompt: "生成视频", size: "720x1280", input_reference: "" });
+        expect(body).not.toHaveProperty("resolution_name");
+        expect(body).not.toHaveProperty("preset");
     });
 
     it("maps Binghuo reference media to canonical fields", async () => {
