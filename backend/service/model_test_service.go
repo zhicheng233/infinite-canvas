@@ -377,22 +377,16 @@ func buildVideoModelTestRequest(cfg *model.TenantApiConfig, input ModelTestInput
 	hasReferences := input.HasReferences || input.ReferenceCount > 0 || strings.TrimSpace(input.Operation) == "image_to_video" || strings.TrimSpace(input.Operation) == "video_to_video"
 	switch route {
 	case "openai":
-		var buffer bytes.Buffer
-		writer := multipart.NewWriter(&buffer)
-		_ = writer.WriteField("model", modelName)
-		_ = writer.WriteField("prompt", prompt)
-		_ = writer.WriteField("seconds", fmt.Sprintf("%d", seconds))
-		_ = writer.WriteField("size", size)
-		_ = writer.WriteField("resolution_name", "720p")
-		_ = writer.WriteField("preset", "normal")
+		payload := map[string]interface{}{
+			"model":           modelName,
+			"prompt":          prompt,
+			"input_reference": "",
+			"size":            size,
+		}
 		if hasReferences {
-			_ = writer.WriteField("image", testReferenceImageURL)
-			_ = writer.WriteField("first_image_url", testReferenceImageURL)
+			payload["input_reference"] = testReferenceImageURL
 		}
-		if err := writer.Close(); err != nil {
-			return modelTestRequest{}, err
-		}
-		return modelTestRequest{Generation: "video", Route: route, Method: http.MethodPost, Path: "/videos", ContentType: writer.FormDataContentType(), Body: buffer.Bytes()}, nil
+		return jsonModelTestRequest("video", route, "/videos", payload)
 	case "veo_json":
 		payload := map[string]interface{}{
 			"model":        modelName,
@@ -426,18 +420,13 @@ func buildVideoModelTestRequest(cfg *model.TenantApiConfig, input ModelTestInput
 		return jsonModelTestRequest("video", route, "/videos", payload)
 	case "yijia":
 		payload := map[string]interface{}{
-			"model":      modelName,
-			"prompt":     prompt,
-			"size":       size,
-			"seconds":    fmt.Sprintf("%d", seconds),
-			"n":          1,
-			"watermark":  false,
-			"private":    false,
-			"storyboard": false,
+			"model":           modelName,
+			"prompt":          prompt,
+			"input_reference": "",
+			"size":            size,
 		}
 		if hasReferences {
 			payload["input_reference"] = testReferenceImageURL
-			payload["first_image_url"] = testReferenceImageURL
 		}
 		return jsonModelTestRequest("video", route, "/videos", payload)
 	case "xai":

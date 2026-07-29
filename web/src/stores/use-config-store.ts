@@ -416,7 +416,7 @@ export const useConfigStore = create<ConfigStore>()(
                         serverMetrics: snapshot.metrics,
                         serverCatalogLoading: false,
                         serverCatalogError: null,
-                        config: applyChannelScopedSelections(state.config, serverChannels, serverChannelModels, snapshot.pricing, snapshot.metrics, snapshot.autoChannelModels),
+                        config: applyChannelScopedSelections(state.config, serverChannels, serverChannelModels, snapshot.pricing, snapshot.metrics, snapshot.autoChannelModels, state.serverMergeGroups),
                     };
                 }),
             failServerCatalogRefresh: (requestId, serverCatalogError) => set((state) => (requestId === state.serverCatalogRequestId ? { serverCatalogLoading: false, serverCatalogError } : state)),
@@ -424,7 +424,7 @@ export const useConfigStore = create<ConfigStore>()(
                 set((state) => ({
                     serverPricing,
                     serverMetrics,
-                    config: applyChannelScopedSelections(state.config, state.serverChannels, state.serverChannelModels, serverPricing, serverMetrics, state.autoChannelModels),
+                    config: applyChannelScopedSelections(state.config, state.serverChannels, state.serverChannelModels, serverPricing, serverMetrics, state.autoChannelModels, state.serverMergeGroups),
                 })),
             applyServerModelCatalog: (catalog) =>
                 set((state) => {
@@ -472,18 +472,22 @@ export const useConfigStore = create<ConfigStore>()(
                         serverChannels,
                         serverChannelModels,
                         serverCatalogError: null,
-                        config: applyChannelScopedSelections(state.config, serverChannels, serverChannelModels, state.serverPricing, state.serverMetrics, state.autoChannelModels),
+                        config: applyChannelScopedSelections(state.config, serverChannels, serverChannelModels, state.serverPricing, state.serverMetrics, state.autoChannelModels, state.serverMergeGroups),
                     };
                 }),
             applyAutoChannelModels: (autoChannelModels) =>
                 set((state) => ({
                     autoChannelModels,
-                    config: applyChannelScopedSelections(state.config, state.serverChannels, state.serverChannelModels, state.serverPricing, state.serverMetrics, autoChannelModels),
+                    config: applyChannelScopedSelections(state.config, state.serverChannels, state.serverChannelModels, state.serverPricing, state.serverMetrics, autoChannelModels, state.serverMergeGroups),
                 })),
             applyServerMergeGroups: (channelId, groups) =>
-                set((state) => ({
-                    serverMergeGroups: { ...state.serverMergeGroups, [channelId]: groups },
-                })),
+                set((state) => {
+                    const serverMergeGroups = { ...state.serverMergeGroups, [channelId]: groups };
+                    return {
+                        serverMergeGroups,
+                        config: applyChannelScopedSelections(state.config, state.serverChannels, state.serverChannelModels, state.serverPricing, state.serverMetrics, state.autoChannelModels, serverMergeGroups),
+                    };
+                }),
             selectCapabilityChannel: (capability, channelId) =>
                 set((state) => {
                     const next = { ...state.config, [channelIdKey(capability)]: channelId };
@@ -688,6 +692,7 @@ export function videoRouteForModel(config: Pick<AiConfig, "modelRoutes"> & Parti
     if (channelId && latestServerChannels.find((channel) => channel.id === channelId)?.videoApiStandard === "binghuo") return "binghuo";
     const explicitRoute = modelRouteForCapability(config, "video", value) as VideoRouteMode;
     if (explicitRoute !== "auto") return explicitRoute;
+    if (merge) return resolvedMergeVideoRoute(merge) || "auto";
     return resolvedPhysicalVideoRoute(config, value) || "auto";
 }
 
@@ -832,6 +837,7 @@ export function buildChannelModelOptions(
             const bestMetricsStatus = matchingModels.some((m) => m.metricsStatus === "ok") ? "ok" : "unavailable";
 
             const channelName = channels.find((c) => c.id === channelId)?.name || "";
+            const videoMetadata = mergedVideoMetadata(channels, channelId, matchingModels, capability);
             mergedOptions.push({
                 value: `merge://${channelId}::${group.group_name}`,
                 channelId,
@@ -844,9 +850,9 @@ export function buildChannelModelOptions(
                 metricsStatus: bestMetricsStatus,
                 imageGenerateRoute: "auto",
                 imageEditRoute: "auto",
-                videoRoute: channels.find((channel) => channel.id === channelId)?.videoApiStandard === "binghuo" ? "binghuo" : "auto",
-                videoDurations: [],
-                videoCustomizable: false,
+                videoRoute: videoMetadata.videoRoute,
+                videoDurations: videoMetadata.videoDurations,
+                videoCustomizable: videoMetadata.videoCustomizable,
                 sortOrder: -1,
             });
         }
@@ -858,19 +864,13 @@ export function buildChannelModelOptions(
             return [
                 ...mergedOptions.sort((a, b) => a.rawModel.localeCompare(b.rawModel)),
                 ...remaining.sort((left, right) => {
-                    if (left.successRate === null && right.successRate !== null) return 1;
-                    if (left.successRate !== null && right.successRate === null) return -1;
-                    if (left.successRate !== null && right.successRate !== null && left.successRate !== right.successRate) return right.successRate - left.successRate;
-                    return left.sortOrder - right.sortOrder || left.rawModel.localeCompare(right.rawModel) || left.channelModelId - right.channelModelId;
+                    return compareChannelModelOptions(left, right);
                 }),
             ];
         }
     }
     return options.sort((left, right) => {
-        if (left.successRate === null && right.successRate !== null) return 1;
-        if (left.successRate !== null && right.successRate === null) return -1;
-        if (left.successRate !== null && right.successRate !== null && left.successRate !== right.successRate) return right.successRate - left.successRate;
-        return left.sortOrder - right.sortOrder || left.rawModel.localeCompare(right.rawModel) || left.channelModelId - right.channelModelId;
+        return compareChannelModelOptions(left, right);
     });
 }
 
@@ -955,6 +955,24 @@ function effectiveChannelVideoRoute(channels: ModelChannel[], channelId: number,
     return channels.find((channel) => channel.id === channelId)?.videoApiStandard === "binghuo" ? "binghuo" : modelRoute || "auto";
 }
 
+function compareChannelModelOptions(left: ChannelModelOption, right: ChannelModelOption) {
+    if (left.successRate === null && right.successRate !== null) return 1;
+    if (left.successRate !== null && right.successRate === null) return -1;
+    if (left.successRate !== null && right.successRate !== null && left.successRate !== right.successRate) return right.successRate - left.successRate;
+    return left.sortOrder - right.sortOrder || left.rawModel.localeCompare(right.rawModel) || left.channelModelId - right.channelModelId;
+}
+
+function preferredChannelModelOption(options: ChannelModelOption[]) {
+    return [...options].sort(compareChannelModelOptions)[0] || null;
+}
+
+function mergedVideoMetadata(channels: ModelChannel[], channelId: number, matchingModels: ChannelModelOption[], capability: ModelCapability) {
+    const preferred = preferredChannelModelOption(matchingModels);
+    if (capability !== "video") return { videoRoute: "auto", videoDurations: [] as number[], videoCustomizable: false };
+    if (channels.find((channel) => channel.id === channelId)?.videoApiStandard === "binghuo") return { videoRoute: "binghuo", videoDurations: preferred?.videoDurations || [], videoCustomizable: Boolean(preferred?.videoCustomizable) };
+    return { videoRoute: preferred?.videoRoute || "auto", videoDurations: preferred?.videoDurations || [], videoCustomizable: Boolean(preferred?.videoCustomizable) };
+}
+
 function normalizeServerChannelModels(items: Record<number, ChannelModelInfo[]>, channels: ModelChannel[]) {
     const enabledChannels = new Set(channels.map((channel) => channel.id));
     return Object.fromEntries(
@@ -990,6 +1008,17 @@ function resolvedPhysicalVideoRoute(config: Pick<AiConfig, "modelRoutes"> & Part
     return route === "auto" ? "" : route;
 }
 
+function resolvedMergeVideoRoute(merge: { channelId: number; groupName: string }): VideoRouteMode | "" {
+    const state = useConfigStore.getState();
+    const channel = state.serverChannels.find((item) => item.id === merge.channelId);
+    if (channel?.videoApiStandard === "binghuo") return "binghuo";
+    const group = state.serverMergeGroups[merge.channelId]?.find((item) => item.enabled && item.group_name === merge.groupName);
+    if (!group) return "";
+    const matchingModels = buildChannelModelOptions(state.serverChannels, state.serverChannelModels, state.serverPricing, state.serverMetrics, "video", merge.channelId, state.autoChannelModels).filter((option) => option.channelId === merge.channelId && option.rawModel.startsWith(group.pattern));
+    const route = mergedVideoMetadata(state.serverChannels, merge.channelId, matchingModels, "video").videoRoute as VideoRouteMode;
+    return route === "auto" ? "" : route;
+}
+
 function findChannelModelById(modelId: number): ServerChannelModel | null {
     return (
         Object.values(useConfigStore.getState().serverChannelModels)
@@ -998,13 +1027,14 @@ function findChannelModelById(modelId: number): ServerChannelModel | null {
     );
 }
 
-function applyChannelScopedSelections(config: AiConfig, channels: ModelChannel[], models: Record<number, ServerChannelModel[]>, pricing: PricingItem[] = [], metrics: MetricsResponse | null = null, autoChannelModels: AutoChannelModelInfo[] = []) {
+function applyChannelScopedSelections(config: AiConfig, channels: ModelChannel[], models: Record<number, ServerChannelModel[]>, pricing: PricingItem[] = [], metrics: MetricsResponse | null = null, autoChannelModels: AutoChannelModelInfo[] = [], mergeGroupsByChannel: Record<number, MergeGroup[]> = {}) {
     const next = { ...config };
     for (const capability of ["image", "video", "text", "audio"] as ModelCapability[]) {
         const requestedChannelId = normalizeSelectedChannelId(config[channelIdKey(capability)], channels);
-        const hasOptions = (channelId: number) => buildChannelModelOptions(channels, models, pricing, metrics, capability, channelId, autoChannelModels).length > 0;
+        const mergeGroupsForChannel = (channelId: number) => (channelId > 0 ? mergeGroupsByChannel[channelId] : undefined);
+        const hasOptions = (channelId: number) => buildChannelModelOptions(channels, models, pricing, metrics, capability, channelId, autoChannelModels, mergeGroupsForChannel(channelId)).length > 0;
         const channelId = requestedChannelId === 0 ? 0 : requestedChannelId !== null && hasOptions(requestedChannelId) ? requestedChannelId : channels.find((channel) => hasOptions(channel.id))?.id || null;
-        const options = channelId !== null ? buildChannelModelOptions(channels, models, pricing, metrics, capability, channelId, autoChannelModels).map((option) => option.value) : [];
+        const options = channelId !== null ? buildChannelModelOptions(channels, models, pricing, metrics, capability, channelId, autoChannelModels, mergeGroupsForChannel(channelId)).map((option) => option.value) : [];
         next[channelIdKey(capability)] = channelId;
         next[modelListKey(capability)] = options;
         const current = next[`${capability}Model`];
@@ -1033,6 +1063,16 @@ function applyChannelScopedSelections(config: AiConfig, channels: ModelChannel[]
         if (option.videoRoute !== "auto") next.modelRoutes[modelRouteKey("video", option.value)] = option.videoRoute;
         if (option.videoDurations.length) next.modelVideoDurations[option.value] = option.videoDurations;
         if (option.videoCustomizable) next.modelVideoCustomizable[option.value] = true;
+    }
+    for (const [channelIdValue, mergeGroups] of Object.entries(mergeGroupsByChannel)) {
+        const channelId = Number(channelIdValue);
+        if (!channelId || !mergeGroups?.length) continue;
+        for (const option of buildChannelModelOptions(channels, models, pricing, metrics, "video", channelId, autoChannelModels, mergeGroups)) {
+            if (!isMergeModelValue(option.value)) continue;
+            if (option.videoRoute !== "auto") next.modelRoutes[modelRouteKey("video", option.value)] = option.videoRoute;
+            if (option.videoDurations.length) next.modelVideoDurations[option.value] = option.videoDurations;
+            if (option.videoCustomizable) next.modelVideoCustomizable[option.value] = true;
+        }
     }
     next.model = next.imageModel || next.videoModel || next.textModel || next.audioModel || "";
     return next;

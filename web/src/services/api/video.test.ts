@@ -77,11 +77,15 @@ describe("video aspect ratio routing", () => {
             expect(task).toMatchObject({ channelId: 2, channelModelId: 62 });
 
             if (route === "openai") {
-                expect((body as FormData).get("size")).toBe("720x1280");
-                expect((body as FormData).get("aspect_ratio")).toBeNull();
+                const headers = (post.mock.calls[0][2]?.headers || {}) as Record<string, string>;
+                expect(headers["Content-Type"]).toBe("application/json");
+                expect(typeof (body as { get?: unknown }).get).toBe("undefined");
+                expect(body).toEqual({ model: "video-model", prompt: "test prompt", input_reference: "", size: "720x1280" });
             } else if (route === "yijia") {
                 expect(typeof (body as { get?: unknown }).get).toBe("undefined");
-                expect(body).toMatchObject({ size: "720x1280", input_reference: "" });
+                expect(body).toEqual({ model: "video-model", prompt: "test prompt", input_reference: "", size: "720x1280" });
+                expect(body).not.toHaveProperty("seconds");
+                expect(body).not.toHaveProperty("n");
                 expect(body).not.toHaveProperty("resolution_name");
                 expect(body).not.toHaveProperty("preset");
             } else if (route === "veo_json" || route === "xai") {
@@ -141,7 +145,60 @@ describe("video aspect ratio routing", () => {
         expect(query.get("channel_model_id")).toBe("77");
         expect(headers["Content-Type"]).toBe("application/json");
         expect(typeof (body as { get?: unknown }).get).toBe("undefined");
-        expect(body).toMatchObject({ model: "omni_flash", prompt: "生成视频", size: "720x1280", input_reference: "" });
+        expect(body).toEqual({ model: "omni_flash", prompt: "生成视频", input_reference: "", size: "720x1280" });
+        expect(body).not.toHaveProperty("seconds");
+        expect(body).not.toHaveProperty("n");
+        expect(body).not.toHaveProperty("resolution_name");
+        expect(body).not.toHaveProperty("preset");
+    });
+
+    it("uses yijia JSON when a default-standard merge model inherits a yijia physical route", async () => {
+        useConfigStore.setState({ config: { ...defaultConfig, model: "merge://7::omni_flash", videoModel: "merge://7::omni_flash", videoChannelId: 7, size: "720x1280" } });
+        useConfigStore.getState().applyServerChannelCatalog(
+            [{ id: 7, name: "混合渠道1", enabled: true, video_api_standard: "default" }],
+            {
+                7: [
+                    {
+                        id: 77,
+                        channel_id: 7,
+                        model_name: "omni_flash",
+                        capabilities: ["video"],
+                        enabled: true,
+                        image_generate_route: "auto",
+                        image_edit_route: "auto",
+                        video_route: "yijia",
+                        video_durations: [6],
+                        video_customizable: true,
+                        sort_order: 0,
+                    },
+                ],
+            },
+        );
+        useConfigStore.getState().applyServerOptionMetadata([{ model: "omni_flash", credits_per_unit: 1, unit_type: "per_video" }], null);
+        useConfigStore.getState().applyServerMergeGroups(7, [
+            {
+                id: 1,
+                channel_id: 7,
+                group_name: "omni_flash",
+                pattern: "omni_flash",
+                enabled: true,
+                created_at: "",
+                updated_at: "",
+            },
+        ]);
+        const post = jest.spyOn(axios, "post").mockResolvedValue({ data: { id: "task_yijia_merge" }, headers: {} });
+
+        await createVideoGenerationTask(useConfigStore.getState().config, "生成视频");
+
+        const [requestUrl, body, requestConfig] = post.mock.calls[0];
+        const query = new URL(String(requestUrl)).searchParams;
+        const headers = (requestConfig?.headers || {}) as Record<string, string>;
+        expect(query.get("channel_id")).toBe("7");
+        expect(query.get("fuzzy_group_name")).toBe("omni_flash");
+        expect(headers["Content-Type"]).toBe("application/json");
+        expect(typeof (body as { get?: unknown }).get).toBe("undefined");
+        expect(body).toEqual({ model: "omni_flash", prompt: "生成视频", input_reference: "", size: "720x1280" });
+        expect(body).not.toHaveProperty("input_reference[]");
         expect(body).not.toHaveProperty("resolution_name");
         expect(body).not.toHaveProperty("preset");
     });

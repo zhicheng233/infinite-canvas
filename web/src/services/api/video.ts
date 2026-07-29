@@ -168,17 +168,16 @@ export async function storeGeneratedVideo(result: VideoGenerationResult): Promis
 }
 
 async function createOpenAIVideoTask(config: AiConfig, model: string, prompt: string, references: ReferenceImage[], options?: RequestOptions): Promise<VideoGenerationTask> {
-    const body = new FormData();
-    body.append("model", modelOptionName(model));
-    body.append("prompt", prompt);
-    body.append("seconds", normalizeVideoSecondsForModel(config, model, config.videoSeconds));
-    if (normalizeVideoSize(config.size)) body.append("size", normalizeVideoSize(config.size)!);
-    body.append("resolution_name", normalizeVideoResolution(config.vquality));
-    body.append("preset", "normal");
-    const files = await Promise.all(references.slice(0, 7).map(async (image) => dataUrlToFile({ ...image, dataUrl: await imageToDataUrl(image) })));
-    files.forEach((file) => body.append("input_reference[]", file));
+    if (references.length > 1) throw new Error("当前视频模型只支持单张参考图");
+    const body: Record<string, unknown> = {
+        model: modelOptionName(model),
+        prompt,
+        input_reference: "",
+        size: normalizeVideoSize(config.size) || "1280x720",
+    };
+    if (references[0]) body.input_reference = await resolveYijiaInputReference(references[0]);
     try {
-        const response = await axios.post<ApiVideoResponse>(aiApiUrl(config, "/videos", { model }), body, { headers: aiHeaders(config), signal: options?.signal });
+        const response = await axios.post<ApiVideoResponse>(aiApiUrl(config, "/videos", { model }), body, { headers: aiHeaders(config, "application/json"), signal: options?.signal });
         const created = unwrapVideoResponse(response.data);
         const taskId = created.id || created.task_id;
         if (!taskId) throw new Error("视频接口没有返回任务 ID");
@@ -281,13 +280,8 @@ async function createYijiaVideoTask(config: AiConfig, model: string, prompt: str
     const payload: Record<string, unknown> = {
         model: modelOptionName(model),
         prompt,
-        size: normalizeVideoSize(config.size) || "1280x720",
         input_reference: "",
-        seconds: normalizeVideoSecondsForModel(config, model, config.videoSeconds),
-        n: 1,
-        watermark: boolConfig(config.videoWatermark, false),
-        private: false,
-        storyboard: false,
+        size: normalizeVideoSize(config.size) || "1280x720",
     };
     if (references.length > 1) throw new Error("当前视频模型只支持单张参考图");
     if (references[0]) payload.input_reference = await resolveYijiaInputReference(references[0]);

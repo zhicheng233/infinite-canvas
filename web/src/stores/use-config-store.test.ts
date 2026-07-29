@@ -171,6 +171,45 @@ test("Binghuo channel standard overrides direct, merge, and Auto video routes", 
     expect(videoRouteForModel(defaultConfig, "merge://1::video-group")).toBe("binghuo");
 });
 
+test("default-standard merge video models inherit the physical yijia route", () => {
+    const videoModels = {
+        1: [
+            {
+                ...models[1][0],
+                id: 51,
+                model_name: "omni_flash",
+                capabilities: ["video"],
+                video_route: "yijia",
+                video_durations: [6],
+                video_customizable: true,
+            },
+        ],
+    };
+    const videoPricing = [{ model: "omni_flash", credits_per_unit: 1, unit_type: "per_video" }];
+    const mergeGroup = {
+        id: 1,
+        channel_id: 1,
+        group_name: "omni_flash",
+        pattern: "omni_flash",
+        enabled: true,
+        created_at: "",
+        updated_at: "",
+    };
+
+    useConfigStore.setState({ config: { ...defaultConfig, videoChannelId: 1, videoModel: "merge://1::omni_flash", videoModels: ["merge://1::omni_flash"] }, serverMergeGroups: {} });
+    useConfigStore.getState().applyServerChannelCatalog(channels, videoModels);
+    useConfigStore.getState().applyServerOptionMetadata(videoPricing, null);
+    useConfigStore.getState().applyServerMergeGroups(1, [mergeGroup]);
+
+    const config = useConfigStore.getState().config;
+    const mergeValue = "merge://1::omni_flash";
+    expect(config.videoModels).toContain(mergeValue);
+    expect(config.modelRoutes[`video:${mergeValue}`]).toBe("yijia");
+    expect(config.modelVideoDurations[mergeValue]).toEqual([6]);
+    expect(config.modelVideoCustomizable[mergeValue]).toBe(true);
+    expect(videoRouteForModel(config, mergeValue)).toBe("yijia");
+});
+
 test("Auto visibility follows usable priced options rather than physical channel count", () => {
     expect(hasUsableAutoChannel("image", { serverChannels: channels, serverChannelModels: models, serverPricing: pricing, serverMetrics: null, autoChannelModels: [] })).toBe(false);
     expect(hasUsableAutoChannel("image", { serverChannels: channels, serverChannelModels: models, serverPricing: pricing, serverMetrics: null, autoChannelModels: [autoModel] })).toBe(false);

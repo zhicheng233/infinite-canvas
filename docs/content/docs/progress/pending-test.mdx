@@ -22,7 +22,7 @@ description: 已实现但需要用户测试确认的变更
 - [ ] 管理员在 `/admin/model-logs` 失败详情中可查看实际上游请求 URL、Content-Type 和请求体；本地校验失败应显示未向上游发送，请求体关键词可被筛选命中。
 - [ ] 管理员在 `/admin/model-logs` 可切换查看失败、成功或全部模型调用日志；成功日志详情也应显示实际上游请求 URL、Content-Type 和完整请求体，JSON 请求体不得被改写或截断。
 - [ ] 管理员在 `/admin/model-logs` 可查看模型失败日志，失败渠道应显示渠道名或渠道 ID，并可按模型、用户、类型和关键词筛选。
-- [ ] 视频模型路由选择 `yijia` 后，应按 `/v1/videos` JSON 格式提交 `size` 和字符串 `input_reference`；旧画布节点或原始模型名也不得误走 multipart `input_reference[]`、`resolution_name`、`preset` 请求。
+- [ ] 默认标准视频请求和 `yijia` 路由都应按 `/v1/videos` JSON 格式提交 `model`、`prompt`、`size` 和字符串 `input_reference`；混合渠道、旧画布节点或原始模型名也不得误走 multipart `input_reference[]`、`resolution_name`、`preset` 请求。
 - [ ] 管理员在 `/admin/api-config` 可为每个视频模型单独配置可选时长；前台视频时长面板应只显示后台允许的选项。
 - [ ] 管理员在 `/admin/api-config` 可为每个图片模型分别配置“文生图接口”和“图生图接口”。
 - [ ] 旧的 `model_routes.image:<model>` 配置仍会兼容为图生图接口，无需手工改库即可继续使用。
