@@ -211,5 +211,7 @@ function videoErrorGuidance(message: string) {
         return "更换参考图或调整提示词，避免真实人物、人脸或敏感内容。";
     }
     if (error.includes("图片") || error.includes("image")) return "检查参考图是否可访问、格式是否支持，必要时更换或压缩后重试。";
+    if (error.includes("prompt is too short")) return "提示词过短，请补充描述后重试。";
     return "可稍后重试，或更换模型/渠道。";
+
 }
