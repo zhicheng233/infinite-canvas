@@ -8,6 +8,7 @@ import { navigationTools, type NavigationToolSlug } from "@/constant/navigation-
 import { AppConfigModal } from "@/components/layout/app-config-modal";
 import { MobileNavDrawer } from "@/components/layout/mobile-nav-drawer";
 import { UserStatusActions } from "@/components/layout/user-status-actions";
+import { useRechargeDialog } from "@/hooks/use-recharge-dialog";
 import { cn } from "@/lib/utils";
 import { useUserStore } from "@/stores/use-user-store";
 import { useState } from "react";
@@ -16,6 +17,7 @@ export function AppTopNav() {
     const pathname = usePathname();
     const user = useUserStore((state) => state.user);
     const [mobileNavOpen, setMobileNavOpen] = useState(false);
+    const openRechargeDialog = useRechargeDialog();
     const hideHeader = /^\/canvas\/[^/]+/.test(pathname);
     const isAdmin = user?.role === "super_admin" || user?.role === "tenant_admin";
     const visibleTools = navigationTools.filter((tool) => !tool.adminOnly || isAdmin);
@@ -46,6 +48,19 @@ export function AppTopNav() {
                                 {visibleTools.map((tool) => {
                                     const Icon = tool.icon;
                                     const active = tool.slug === activeToolSlug;
+                                    if (tool.slug === "recharge") {
+                                        return (
+                                            <button
+                                                key={tool.slug}
+                                                type="button"
+                                                onClick={openRechargeDialog}
+                                                className="relative flex h-16 shrink-0 items-center gap-2 border-0 bg-transparent p-0 text-sm leading-6 text-stone-500 transition after:absolute after:inset-x-0 after:bottom-0 after:h-px after:bg-transparent hover:text-stone-950 dark:text-stone-400 dark:hover:text-stone-100"
+                                            >
+                                                <Icon className="size-4" />
+                                                <span className="truncate">{tool.label}</span>
+                                            </button>
+                                        );
+                                    }
                                     return (
                                         <Link
                                             key={tool.slug}

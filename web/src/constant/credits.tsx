@@ -6,6 +6,7 @@ import { Button } from "antd";
 
 import { estimateCost, getBalance } from "@/services/api/credits";
 import { getStoredToken } from "@/services/api/client";
+import { useRechargeDialog } from "@/hooks/use-recharge-dialog";
 import { decodeChannelModel, modelOptionName, parseMergeModelValue } from "@/stores/use-config-store";
 
 export function CreditSymbol({ className, ...props }: ComponentProps<"span">) {
@@ -176,6 +177,7 @@ export function useEstimatedCreditCost(model: string, count?: string | number, o
 }
 
 export function CreditCostHint({ credits, estimate, balance, compact = false }: { credits?: number; estimate?: CreditEstimate; balance: number | null; compact?: boolean }) {
+    const openRechargeDialog = useRechargeDialog();
     const current = estimate || { status: "ready", credits: credits || 0 };
     const currentCredits = current.credits;
     const failed = current.status === "error";
@@ -200,7 +202,7 @@ export function CreditCostHint({ credits, estimate, balance, compact = false }: 
                 {failed ? "计费预估失败" : current.status === "idle" || current.status === "loading" ? "正在读取计费配置" : hasCost ? `本次预计扣除 ${currentCredits} 积分${insufficient ? "，余额不足" : ""}` : "当前模型未配置扣费"}
             </span>
             {insufficient ? (
-                <Button size="small" type="link" href="/recharge" className="!h-auto !p-0">
+                <Button size="small" type="link" onClick={openRechargeDialog} className="!h-auto !p-0">
                     去充值
                 </Button>
             ) : null}
@@ -213,12 +215,13 @@ export function isInsufficientCreditError(message: string) {
 }
 
 export function CreditHelpActions() {
+    const openRechargeDialog = useRechargeDialog();
     return (
         <div className="flex flex-wrap justify-center gap-2">
             <Button size="small" href="/credits">
                 积分明细
             </Button>
-            <Button size="small" type="primary" ghost href="/recharge">
+            <Button size="small" type="primary" ghost onClick={openRechargeDialog}>
                 去充值
             </Button>
         </div>

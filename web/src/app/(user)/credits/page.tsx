@@ -1,12 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import Link from "next/link";
 import { Card, Spin, Table, Tag, Button } from "antd";
 import { ArrowDownLeft, ArrowUpRight, ReceiptText, WalletCards, Zap } from "lucide-react";
 
 import { getBalance, getTransactions } from "@/services/api/credits";
 import { CreditTransactionDetailButton } from "@/components/credits/credit-transaction-detail-button";
+import { useRechargeDialog } from "@/hooks/use-recharge-dialog";
 import { creditTransactionModel } from "@/lib/credit-display";
 import { cn } from "@/lib/utils";
 
@@ -33,6 +33,7 @@ export default function CreditsPage() {
     const [page, setPage] = useState(1);
     const [pageSize, setPageSize] = useState(20);
     const [total, setTotal] = useState(0);
+    const openRechargeDialog = useRechargeDialog();
 
     const loadSummary = useCallback(async () => {
         setLoading(true);
@@ -169,9 +170,7 @@ export default function CreditsPage() {
                     <p className="mt-1 text-sm text-stone-500 dark:text-stone-400">查看当前余额、累计收支和全部积分流水</p>
                 </div>
                 <div className="flex items-center gap-3">
-                    <Link href="/recharge">
-                        <Button>前往充值</Button>
-                    </Link>
+                    <Button onClick={openRechargeDialog}>前往充值</Button>
                 </div>
             </div>
 
