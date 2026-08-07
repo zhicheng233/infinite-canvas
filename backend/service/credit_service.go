@@ -3,6 +3,8 @@ package service
 import (
 	"encoding/json"
 	"errors"
+	"strings"
+
 	"infinite-canvas-server/model"
 	"infinite-canvas-server/repository"
 )
@@ -36,6 +38,10 @@ func (s *CreditService) Spend(accountID, userID uint, amount int, refType, refID
 }
 
 func (s *CreditService) SpendWithMetadata(accountID, userID uint, amount int, refType, refID, note, metadata string) error {
+	return s.SpendWithIdempotencyMetadata(accountID, userID, amount, refType, refID, note, metadata, "")
+}
+
+func (s *CreditService) SpendWithIdempotencyMetadata(accountID, userID uint, amount int, refType, refID, note, metadata, idempotencyKey string) error {
 	account, err := s.creditRepo.FindAccountByUser(userID)
 	if err != nil {
 		return err
@@ -59,6 +65,9 @@ func (s *CreditService) SpendWithMetadata(accountID, userID uint, amount int, re
 		RefID:         refID,
 		Note:          note,
 		Metadata:      metadata,
+	}
+	if strings.TrimSpace(idempotencyKey) != "" {
+		tx.IdempotencyKey = &idempotencyKey
 	}
 	return s.creditRepo.CreateTransaction(tx)
 }
@@ -119,6 +128,16 @@ func (s *CreditService) RefundWithMetadata(userID uint, amount int, refType, ref
 		Metadata:      metadata,
 	}
 	return s.creditRepo.CreateTransaction(tx)
+}
+
+func (s *CreditService) RefundAsyncSpendOnce(userID uint, refType, refID, idempotencyKey, note, metadata string) (*repository.AsyncRefundResult, error) {
+	if s == nil || s.creditRepo == nil {
+		return nil, errors.New("credit service is not configured")
+	}
+	if userID == 0 || strings.TrimSpace(refType) == "" || strings.TrimSpace(refID) == "" || strings.TrimSpace(idempotencyKey) == "" {
+		return nil, errors.New("invalid async refund reference")
+	}
+	return s.creditRepo.RefundSpendOnce(userID, refType, refID, idempotencyKey, note, metadata)
 }
 
 func BuildCreditMetadata(values map[string]interface{}) string {

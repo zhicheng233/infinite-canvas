@@ -41,6 +41,7 @@ description: 当前后端数据库表结构说明
 | balance_after | int | 变动后余额 |
 | ref_type | string(50) | 业务来源，如 image/video/audio/recharge |
 | ref_id | string(100) | 关联业务 ID |
+| idempotency_key | string(150) | 可为空的幂等键；异步视频任务扣费和失败退款用于防止重复入账 |
 | note | string(500) | 备注 |
 | metadata | longtext | 流水扩展详情 JSON，如模型、接口、计费单位、操作人 |
 

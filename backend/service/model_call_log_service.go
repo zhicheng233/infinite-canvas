@@ -254,7 +254,7 @@ func readErrorMessage(body []byte) string {
 	if json.Unmarshal(body, &payload) != nil {
 		return ""
 	}
-	return unwrapErrorMessage(readStringPath(payload, "error.message", "data.error.message", "data.message", "message", "msg", "detail", "code"))
+	return unwrapErrorMessage(readStringPath(payload, "error.message", "data.error.message", "data.error", "error", "data.message", "message", "msg", "detail", "code"))
 }
 
 func readFailedModelTaskResponse(body []byte) (bool, string, string) {
@@ -270,7 +270,8 @@ func readFailedModelTaskResponse(body []byte) (bool, string, string) {
 	}
 	code := strings.ToLower(readStringPath(payload, "code"))
 	success, hasSuccess := readBoolPath(payload, "success", "data.success")
-	failed := status == "failed" || status == "error" || status == "cancelled" || (hasSuccess && !success) || (code != "" && code != "success" && code != "ok")
+	ok, hasOK := readBoolPath(payload, "ok", "data.ok")
+	failed := status == "failed" || status == "error" || status == "cancelled" || status == "expired" || (hasSuccess && !success) || (hasOK && !ok) || (code != "" && code != "success" && code != "ok")
 	if !failed {
 		return false, "", ""
 	}
@@ -320,7 +321,7 @@ func unwrapErrorMessage(message string) string {
 		if json.Unmarshal([]byte(message), &payload) != nil {
 			return message
 		}
-		next := readStringPath(payload, "error.message", "message", "msg", "detail", "code")
+		next := readStringPath(payload, "error.message", "error", "message", "msg", "detail", "code")
 		if next == "" || next == message {
 			return message
 		}

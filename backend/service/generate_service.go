@@ -103,6 +103,7 @@ type ProxyResult struct {
 	Headers                http.Header
 	Cost                   int
 	Balance                int
+	Refund                 int
 	ResolvedChannelID      uint
 	ResolvedChannelModelID uint
 }
@@ -337,11 +338,42 @@ func (s *GenerateService) proxyWithAutoFailover(tenantID, userID uint, method, c
 			continue
 		}
 
+		refund := 0
+		if failed, responseModel, message := readFailedAsyncVideoTask(method, capability, upstream.Body); failed {
+			if modelName == "" {
+				modelName = responseModel
+			}
+			s.recordModelFailureWithRouteAndRequest(tenantID, userID, capability, modelName, method, path, upstream.StatusCode, upstream.Body, message, route, requestSnapshot)
+			if strings.ToUpper(strings.TrimSpace(method)) == http.MethodGet {
+				refund, _ = s.refundFailedAsyncTask(tenantID, userID, capability, modelName, path, upstream.Body, message, route)
+			}
+			balance := 0
+			if s.creditService != nil {
+				account, _ = s.creditService.GetOrCreateAccount(tenantID, userID)
+				if account != nil {
+					balance = account.Balance
+				}
+			}
+			resultCost := cost
+			if strings.ToUpper(strings.TrimSpace(method)) == http.MethodPost {
+				resultCost = 0
+			}
+			return &ProxyResult{
+				StatusCode:             upstream.StatusCode,
+				Body:                   upstream.Body,
+				Headers:                upstream.Headers,
+				Cost:                   resultCost,
+				Balance:                balance,
+				Refund:                 refund,
+				ResolvedChannelID:      candidate.ChannelID,
+				ResolvedChannelModelID: candidate.ChannelModelID,
+			}, nil
+		}
+
 		s.recordModelSuccessWithRouteAndRequest(tenantID, userID, capability, modelName, method, path, upstream.StatusCode, upstream.ResponseTimeMs, route, requestSnapshot)
 
 		if cost > 0 {
-			metadata, note := buildCreditSpendDetail(chargeType, modelName, path, pricingResult)
-			_ = s.creditService.SpendWithMetadata(0, userID, cost, chargeType, modelName, note, metadata)
+			_ = s.spendGenerationCredits(userID, cost, chargeType, modelName, path, pricingResult, upstream.Body, route)
 		}
 
 		balance := 0
@@ -358,6 +390,7 @@ func (s *GenerateService) proxyWithAutoFailover(tenantID, userID uint, method, c
 			Headers:                upstream.Headers,
 			Cost:                   cost,
 			Balance:                balance,
+			Refund:                 refund,
 			ResolvedChannelID:      candidate.ChannelID,
 			ResolvedChannelModelID: candidate.ChannelModelID,
 		}, nil
@@ -1016,11 +1049,31 @@ func (s *GenerateService) proxy(tenantID, userID uint, genType, path, contentTyp
 		}, nil
 	}
 
+	if failed, responseModel, message := readFailedAsyncVideoTask(http.MethodPost, genType, respBytes); failed {
+		if modelName == "" {
+			modelName = responseModel
+		}
+		s.recordModelFailureWithRouteAndRequest(tenantID, userID, genType, modelName, http.MethodPost, path, upstream.StatusCode, respBytes, message, route, requestSnapshot)
+		account, _ = s.creditService.GetOrCreateAccount(tenantID, userID)
+		balance := 0
+		if account != nil {
+			balance = account.Balance
+		}
+		return &ProxyResult{
+			StatusCode:             upstream.StatusCode,
+			Body:                   respBytes,
+			Headers:                upstream.Headers,
+			Cost:                   0,
+			Balance:                balance,
+			ResolvedChannelID:      selectionFromRoute(route).ChannelID,
+			ResolvedChannelModelID: selectionFromRoute(route).ChannelModelID,
+		}, nil
+	}
+
 	s.recordModelSuccessWithRouteAndRequest(tenantID, userID, genType, modelName, http.MethodPost, path, upstream.StatusCode, upstream.ResponseTimeMs, route, requestSnapshot)
 
 	if cost > 0 {
-		metadata, note := buildCreditSpendDetail(genType, pricingModel, path, pricingResult)
-		if err := s.creditService.SpendWithMetadata(0, userID, cost, genType, pricingModel, note, metadata); err != nil {
+		if err := s.spendGenerationCredits(userID, cost, genType, pricingModel, path, pricingResult, respBytes, route); err != nil {
 			return nil, err
 		}
 	}
@@ -1205,32 +1258,27 @@ func (s *GenerateService) ProxyRaw(tenantID, userID uint, method, path, contentT
 		}
 		return nil, errors.New(alertMessage)
 	}
-	if upstream.StatusCode < 400 && strings.ToUpper(strings.TrimSpace(method)) == http.MethodGet {
-		if failed, responseModel, message := readFailedModelTaskResponse(respBytes); failed {
+	refund := 0
+	asyncFailed := false
+	if upstream.StatusCode < 400 {
+		if failed, responseModel, message := readFailedAsyncVideoTask(method, chargeType, respBytes); failed {
+			asyncFailed = true
 			if modelName == "" {
 				modelName = responseModel
 			}
 			s.recordModelFailureWithRouteAndRequest(tenantID, userID, chargeType, modelName, method, path, upstream.StatusCode, respBytes, message, route, requestSnapshot)
-			// Refund credits deducted on the initial POST since the async task actually failed
-			if cost == 0 {
-				recalculatedCost := s.recalculateGenerationCost(tenantID, pricingChannelID, chargeType, modelName)
-				if recalculatedCost > 0 {
-					refundNote := fmt.Sprintf("异步任务失败退款: %s", message)
-					if err := s.creditService.Refund(userID, recalculatedCost, chargeType, modelName, refundNote); err != nil {
-						log.Printf("failed to refund credits for async task failure user=%d generation=%s model=%s: %v", userID, chargeType, modelName, err)
-					}
-				}
+			if strings.ToUpper(strings.TrimSpace(method)) == http.MethodGet {
+				refund, _ = s.refundFailedAsyncTask(tenantID, userID, chargeType, modelName, path, respBytes, message, route)
 			}
+		} else if strings.ToUpper(strings.TrimSpace(method)) == http.MethodGet && chargeType != "" && modelName != "" {
+			s.recordModelSuccessWithRouteAndRequest(tenantID, userID, chargeType, modelName, method, path, upstream.StatusCode, upstream.ResponseTimeMs, route, requestSnapshot)
 		} else if chargeType != "" && modelName != "" {
 			s.recordModelSuccessWithRouteAndRequest(tenantID, userID, chargeType, modelName, method, path, upstream.StatusCode, upstream.ResponseTimeMs, route, requestSnapshot)
 		}
-	} else if upstream.StatusCode < 400 && chargeType != "" && modelName != "" {
-		s.recordModelSuccessWithRouteAndRequest(tenantID, userID, chargeType, modelName, method, path, upstream.StatusCode, upstream.ResponseTimeMs, route, requestSnapshot)
 	}
 
-	if upstream.StatusCode < 400 && cost > 0 {
-		metadata, note := buildCreditSpendDetail(chargeType, pricingModel, path, pricingResult)
-		if err := s.creditService.SpendWithMetadata(0, userID, cost, chargeType, pricingModel, note, metadata); err != nil {
+	if upstream.StatusCode < 400 && !asyncFailed && cost > 0 {
+		if err := s.spendGenerationCredits(userID, cost, chargeType, pricingModel, path, pricingResult, respBytes, route); err != nil {
 			return nil, err
 		}
 	}
@@ -1240,13 +1288,18 @@ func (s *GenerateService) ProxyRaw(tenantID, userID uint, method, path, contentT
 	if account != nil {
 		balance = account.Balance
 	}
+	resultCost := cost
+	if asyncFailed && strings.ToUpper(strings.TrimSpace(method)) == http.MethodPost {
+		resultCost = 0
+	}
 
 	return &ProxyResult{
 		StatusCode:             upstream.StatusCode,
 		Body:                   respBytes,
 		Headers:                upstream.Headers,
-		Cost:                   cost,
+		Cost:                   resultCost,
 		Balance:                balance,
+		Refund:                 refund,
 		ResolvedChannelID:      selectionFromRoute(route).ChannelID,
 		ResolvedChannelModelID: selectionFromRoute(route).ChannelModelID,
 	}, nil
@@ -1371,34 +1424,29 @@ func (s *GenerateService) ProxyRawWithRepair(tenantID, userID uint, method, path
 		return nil, errors.New(alertMessage)
 	}
 
-	if upstream.StatusCode < 400 && strings.ToUpper(strings.TrimSpace(method)) == http.MethodGet {
-		if failed, responseModel, message := readFailedModelTaskResponse(respBytes); failed {
+	refund := 0
+	asyncFailed := false
+	if upstream.StatusCode < 400 {
+		if failed, responseModel, message := readFailedAsyncVideoTask(method, generation, respBytes); failed {
+			asyncFailed = true
 			if modelName == "" {
 				modelName = responseModel
 			}
 			s.recordModelFailureWithRouteAndRequest(tenantID, userID, generation, modelName, method, path, upstream.StatusCode, respBytes, message, route, requestSnapshot)
 			requestContext := buildRepairRequestContext(generation, method, path, "application/json", respBytes)
 			s.triggerOnDemandRepairAsync(generation, modelName, message, requestContext)
-			// Refund credits deducted on the initial POST since the async task actually failed
-			if cost == 0 {
-				recalculatedCost := s.recalculateGenerationCost(tenantID, pricingChannelID, generation, modelName)
-				if recalculatedCost > 0 {
-					refundNote := fmt.Sprintf("异步任务失败退款: %s", message)
-					if err := s.creditService.Refund(userID, recalculatedCost, generation, modelName, refundNote); err != nil {
-						log.Printf("failed to refund credits for async task failure user=%d generation=%s model=%s: %v", userID, generation, modelName, err)
-					}
-				}
+			if strings.ToUpper(strings.TrimSpace(method)) == http.MethodGet {
+				refund, _ = s.refundFailedAsyncTask(tenantID, userID, generation, modelName, path, respBytes, message, route)
 			}
+		} else if strings.ToUpper(strings.TrimSpace(method)) == http.MethodGet && generation != "" && modelName != "" {
+			s.recordModelSuccessWithRouteAndRequest(tenantID, userID, generation, modelName, method, path, upstream.StatusCode, upstream.ResponseTimeMs, route, requestSnapshot)
 		} else if generation != "" && modelName != "" {
 			s.recordModelSuccessWithRouteAndRequest(tenantID, userID, generation, modelName, method, path, upstream.StatusCode, upstream.ResponseTimeMs, route, requestSnapshot)
 		}
-	} else if upstream.StatusCode < 400 && generation != "" && modelName != "" {
-		s.recordModelSuccessWithRouteAndRequest(tenantID, userID, generation, modelName, method, path, upstream.StatusCode, upstream.ResponseTimeMs, route, requestSnapshot)
 	}
 
-	if upstream.StatusCode < 400 && cost > 0 {
-		metadata, note := buildCreditSpendDetail(chargeType, pricingModel, path, pricingResult)
-		if err := s.creditService.SpendWithMetadata(0, userID, cost, chargeType, pricingModel, note, metadata); err != nil {
+	if upstream.StatusCode < 400 && !asyncFailed && cost > 0 {
+		if err := s.spendGenerationCredits(userID, cost, chargeType, pricingModel, path, pricingResult, respBytes, route); err != nil {
 			return nil, err
 		}
 	}
@@ -1408,13 +1456,18 @@ func (s *GenerateService) ProxyRawWithRepair(tenantID, userID uint, method, path
 	if account != nil {
 		balance = account.Balance
 	}
+	resultCost := cost
+	if asyncFailed && strings.ToUpper(strings.TrimSpace(method)) == http.MethodPost {
+		resultCost = 0
+	}
 
 	return &ProxyResult{
 		StatusCode:             upstream.StatusCode,
 		Body:                   respBytes,
 		Headers:                upstream.Headers,
-		Cost:                   cost,
+		Cost:                   resultCost,
 		Balance:                balance,
+		Refund:                 refund,
 		ResolvedChannelID:      selectionFromRoute(route).ChannelID,
 		ResolvedChannelModelID: selectionFromRoute(route).ChannelModelID,
 	}, nil
@@ -1434,17 +1487,187 @@ func (s *GenerateService) getProxyCostByGeneration(tenantID uint, channelID uint
 	return cost, generation, result, nil
 }
 
-// recalculateGenerationCost recalculates the cost for a generation without the POST-only restriction.
-// Used when GET polling discovers an async task has failed and we need to refund.
-func (s *GenerateService) recalculateGenerationCost(tenantID, channelID uint, generation, modelName string) int {
-	if generation == "" || modelName == "" {
-		return 0
+func asyncVideoTaskRefID(taskID string) string {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return ""
 	}
-	cost, _, err := s.getRequiredPricing(tenantID, channelID, generation, modelName, "application/json", nil)
+	return "video_task:" + taskID
+}
+
+func asyncVideoSpendIdempotencyKey(userID uint, refID string) string {
+	if strings.TrimSpace(refID) == "" {
+		return ""
+	}
+	return fmt.Sprintf("spend:video:%d:%s", userID, refID)
+}
+
+func asyncVideoRefundIdempotencyKey(userID uint, refID string) string {
+	if strings.TrimSpace(refID) == "" {
+		return ""
+	}
+	return fmt.Sprintf("refund:video:%d:%s", userID, refID)
+}
+
+func readAsyncVideoTaskID(body []byte) string {
+	if len(body) == 0 {
+		return ""
+	}
+	var payload map[string]interface{}
+	if json.Unmarshal(body, &payload) != nil {
+		return ""
+	}
+	return readStringPath(payload, "id", "task_id", "request_id", "data.id", "data.task_id", "data.request_id")
+}
+
+func readAsyncVideoTaskIDFromPath(path string) string {
+	clean := strings.Trim(strings.Split(strings.TrimSpace(path), "?")[0], "/")
+	if clean == "" {
+		return ""
+	}
+	parts := strings.Split(clean, "/")
+	for i, part := range parts {
+		switch part {
+		case "videos":
+			if i+1 < len(parts) && parts[i+1] != "generations" && parts[i+1] != "content" {
+				return parts[i+1]
+			}
+		case "generations":
+			if i > 0 && parts[i-1] == "video" && i+1 < len(parts) {
+				return parts[i+1]
+			}
+		case "tasks":
+			if i > 0 && parts[i-1] == "generations" && i+1 < len(parts) {
+				return parts[i+1]
+			}
+		}
+	}
+	return ""
+}
+
+func readFailedAsyncVideoTask(method, generation string, body []byte) (bool, string, string) {
+	normalizedMethod := strings.ToUpper(strings.TrimSpace(method))
+	if generation != "video" || (normalizedMethod != http.MethodGet && normalizedMethod != http.MethodPost) {
+		return false, "", ""
+	}
+	return readFailedModelTaskResponse(body)
+}
+
+func buildCreditSpendDetailForResponse(genType, modelName, path string, cost CreditCostResult, responseBody []byte, route *channelRouteContext) (string, string, string) {
+	metadata, note := buildCreditSpendDetail(genType, modelName, path, cost)
+	refID := modelName
+	if genType != "video" {
+		return metadata, note, refID
+	}
+	taskID := readAsyncVideoTaskID(responseBody)
+	if taskID == "" {
+		return metadata, note, refID
+	}
+	refID = asyncVideoTaskRefID(taskID)
+	if refID == "" {
+		return metadata, note, modelName
+	}
+	values := map[string]interface{}{
+		"task_id":           taskID,
+		"async_task_ref_id": refID,
+	}
+	if route != nil {
+		if route.ChannelID != nil {
+			values["channel_id"] = *route.ChannelID
+		}
+		if route.ChannelModelID != nil {
+			values["channel_model_id"] = *route.ChannelModelID
+		}
+	}
+	metadata = mergeCreditMetadata(metadata, values)
+	note = fmt.Sprintf("%s · 任务 %s", note, cleanShort(taskID, 60))
+	return metadata, note, refID
+}
+
+func (s *GenerateService) spendGenerationCredits(userID uint, amount int, genType, modelName, path string, cost CreditCostResult, responseBody []byte, route *channelRouteContext) error {
+	metadata, note, refID := buildCreditSpendDetailForResponse(genType, modelName, path, cost, responseBody, route)
+	idempotencyKey := ""
+	if genType == "video" && refID != modelName {
+		idempotencyKey = asyncVideoSpendIdempotencyKey(userID, refID)
+	}
+	if idempotencyKey != "" {
+		return s.creditService.SpendWithIdempotencyMetadata(0, userID, amount, genType, refID, note, metadata, idempotencyKey)
+	}
+	return s.creditService.SpendWithMetadata(0, userID, amount, genType, refID, note, metadata)
+}
+
+func mergeCreditMetadata(metadata string, values map[string]interface{}) string {
+	payload := map[string]interface{}{}
+	if strings.TrimSpace(metadata) != "" {
+		_ = json.Unmarshal([]byte(metadata), &payload)
+	}
+	if payload == nil {
+		payload = map[string]interface{}{}
+	}
+	for key, value := range values {
+		payload[key] = value
+	}
+	data, err := json.Marshal(payload)
 	if err != nil {
-		return 0
+		return metadata
 	}
-	return cost
+	return string(data)
+}
+
+func (s *GenerateService) refundFailedAsyncTask(tenantID, userID uint, generation, modelName, path string, responseBody []byte, message string, route *channelRouteContext) (int, int) {
+	if s == nil || s.creditService == nil || generation != "video" || strings.TrimSpace(modelName) == "" {
+		return 0, 0
+	}
+	taskID := readAsyncVideoTaskID(responseBody)
+	if taskID == "" {
+		taskID = readAsyncVideoTaskIDFromPath(path)
+	}
+	refID := asyncVideoTaskRefID(taskID)
+	if refID == "" {
+		log.Printf("skip async video refund: missing task id user=%d model=%s path=%s", userID, modelName, cleanPath(path))
+		return 0, 0
+	}
+	metadata := BuildCreditMetadata(map[string]interface{}{
+		"scene":      generationTypeLabel(generation),
+		"generation": generation,
+		"model":      modelName,
+		"path":       cleanPath(path),
+		"task_id":    taskID,
+		"status":     "failed",
+		"error":      cleanShort(message, 500),
+	})
+	if route != nil {
+		values := map[string]interface{}{}
+		if route.ChannelID != nil {
+			values["channel_id"] = *route.ChannelID
+		}
+		if route.ChannelModelID != nil {
+			values["channel_model_id"] = *route.ChannelModelID
+		}
+		if len(values) > 0 {
+			metadata = mergeCreditMetadata(metadata, values)
+		}
+	}
+	note := fmt.Sprintf("视频生成失败自动退款: %s", cleanShort(message, 300))
+	result, err := s.creditService.RefundAsyncSpendOnce(userID, generation, refID, asyncVideoRefundIdempotencyKey(userID, refID), note, metadata)
+	if err != nil {
+		log.Printf("failed to refund async video task user=%d task=%s model=%s: %v", userID, taskID, modelName, err)
+		return 0, 0
+	}
+	if result == nil {
+		return 0, 0
+	}
+	if result.AlreadyExists {
+		return 0, result.Balance
+	}
+	if !result.SpendFound {
+		log.Printf("skip async video refund: original spend not found user=%d task=%s model=%s", userID, taskID, modelName)
+		return 0, result.Balance
+	}
+	if result.Refunded {
+		return result.Amount, result.Balance
+	}
+	return 0, result.Balance
 }
 
 func (s *GenerateService) repairAndRetryUpstream(tenantID, userID uint, generation, modelName, method, path, contentType string, body []byte, statusCode int, responseBody []byte, fallback string, route *channelRouteContext) (*upstreamCallResult, bool) {

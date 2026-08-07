@@ -34,15 +34,16 @@ func (CreditAccount) TableName() string { return "credit_accounts" }
 
 type CreditTransaction struct {
 	BaseModel
-	AccountID     uint                  `gorm:"index;not null" json:"account_id"`
-	Type          CreditTransactionType `gorm:"size:20;not null" json:"type"`
-	Amount        int                   `gorm:"not null" json:"amount"`
-	BalanceBefore *int                  `json:"balance_before,omitempty"`
-	BalanceAfter  int                   `gorm:"not null" json:"balance_after"`
-	RefType       string                `gorm:"size:50" json:"ref_type"`
-	RefID         string                `gorm:"size:100" json:"ref_id"`
-	Note          string                `gorm:"size:500" json:"note"`
-	Metadata      string                `gorm:"type:longtext" json:"metadata"`
+	AccountID      uint                  `gorm:"index;not null" json:"account_id"`
+	Type           CreditTransactionType `gorm:"size:20;not null" json:"type"`
+	Amount         int                   `gorm:"not null" json:"amount"`
+	BalanceBefore  *int                  `json:"balance_before,omitempty"`
+	BalanceAfter   int                   `gorm:"not null" json:"balance_after"`
+	RefType        string                `gorm:"size:50" json:"ref_type"`
+	RefID          string                `gorm:"size:100" json:"ref_id"`
+	IdempotencyKey *string               `gorm:"size:150;uniqueIndex" json:"idempotency_key,omitempty"`
+	Note           string                `gorm:"size:500" json:"note"`
+	Metadata       string                `gorm:"type:longtext" json:"metadata"`
 }
 
 func (CreditTransaction) TableName() string { return "credit_transactions" }

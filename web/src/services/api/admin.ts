@@ -81,6 +81,7 @@ export type TransactionItem = {
     balance_after: number;
     ref_type: string;
     ref_id?: string;
+    idempotency_key?: string;
     note: string;
     metadata?: string;
     created_at: string;

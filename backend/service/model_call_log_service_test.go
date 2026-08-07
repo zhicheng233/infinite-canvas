@@ -73,6 +73,22 @@ func TestReadFailedModelTaskResponse_CancelledStatus_ReturnsTrue(t *testing.T) {
 	}
 }
 
+func TestReadFailedModelTaskResponse_ExpiredStatus_ReturnsTrue(t *testing.T) {
+	body := []byte(`{"status":"expired","error":{"message":"task expired"}}`)
+	failed, _, message := readFailedModelTaskResponse(body)
+	if !failed || message != "task expired" {
+		t.Fatalf("failed=%v message=%q", failed, message)
+	}
+}
+
+func TestReadFailedModelTaskResponse_OKFalseErrorString_ReturnsTrue(t *testing.T) {
+	body := []byte(`{"ok":false,"error":"视频生成失败：该模型为图生视频，必须提供 1 张参考图"}`)
+	failed, _, message := readFailedModelTaskResponse(body)
+	if !failed || message != "视频生成失败：该模型为图生视频，必须提供 1 张参考图" {
+		t.Fatalf("failed=%v message=%q", failed, message)
+	}
+}
+
 func TestReadFailedModelTaskResponse_SuccessFalse_ReturnsTrue(t *testing.T) {
 	body := []byte(`{"success":false,"error":{"message":"processing error"}}`)
 	failed, _, message := readFailedModelTaskResponse(body)

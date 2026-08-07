@@ -27,13 +27,19 @@ export type CreditTransactionMetadata = {
     resolution?: string;
     formula?: string;
     total_cost?: number;
+    task_id?: string;
+    async_task_ref_id?: string;
+    refund_of_transaction_id?: number;
+    error?: string;
+    channel_id?: number;
+    channel_model_id?: number;
     operator_user_id?: number;
     target_user_id?: number;
     recharge_order_id?: number;
     credits?: number;
     adjustment?: number;
 };
-export type TransactionItem = { id: number; type: string; amount: number; balance_before?: number; balance_after: number; ref_type: string; ref_id?: string; note: string; metadata?: string; created_at: string };
+export type TransactionItem = { id: number; type: string; amount: number; balance_before?: number; balance_after: number; ref_type: string; ref_id?: string; idempotency_key?: string; note: string; metadata?: string; created_at: string };
 type PageData<T> = { items: T[]; total: number; page: number; page_size: number };
 type ApiResult<T> = { code: number; data: T; msg: string };
 

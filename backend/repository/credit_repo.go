@@ -1,9 +1,11 @@
 package repository
 
 import (
+	"encoding/json"
 	"errors"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 	"infinite-canvas-server/model"
 )
 
@@ -34,6 +36,105 @@ func (r *CreditRepo) UpdateAccountBalance(account *model.CreditAccount) error {
 
 func (r *CreditRepo) CreateTransaction(tx *model.CreditTransaction) error {
 	return r.db.Create(tx).Error
+}
+
+type AsyncRefundResult struct {
+	Amount        int
+	Balance       int
+	Refunded      bool
+	AlreadyExists bool
+	SpendFound    bool
+	SpendID       uint
+}
+
+func (r *CreditRepo) RefundSpendOnce(userID uint, refType, refID, idempotencyKey, note, metadata string) (*AsyncRefundResult, error) {
+	result := &AsyncRefundResult{}
+	err := r.db.Transaction(func(tx *gorm.DB) error {
+		var account model.CreditAccount
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("user_id = ?", userID).First(&account).Error; err != nil {
+			return err
+		}
+		result.Balance = account.Balance
+
+		var existing model.CreditTransaction
+		err := tx.Where("idempotency_key = ? AND type = ?", idempotencyKey, model.TxTypeRefund).First(&existing).Error
+		if err == nil {
+			result.AlreadyExists = true
+			result.Amount = existing.Amount
+			return nil
+		}
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+
+		var spend model.CreditTransaction
+		err = tx.Where("account_id = ? AND type = ? AND ref_type = ? AND ref_id = ?", account.ID, model.TxTypeSpend, refType, refID).
+			Order("id DESC").
+			First(&spend).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			result.SpendFound = false
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		result.SpendFound = true
+		result.SpendID = spend.ID
+		result.Amount = spend.Amount
+		if spend.Amount <= 0 {
+			return nil
+		}
+
+		balanceBefore := account.Balance
+		account.Balance += spend.Amount
+		account.TotalSpent -= spend.Amount
+		if err := tx.Model(&account).Updates(map[string]interface{}{
+			"balance":      account.Balance,
+			"total_earned": account.TotalEarned,
+			"total_spent":  account.TotalSpent,
+		}).Error; err != nil {
+			return err
+		}
+		result.Balance = account.Balance
+		key := idempotencyKey
+		if err := tx.Create(&model.CreditTransaction{
+			AccountID:      account.ID,
+			Type:           model.TxTypeRefund,
+			Amount:         spend.Amount,
+			BalanceBefore:  creditIntPtr(balanceBefore),
+			BalanceAfter:   account.Balance,
+			RefType:        refType,
+			RefID:          refID,
+			IdempotencyKey: &key,
+			Note:           note,
+			Metadata:       mergeRefundMetadata(metadata, spend.ID),
+		}).Error; err != nil {
+			return err
+		}
+		result.Refunded = true
+		return nil
+	})
+	return result, err
+}
+
+func creditIntPtr(value int) *int {
+	return &value
+}
+
+func mergeRefundMetadata(metadata string, spendID uint) string {
+	var payload map[string]interface{}
+	if metadata != "" && json.Unmarshal([]byte(metadata), &payload) != nil {
+		return metadata
+	}
+	if payload == nil {
+		payload = map[string]interface{}{}
+	}
+	payload["refund_of_transaction_id"] = spendID
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return metadata
+	}
+	return string(data)
 }
 
 func (r *CreditRepo) ListTransactions(accountID uint, page, pageSize int) ([]model.CreditTransaction, int64, error) {

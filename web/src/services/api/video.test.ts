@@ -250,6 +250,43 @@ describe("video aspect ratio routing", () => {
         expect(query.has("routing_video_route")).toBe(false);
     });
 
+    it("refreshes credits when failed polling reports an async refund", async () => {
+        const dispatchEvent = jest.fn();
+        (globalThis.window as unknown as { dispatchEvent: typeof dispatchEvent }).dispatchEvent = dispatchEvent;
+        jest.spyOn(axios, "get").mockResolvedValue({ data: { status: "failed", error: { message: "upstream failed" } }, headers: { "x-credits-refund": "12" } });
+
+        const state = await pollVideoGenerationTask(videoConfig("waninter"), {
+            id: "task_123",
+            provider: "openai",
+            model: "0::0::video-model",
+            channelId: 2,
+            channelModelId: 62,
+        });
+
+        expect(state).toEqual({ status: "failed", error: "upstream failed" });
+        expect(dispatchEvent).toHaveBeenCalledTimes(1);
+    });
+
+    it("refreshes credits when polling unwraps a failed envelope with a refund header", async () => {
+        const dispatchEvent = jest.fn();
+        (globalThis.window as unknown as { dispatchEvent: typeof dispatchEvent }).dispatchEvent = dispatchEvent;
+        jest.spyOn(axios, "get").mockResolvedValue({
+            data: { code: "fail_to_fetch_task", message: "{\"error\":{\"message\":\"task failed\"}}" },
+            headers: { "x-credits-refund": "8" },
+        });
+
+        await expect(
+            pollVideoGenerationTask(videoConfig("binghuo"), {
+                id: "task_binghuo",
+                provider: "binghuo",
+                model: "0::0::video-model",
+                channelId: 2,
+                channelModelId: 62,
+            }),
+        ).rejects.toThrow("task failed");
+        expect(dispatchEvent).toHaveBeenCalledTimes(1);
+    });
+
     it("polls Binghuo tasks through the New API endpoint on the resolved channel", async () => {
         const get = jest.spyOn(axios, "get").mockResolvedValue({ data: { status: "processing" } });
         const state = await pollVideoGenerationTask(videoConfig("binghuo"), {

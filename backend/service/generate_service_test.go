@@ -163,6 +163,65 @@ func TestBuildCreditSpendDetail(t *testing.T) {
 	}
 }
 
+func TestBuildCreditSpendDetailForAsyncVideoTask(t *testing.T) {
+	channelID, channelModelID := uint(2), uint(22)
+	metadata, note, refID := buildCreditSpendDetailForResponse("video", "omni_flash", "/v1/videos", CreditCostResult{
+		TotalCost:  23,
+		UnitCost:   2,
+		UnitType:   model.UnitPerVideoSecond,
+		Units:      10,
+		Seconds:    10,
+		Resolution: "1080p",
+	}, []byte(`{"id":"task_123","status":"processing"}`), &channelRouteContext{ChannelID: &channelID, ChannelModelID: &channelModelID})
+
+	if refID != "video_task:task_123" || !strings.Contains(note, "任务 task_123") {
+		t.Fatalf("refID=%q note=%q", refID, note)
+	}
+	var parsed map[string]interface{}
+	if err := json.Unmarshal([]byte(metadata), &parsed); err != nil {
+		t.Fatalf("metadata is not json: %v", err)
+	}
+	if parsed["task_id"] != "task_123" || parsed["async_task_ref_id"] != "video_task:task_123" || parsed["total_cost"].(float64) != 23 {
+		t.Fatalf("unexpected metadata: %#v", parsed)
+	}
+	if parsed["channel_id"].(float64) != 2 || parsed["channel_model_id"].(float64) != 22 {
+		t.Fatalf("missing channel metadata: %#v", parsed)
+	}
+}
+
+func TestReadAsyncVideoTaskIDFromCommonResponses(t *testing.T) {
+	tests := []struct {
+		body string
+		want string
+	}{
+		{body: `{"id":"task_openai"}`, want: "task_openai"},
+		{body: `{"task_id":"task_binghuo"}`, want: "task_binghuo"},
+		{body: `{"request_id":"task_xai"}`, want: "task_xai"},
+		{body: `{"data":{"task_id":"task_nested"}}`, want: "task_nested"},
+	}
+	for _, tt := range tests {
+		if got := readAsyncVideoTaskID([]byte(tt.body)); got != tt.want {
+			t.Fatalf("readAsyncVideoTaskID(%s)=%q want %q", tt.body, got, tt.want)
+		}
+	}
+}
+
+func TestReadAsyncVideoTaskIDFromPollingPath(t *testing.T) {
+	tests := []struct {
+		path string
+		want string
+	}{
+		{path: "/v1/videos/task_123", want: "task_123"},
+		{path: "/v1/video/generations/task_binghuo", want: "task_binghuo"},
+		{path: "/contents/generations/tasks/task_seedance?x=1", want: "task_seedance"},
+	}
+	for _, tt := range tests {
+		if got := readAsyncVideoTaskIDFromPath(tt.path); got != tt.want {
+			t.Fatalf("readAsyncVideoTaskIDFromPath(%q)=%q want %q", tt.path, got, tt.want)
+		}
+	}
+}
+
 func TestTransformImageResponseToChatFormat(t *testing.T) {
 	raw := []byte(`{"created":1782898083,"data":[{"url":"https://example.com/a.jfif"},{"b64_json":"Zm9v"}]}`)
 	converted, ok := transformImageResponseToChatFormat("/v1/chat/completions", raw)
@@ -328,32 +387,6 @@ func TestBuildRepairRequestContextVideoImageToVideo(t *testing.T) {
 	if !ctx.HasReferences || ctx.ReferenceCount != 1 {
 		t.Fatalf("unexpected reference context: %#v", ctx)
 	}
-}
-
-func TestRecalculateGenerationCost(t *testing.T) {
-	t.Run("returns zero for empty generation", func(t *testing.T) {
-		s := &GenerateService{}
-		cost := s.recalculateGenerationCost(0, 0, "", "gpt-image-2")
-		if cost != 0 {
-			t.Fatalf("recalculateGenerationCost = %d, want 0", cost)
-		}
-	})
-
-	t.Run("returns zero for empty modelName", func(t *testing.T) {
-		s := &GenerateService{}
-		cost := s.recalculateGenerationCost(0, 0, "image", "")
-		if cost != 0 {
-			t.Fatalf("recalculateGenerationCost = %d, want 0", cost)
-		}
-	})
-
-	t.Run("returns zero for both empty", func(t *testing.T) {
-		s := &GenerateService{}
-		cost := s.recalculateGenerationCost(0, 0, "", "")
-		if cost != 0 {
-			t.Fatalf("recalculateGenerationCost = %d, want 0", cost)
-		}
-	})
 }
 
 func TestBuildRepairRequestContextImageEdit(t *testing.T) {

@@ -53,6 +53,7 @@ func (h *GenerateHandler) handleProxy(c *gin.Context, fn proxyFunc) {
 
 	c.Header("X-Credits-Cost", itoa(result.Cost))
 	c.Header("X-Credits-Balance", itoa(result.Balance))
+	c.Header("X-Credits-Refund", itoa(result.Refund))
 	writeResolvedChannelHeaders(c, result)
 
 	if result.StatusCode >= http.StatusBadRequest {

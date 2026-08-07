@@ -84,6 +84,20 @@ function resolvedTaskRouting(headers: unknown) {
     return channelId > 0 && channelModelId > 0 ? { channelId, channelModelId } : {};
 }
 
+function notifyCreditRefundIfAny(headers: unknown) {
+    const values = (headers || {}) as Record<string, unknown>;
+    if (Number(values["x-credits-refund"]) > 0) notifyCreditBalanceChanged();
+}
+
+function unwrapPolledResponse<T, R>(response: { data: T; headers?: unknown }, unwrap: (data: T) => R) {
+    try {
+        return unwrap(response.data);
+    } catch (error) {
+        notifyCreditRefundIfAny(response.headers);
+        throw error;
+    }
+}
+
 function aiHeaders(config: AiConfig, contentType?: string) {
     const headers: Record<string, string> = {};
     if (isLoggedIn()) {
@@ -411,7 +425,8 @@ async function pollYijiaVideoTask(config: AiConfig, task: VideoGenerationTask, o
 
 async function pollOpenAIVideoTask(config: AiConfig, task: VideoGenerationTask, options?: RequestOptions): Promise<VideoGenerationTaskState> {
     try {
-        const video = unwrapVideoResponse((await axios.get<ApiVideoResponse>(aiApiUrl(config, `/videos/${task.id}`, task), { headers: aiHeaders(config), signal: options?.signal })).data);
+        const response = await axios.get<ApiVideoResponse>(aiApiUrl(config, `/videos/${task.id}`, task), { headers: aiHeaders(config), signal: options?.signal });
+        const video = unwrapPolledResponse(response, unwrapVideoResponse);
         const status = String(video.status || "").toLowerCase();
         if (status === "completed" || status === "succeeded" || status === "done") {
             const result = await resolveVideoTaskResult(config, video as NewApiVideoTask, options, task);
@@ -419,7 +434,10 @@ async function pollOpenAIVideoTask(config: AiConfig, task: VideoGenerationTask, 
             const content = await axios.get<Blob>(aiApiUrl(config, `/videos/${task.id}/content`, task), { headers: aiHeaders(config), responseType: "blob", signal: options?.signal });
             return { status: "completed", result: { blob: await normalizeVideoBlob(content.data) } };
         }
-        if (status === "failed" || status === "cancelled" || status === "error") return { status: "failed", error: video.error?.message || "视频生成失败" };
+        if (status === "failed" || status === "cancelled" || status === "error") {
+            notifyCreditRefundIfAny(response.headers);
+            return { status: "failed", error: video.error?.message || "视频生成失败" };
+        }
         return { status: "pending" };
     } catch (error) {
         throw new Error(readAxiosError(error, "视频任务查询失败"));
@@ -428,7 +446,8 @@ async function pollOpenAIVideoTask(config: AiConfig, task: VideoGenerationTask, 
 
 async function pollXAIVideoTask(config: AiConfig, task: VideoGenerationTask, options?: RequestOptions): Promise<VideoGenerationTaskState> {
     try {
-        const state = unwrapXAIVideoTask((await axios.get<ApiEnvelope<XAIVideoTask>>(aiApiUrl(config, `/videos/${task.id}`, task), { headers: aiHeaders(config), signal: options?.signal })).data);
+        const response = await axios.get<ApiEnvelope<XAIVideoTask>>(aiApiUrl(config, `/videos/${task.id}`, task), { headers: aiHeaders(config), signal: options?.signal });
+        const state = unwrapPolledResponse(response, unwrapXAIVideoTask);
         const status = String(state.status || "").toLowerCase();
         if (status === "done" || status === "completed" || status === "succeeded") {
             const url = state.video?.url;
@@ -436,6 +455,7 @@ async function pollXAIVideoTask(config: AiConfig, task: VideoGenerationTask, opt
             return { status: "completed", result: await videoResultFromUrl(config, url, options, task) };
         }
         if (status === "failed" || status === "cancelled" || status === "error") {
+            notifyCreditRefundIfAny(response.headers);
             return { status: "failed", error: videoTaskErrorMessage(state.error) || state.message || "视频生成失败" };
         }
         return { status: "pending" };
@@ -446,7 +466,8 @@ async function pollXAIVideoTask(config: AiConfig, task: VideoGenerationTask, opt
 
 async function pollNewApiVideoTask(config: AiConfig, task: VideoGenerationTask, options?: RequestOptions): Promise<VideoGenerationTaskState> {
     try {
-        const state = unwrapNewApiVideoTask((await axios.get<ApiEnvelope<NewApiVideoTask>>(aiApiUrl(config, `/video/generations/${task.id}`, task), { headers: aiHeaders(config), signal: options?.signal })).data);
+        const response = await axios.get<ApiEnvelope<NewApiVideoTask>>(aiApiUrl(config, `/video/generations/${task.id}`, task), { headers: aiHeaders(config), signal: options?.signal });
+        const state = unwrapPolledResponse(response, unwrapNewApiVideoTask);
         const status = String(state.status || "").toLowerCase();
         if (status === "completed" || status === "succeeded" || status === "done") {
             const result = await resolveVideoTaskResult(config, state, options, task);
@@ -454,6 +475,7 @@ async function pollNewApiVideoTask(config: AiConfig, task: VideoGenerationTask, 
             return { status: "failed", error: "视频生成成功但没有返回可播放的视频地址" };
         }
         if (status === "failed" || status === "cancelled" || status === "error") {
+            notifyCreditRefundIfAny(response.headers);
             return { status: "failed", error: videoTaskErrorMessage(state.error) || state.message || "视频生成失败" };
         }
         return { status: "pending" };
@@ -493,13 +515,17 @@ async function createSeedanceTask(config: AiConfig, model: string, prompt: strin
 
 async function pollSeedanceTask(config: AiConfig, task: VideoGenerationTask, options?: RequestOptions): Promise<VideoGenerationTaskState> {
     try {
-        const state = unwrapSeedanceTask((await axios.get<ApiEnvelope<SeedanceTask>>(seedanceApiUrl(config, task.model, task.id, task), { headers: aiHeaders(config), signal: options?.signal })).data);
+        const response = await axios.get<ApiEnvelope<SeedanceTask>>(seedanceApiUrl(config, task.model, task.id, task), { headers: aiHeaders(config), signal: options?.signal });
+        const state = unwrapPolledResponse(response, unwrapSeedanceTask);
         if (state.status === "succeeded") {
             const url = state.content?.video_url;
             if (!url) return { status: "failed", error: "Seedance 任务成功但没有返回视频 URL" };
             return { status: "completed", result: await videoResultFromUrl(config, url, options, task) };
         }
-        if (state.status === "failed" || state.status === "cancelled" || state.status === "expired") return { status: "failed", error: state.error?.message || `Seedance 视频生成${state.status === "expired" ? "超时" : "失败"}` };
+        if (state.status === "failed" || state.status === "cancelled" || state.status === "expired") {
+            notifyCreditRefundIfAny(response.headers);
+            return { status: "failed", error: state.error?.message || `Seedance 视频生成${state.status === "expired" ? "超时" : "失败"}` };
+        }
         return { status: "pending" };
     } catch (error) {
         throw new Error(readAxiosError(error, "Seedance 任务查询失败"));
