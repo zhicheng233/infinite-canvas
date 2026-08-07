@@ -207,7 +207,7 @@ function videoErrorGuidance(message: string) {
     if (error.includes("线路") || error.includes("暂时不可用") || error.includes("unavailable") || error.includes("not available")) {
         return "稍后重试，或切换其它模型/渠道。";
     }
-    if (error.includes("真人脸") || error.includes("真实人物") || error.includes("safety") || error.includes("policy") || error.includes("moderation")) {
+    if (error.includes("真人脸") || error.includes("真实人物") || error.includes("safety") || error.includes("policy") || error.includes("moderation") || error.includes("real person")) {
         return "更换参考图或调整提示词，避免真实人物、人脸或敏感内容。";
     }
     if (error.includes("图片") || error.includes("image")) return "检查参考图是否可访问、格式是否支持，必要时更换或压缩后重试。";
