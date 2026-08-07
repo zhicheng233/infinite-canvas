@@ -253,7 +253,7 @@ describe("video aspect ratio routing", () => {
     it("refreshes credits when failed polling reports an async refund", async () => {
         const dispatchEvent = jest.fn();
         (globalThis.window as unknown as { dispatchEvent: typeof dispatchEvent }).dispatchEvent = dispatchEvent;
-        jest.spyOn(axios, "get").mockResolvedValue({ data: { status: "failed", error: { message: "upstream failed" } }, headers: { "x-credits-refund": "12" } });
+        jest.spyOn(axios, "get").mockResolvedValue({ data: { status: "failed", error: { message: "upstream failed" } }, headers: { "X-Credits-Refund": "12" } });
 
         const state = await pollVideoGenerationTask(videoConfig("waninter"), {
             id: "task_123",
@@ -264,6 +264,25 @@ describe("video aspect ratio routing", () => {
         });
 
         expect(state).toEqual({ status: "failed", error: "upstream failed" });
+        expect(dispatchEvent).toHaveBeenCalledTimes(1);
+    });
+
+    it("refreshes credits when axios headers expose refund through get()", async () => {
+        const dispatchEvent = jest.fn();
+        (globalThis.window as unknown as { dispatchEvent: typeof dispatchEvent }).dispatchEvent = dispatchEvent;
+        jest.spyOn(axios, "get").mockResolvedValue({
+            data: { status: "failed", error: { message: "upstream failed" } },
+            headers: { get: (key: string) => (key.toLowerCase() === "x-credits-refund" ? "12" : undefined) },
+        });
+
+        await pollVideoGenerationTask(videoConfig("waninter"), {
+            id: "task_123",
+            provider: "openai",
+            model: "0::0::video-model",
+            channelId: 2,
+            channelModelId: 62,
+        });
+
         expect(dispatchEvent).toHaveBeenCalledTimes(1);
     });
 

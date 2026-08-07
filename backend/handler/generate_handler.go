@@ -122,7 +122,9 @@ func copyProxyResponseHeaders(c *gin.Context, headers http.Header) {
 func shouldCopyProxyHeader(key string) bool {
 	switch http.CanonicalHeaderKey(key) {
 	case "Connection", "Keep-Alive", "Proxy-Authenticate", "Proxy-Authorization", "Te", "Trailer", "Transfer-Encoding", "Upgrade",
-		"Content-Length", "Content-Encoding":
+		"Content-Length", "Content-Encoding",
+		"Access-Control-Allow-Origin", "Access-Control-Allow-Methods", "Access-Control-Allow-Headers", "Access-Control-Expose-Headers",
+		"Access-Control-Allow-Credentials", "Access-Control-Max-Age":
 		return false
 	default:
 		return true

@@ -29,10 +29,11 @@ func TestCopyProxyResponseHeadersSkipsBodyManagedHeaders(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	context, _ := gin.CreateTestContext(recorder)
 	headers := http.Header{
-		"Content-Length":    []string{"99"},
-		"Content-Encoding":  []string{"gzip"},
-		"Transfer-Encoding": []string{"chunked"},
-		"X-Upstream-Trace":  []string{"trace-1"},
+		"Content-Length":                []string{"99"},
+		"Content-Encoding":              []string{"gzip"},
+		"Transfer-Encoding":             []string{"chunked"},
+		"Access-Control-Expose-Headers": []string{"X-Upstream-Only"},
+		"X-Upstream-Trace":              []string{"trace-1"},
 	}
 
 	copyProxyResponseHeaders(context, headers)
@@ -45,6 +46,9 @@ func TestCopyProxyResponseHeadersSkipsBodyManagedHeaders(t *testing.T) {
 	}
 	if recorder.Header().Get("Transfer-Encoding") != "" {
 		t.Fatalf("Transfer-Encoding should not be copied: %#v", recorder.Header())
+	}
+	if recorder.Header().Get("Access-Control-Expose-Headers") != "" {
+		t.Fatalf("Access-Control-Expose-Headers should not be copied: %#v", recorder.Header())
 	}
 	if recorder.Header().Get("X-Upstream-Trace") != "trace-1" {
 		t.Fatalf("custom upstream header not copied: %#v", recorder.Header())

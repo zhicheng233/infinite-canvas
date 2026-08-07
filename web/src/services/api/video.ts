@@ -78,15 +78,25 @@ function aiApiUrl(config: AiConfig, path: string, routing?: VideoTaskRouting) {
 }
 
 function resolvedTaskRouting(headers: unknown) {
-    const values = (headers || {}) as Record<string, unknown>;
-    const channelId = Number(values["x-resolved-channel-id"]);
-    const channelModelId = Number(values["x-resolved-channel-model-id"]);
+    const channelId = Number(readResponseHeader(headers, "x-resolved-channel-id"));
+    const channelModelId = Number(readResponseHeader(headers, "x-resolved-channel-model-id"));
     return channelId > 0 && channelModelId > 0 ? { channelId, channelModelId } : {};
 }
 
 function notifyCreditRefundIfAny(headers: unknown) {
+    if (Number(readResponseHeader(headers, "x-credits-refund")) > 0) notifyCreditBalanceChanged();
+}
+
+function readResponseHeader(headers: unknown, name: string) {
+    const getter = (headers as { get?: (key: string) => unknown } | null)?.get;
+    if (typeof getter === "function") {
+        const value = getter.call(headers, name) ?? getter.call(headers, name.toLowerCase()) ?? getter.call(headers, name.toUpperCase());
+        if (value != null) return String(value);
+    }
     const values = (headers || {}) as Record<string, unknown>;
-    if (Number(values["x-credits-refund"]) > 0) notifyCreditBalanceChanged();
+    const lowerName = name.toLowerCase();
+    const foundKey = Object.keys(values).find((key) => key.toLowerCase() === lowerName);
+    return foundKey ? String(values[foundKey] ?? "") : "";
 }
 
 function unwrapPolledResponse<T, R>(response: { data: T; headers?: unknown }, unwrap: (data: T) => R) {
