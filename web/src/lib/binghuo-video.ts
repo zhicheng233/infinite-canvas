@@ -6,16 +6,18 @@ export type BinghuoReferenceMode = "reference" | "first_last";
 export function normalizeBinghuoRatio(value: string) {
     const ratio = dimensionsRatio(value);
     if (!ratio) return "16:9";
-    return binghuoRatioOptions.reduce((best, item) => Math.abs(ratioValue(item) - ratio) < Math.abs(ratioValue(best) - ratio) ? item : best, binghuoRatioOptions[0]);
+    return binghuoRatioOptions.reduce((best, item) => (Math.abs(ratioValue(item) - ratio) < Math.abs(ratioValue(best) - ratio) ? item : best), binghuoRatioOptions[0]);
 }
 
 export function normalizeBinghuoResolution(value: string) {
-    const normalized = String(value || "").trim().toUpperCase();
+    const normalized = String(value || "")
+        .trim()
+        .toUpperCase();
     if (normalized === "4K") return "4K";
     const pixels = Number(normalized.replace(/P$/, ""));
     if (!pixels) return "720P";
     const values = [480, 540, 720, 1080, 2160] as const;
-    const nearest = values.reduce((best, item) => Math.abs(item - pixels) < Math.abs(best - pixels) ? item : best, values[0]);
+    const nearest = values.reduce((best, item) => (Math.abs(item - pixels) < Math.abs(best - pixels) ? item : best), values[0]);
     return nearest === 2160 ? "4K" : `${nearest}P`;
 }
 

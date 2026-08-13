@@ -1,12 +1,7 @@
 import apiClient from "@/services/api/client";
 import { afterEach, describe, expect, it, jest } from "bun:test";
 
-import {
-    listWebhookConfigs,
-    listWebhookLogs,
-    saveWebhookConfig,
-    testWebhookSend,
-} from "./webhook";
+import { listWebhookConfigs, listWebhookLogs, saveWebhookConfig, testWebhookSend } from "./webhook";
 
 /** Wraps data in the axios response envelope so apiClient returns `{ data: { data } }`. */
 function mockResponse(data: unknown) {
@@ -127,9 +122,7 @@ describe("webhook API client", () => {
     });
 
     it("testWebhookSend returns fail result when send fails", async () => {
-        jest.spyOn(apiClient, "post").mockResolvedValue(
-            mockResponse({ success: false, error: "channel not configured" }),
-        );
+        jest.spyOn(apiClient, "post").mockResolvedValue(mockResponse({ success: false, error: "channel not configured" }));
         const result = await testWebhookSend({ platform: "wecom", message: "test" });
         expect(result.success).toBe(false);
         expect(result.error).toBe("channel not configured");
@@ -139,5 +132,4 @@ describe("webhook API client", () => {
         jest.spyOn(apiClient, "post").mockRejectedValue(new Error("internal error"));
         await expect(testWebhookSend({ platform: "feishu", message: "x" })).rejects.toThrow("internal error");
     });
-
 });

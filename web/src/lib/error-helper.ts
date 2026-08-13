@@ -1,27 +1,14 @@
 import { ApiError } from "@/lib/api-error";
 
 // Balance error keywords matching backend's IsUpstreamBalanceError
-const BALANCE_KEYWORDS = [
-    "余额不足",
-    "额度不足",
-    "用户额度不足",
-    "积分不足",
-    "insufficient balance",
-    "insufficient_user_quota",
-    "insufficient_quota",
-    "quota exceeded",
-    "billing failed",
-    "扣费额度失败",
-];
+const BALANCE_KEYWORDS = ["余额不足", "额度不足", "用户额度不足", "积分不足", "insufficient balance", "insufficient_user_quota", "insufficient_quota", "quota exceeded", "billing failed", "扣费额度失败"];
 
 /**
  * Check if an error message indicates a balance/credit issue.
  */
 export function isBalanceError(message: string): boolean {
     if (!message) return false;
-    return BALANCE_KEYWORDS.some((kw) =>
-        message.toLowerCase().includes(kw.toLowerCase())
-    );
+    return BALANCE_KEYWORDS.some((kw) => message.toLowerCase().includes(kw.toLowerCase()));
 }
 
 /**
@@ -213,5 +200,4 @@ function videoErrorGuidance(message: string) {
     if (error.includes("图片") || error.includes("image")) return "检查参考图是否可访问、格式是否支持，必要时更换或压缩后重试。";
     if (error.includes("prompt is too short")) return "提示词过短，请补充描述后重试。";
     return "可稍后重试，或更换模型/渠道。";
-
 }

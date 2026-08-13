@@ -4,5 +4,17 @@
         "types": ["node"],
         "incremental": false
     },
-    "include": ["src/components/video-settings-panel.tsx", "src/components/custom-video-settings-panel.ts", "src/lib/custom-video-config.ts", "src/lib/custom-video-config-normalizer.ts", "src/lib/custom-video-runtime.ts", "src/lib/seedance-video.ts", "src/lib/binghuo-video.ts", "src/lib/canvas-theme.ts", "src/components/image-settings-panel.tsx", "src/stores/use-config-store.ts", "src/services/api/**/*.ts"]
+    "include": [
+        "src/components/video-settings-panel.tsx",
+        "src/components/custom-video-settings-panel.ts",
+        "src/lib/custom-video-config.ts",
+        "src/lib/custom-video-config-normalizer.ts",
+        "src/lib/custom-video-runtime.ts",
+        "src/lib/seedance-video.ts",
+        "src/lib/binghuo-video.ts",
+        "src/lib/canvas-theme.ts",
+        "src/components/image-settings-panel.tsx",
+        "src/stores/use-config-store.ts",
+        "src/services/api/**/*.ts"
+    ]
 }

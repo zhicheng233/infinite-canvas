@@ -194,8 +194,10 @@ func (s *ChannelModelService) Update(id uint, input model.UpdateChannelModelInpu
 		}
 		item.Capabilities = string(encoded)
 	}
-	if err := applyVideoCustomConfig(item, input.VideoCustomConfig); err != nil {
-		return nil, err
+	if input.VideoRoute != nil || input.VideoCustomConfig != nil {
+		if err := applyVideoCustomConfig(item, input.VideoCustomConfig); err != nil {
+			return nil, err
+		}
 	}
 	if err := s.modelRepo.Save(item); err != nil {
 		return nil, err

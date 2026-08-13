@@ -37,10 +37,7 @@ export async function listMergeGroups(channelId: number): Promise<MergeGroup[]> 
 /**
  * SuperAdmin: Create a new merge group.
  */
-export async function createMergeGroup(
-    channelId: number,
-    input: CreateMergeGroupInput,
-): Promise<MergeGroup> {
+export async function createMergeGroup(channelId: number, input: CreateMergeGroupInput): Promise<MergeGroup> {
     const res = await apiClient.post(`/admin/channels/${channelId}/merge-groups`, input);
     return res.data.data;
 }

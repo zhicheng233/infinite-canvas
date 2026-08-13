@@ -149,10 +149,10 @@ export default function VideoPage() {
             }),
         );
         const uploadedAudioReferences = await Promise.all(
-                audioFiles.map(async (file) => {
-                    const audio = await uploadMediaFile(file, "audio-reference");
-                    return { id: nanoid(), name: file.name, type: audio.mimeType, url: audio.url, storageKey: audio.storageKey, durationMs: audio.durationMs };
-                }),
+            audioFiles.map(async (file) => {
+                const audio = await uploadMediaFile(file, "audio-reference");
+                return { id: nanoid(), name: file.name, type: audio.mimeType, url: audio.url, storageKey: audio.storageKey, durationMs: audio.durationMs };
+            }),
         );
         const nextAudioReferences = videoRouteForModel(effectiveConfig, model) === "seedance" ? filterAudioReferencesByDuration(audioReferences, uploadedAudioReferences, message.warning) : uploadedAudioReferences;
         setReferences((value) => [...value, ...nextReferences].slice(0, SEEDANCE_REFERENCE_LIMITS.images));
@@ -206,7 +206,18 @@ export default function VideoPage() {
         setStartedAt(batchStartedAt);
         try {
             const task = await createVideoGenerationTask(snapshot.config, snapshot.text, snapshot.references, snapshot.videoReferences, snapshot.audioReferences);
-            const log = buildLog({ prompt: snapshot.text, model, config: snapshot.config, references: snapshot.references, videoReferences: snapshot.videoReferences, audioReferences: snapshot.audioReferences, customVideoRuntime: snapshot.customVideoRuntime, durationMs: 0, status: "生成中", task });
+            const log = buildLog({
+                prompt: snapshot.text,
+                model,
+                config: snapshot.config,
+                references: snapshot.references,
+                videoReferences: snapshot.videoReferences,
+                audioReferences: snapshot.audioReferences,
+                customVideoRuntime: snapshot.customVideoRuntime,
+                durationMs: 0,
+                status: "生成中",
+                task,
+            });
             await saveLog(log);
             void pollGenerationLog(log, snapshot.config);
         } catch (error) {
@@ -432,9 +443,11 @@ export default function VideoPage() {
                                         <Button size="small" icon={<BookOpen className="size-3.5" />} onClick={() => setPromptDialogOpen(true)}>
                                             查看提示词库
                                         </Button>
-                                        {!isCustomVideoModel ? <Button size="small" icon={<FolderPlus className="size-3.5" />} onClick={() => setAssetPickerOpen(true)}>
-                                            查看我的素材
-                                        </Button> : null}
+                                        {!isCustomVideoModel ? (
+                                            <Button size="small" icon={<FolderPlus className="size-3.5" />} onClick={() => setAssetPickerOpen(true)}>
+                                                查看我的素材
+                                            </Button>
+                                        ) : null}
                                     </div>
                                 </div>
                                 <Input.TextArea value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={7} placeholder="描述镜头运动、主体动作、场景氛围和画面风格" />
@@ -446,100 +459,104 @@ export default function VideoPage() {
                                     media={normalizedCustomVideoRuntime.media}
                                     referenceMode={normalizedCustomVideoRuntime.values.reference_mode}
                                     onUpload={addCustomVideoMedia}
-                                    onChange={({ media, referenceMode }) => setCustomVideoRuntime((current) => normalizeCustomVideoRuntimeState(customVideoConfig, { ...current?.values, ...(referenceMode ? { reference_mode: referenceMode } : {}) }, media))}
+                                    onChange={({ media, referenceMode }) =>
+                                        setCustomVideoRuntime((current) => normalizeCustomVideoRuntimeState(customVideoConfig, { ...current?.values, ...(referenceMode ? { reference_mode: referenceMode } : {}) }, media))
+                                    }
                                 />
                             ) : null}
 
                             {!isCustomVideoModel ? (
                                 <>
                                     <div className="min-w-0">
-                                <div className="mb-2 flex items-center justify-between gap-3">
-                                    <span className="text-base font-semibold">参考图</span>
-                                    <div className="flex gap-2">
-                                        <Button size="small" icon={<ClipboardPaste className="size-3.5" />} onClick={() => void addReferencesFromClipboard()}>
-                                            剪切板
-                                        </Button>
-                                        <Button size="small" icon={<Upload className="size-3.5" />} onClick={() => fileInputRef.current?.click()}>
-                                            上传
-                                        </Button>
-                                    </div>
-                                </div>
-                                <div className="hover-scrollbar hover-scrollbar-hint flex min-h-24 w-full min-w-0 max-w-full gap-2 overflow-x-scroll overflow-y-hidden rounded-lg border border-dashed border-stone-300 p-2 pb-3 overscroll-x-contain dark:border-stone-700">
-                                    {references.map((item, index) => (
-                                        <div key={item.id} className="group relative size-20 shrink-0 overflow-hidden rounded-md border border-stone-200 dark:border-stone-800">
-                                            <img src={item.dataUrl} alt={item.name} className="size-full object-cover" />
-                                            <span className="absolute left-1 top-1 rounded bg-black/60 px-1.5 py-0.5 text-[10px] font-medium text-white">{imageReferenceMode === "first_last" && index < 2 ? (index === 0 ? "首帧" : "尾帧") : seedanceReferenceLabel("image", index)}</span>
-                                            <ReferenceOrderButtons index={index} total={references.length} onMove={(offset) => setReferences((value) => moveListItem(value, index, offset))} />
-                                            <button
-                                                type="button"
-                                                className="absolute right-1 top-1 hidden size-6 items-center justify-center rounded bg-black/60 text-white group-hover:flex"
-                                                onClick={() => setReferences((value) => value.filter((ref) => ref.id !== item.id))}
-                                                aria-label="移除参考图"
-                                            >
-                                                <Trash2 className="size-3.5" />
-                                            </button>
-                                        </div>
-                                    ))}
-                                    {!references.length ? <div className="flex min-w-full items-center justify-center text-sm text-stone-500">暂无参考图，最多 9 张</div> : null}
-                                </div>
-                                    </div>
-
-                                    <div className="min-w-0">
-                                <div className="mb-2 flex items-center justify-between gap-3">
-                                    <span className="text-base font-semibold">参考视频</span>
-                                    <Button size="small" icon={<Upload className="size-3.5" />} onClick={() => fileInputRef.current?.click()}>
-                                        上传
-                                    </Button>
-                                </div>
-                                <div className="hover-scrollbar hover-scrollbar-hint flex min-h-24 w-full min-w-0 max-w-full gap-2 overflow-x-scroll overflow-y-hidden rounded-lg border border-dashed border-stone-300 p-2 pb-3 overscroll-x-contain dark:border-stone-700">
-                                    {videoReferences.map((item, index) => (
-                                        <div key={item.id} className="group relative h-20 w-32 shrink-0 overflow-hidden rounded-md border border-stone-200 bg-black dark:border-stone-800">
-                                            <video src={item.url} className="size-full object-cover" muted preload="metadata" />
-                                            <span className="absolute left-1 top-1 rounded bg-black/60 px-1.5 py-0.5 text-[10px] font-medium text-white">{seedanceReferenceLabel("video", index)}</span>
-                                            <ReferenceOrderButtons index={index} total={videoReferences.length} onMove={(offset) => setVideoReferences((value) => moveListItem(value, index, offset))} />
-                                            <button
-                                                type="button"
-                                                className="absolute right-1 top-1 hidden size-6 items-center justify-center rounded bg-black/60 text-white group-hover:flex"
-                                                onClick={() => setVideoReferences((value) => value.filter((ref) => ref.id !== item.id))}
-                                                aria-label="移除参考视频"
-                                            >
-                                                <Trash2 className="size-3.5" />
-                                            </button>
-                                        </div>
-                                    ))}
-                                    {!videoReferences.length ? <div className="flex min-w-full items-center justify-center text-sm text-stone-500">暂无参考视频，最多 3 个</div> : null}
-                                </div>
-                                    </div>
-
-                                    <div className="min-w-0">
-                                <div className="mb-2 flex items-center justify-between gap-3">
-                                    <span className="text-base font-semibold">参考音频</span>
-                                    <Button size="small" icon={<Upload className="size-3.5" />} onClick={() => fileInputRef.current?.click()}>
-                                        上传
-                                    </Button>
-                                </div>
-                                <div className="hover-scrollbar hover-scrollbar-hint flex min-h-24 w-full min-w-0 max-w-full gap-2 overflow-x-scroll overflow-y-hidden rounded-lg border border-dashed border-stone-300 p-2 pb-3 overscroll-x-contain dark:border-stone-700">
-                                    {audioReferences.map((item, index) => (
-                                        <div key={item.id} className="group relative flex h-20 w-48 shrink-0 flex-col justify-center gap-2 rounded-md border border-stone-200 bg-stone-50 px-2 dark:border-stone-800 dark:bg-stone-900">
-                                            <div className="flex min-w-0 items-center gap-2 text-xs text-stone-500 dark:text-stone-400">
-                                                <Music2 className="size-4 shrink-0" />
-                                                <span className="shrink-0 rounded bg-stone-200 px-1 text-[10px] text-stone-700 dark:bg-stone-800 dark:text-stone-200">{seedanceReferenceLabel("audio", index)}</span>
-                                                <span className="truncate">{item.name}</span>
+                                        <div className="mb-2 flex items-center justify-between gap-3">
+                                            <span className="text-base font-semibold">参考图</span>
+                                            <div className="flex gap-2">
+                                                <Button size="small" icon={<ClipboardPaste className="size-3.5" />} onClick={() => void addReferencesFromClipboard()}>
+                                                    剪切板
+                                                </Button>
+                                                <Button size="small" icon={<Upload className="size-3.5" />} onClick={() => fileInputRef.current?.click()}>
+                                                    上传
+                                                </Button>
                                             </div>
-                                            <audio src={item.url} controls className="h-8 w-full" preload="metadata" />
-                                            <ReferenceOrderButtons index={index} total={audioReferences.length} onMove={(offset) => setAudioReferences((value) => moveListItem(value, index, offset))} />
-                                            <button
-                                                type="button"
-                                                className="absolute right-1 top-1 hidden size-6 items-center justify-center rounded bg-black/60 text-white group-hover:flex"
-                                                onClick={() => setAudioReferences((value) => value.filter((ref) => ref.id !== item.id))}
-                                                aria-label="移除参考音频"
-                                            >
-                                                <Trash2 className="size-3.5" />
-                                            </button>
                                         </div>
-                                    ))}
-                                    {!audioReferences.length ? <div className="flex min-w-full items-center justify-center text-center text-sm text-stone-500">暂无参考音频，最多 3 个，mp3/wav，单个 15MB 内</div> : null}
-                                </div>
+                                        <div className="hover-scrollbar hover-scrollbar-hint flex min-h-24 w-full min-w-0 max-w-full gap-2 overflow-x-scroll overflow-y-hidden rounded-lg border border-dashed border-stone-300 p-2 pb-3 overscroll-x-contain dark:border-stone-700">
+                                            {references.map((item, index) => (
+                                                <div key={item.id} className="group relative size-20 shrink-0 overflow-hidden rounded-md border border-stone-200 dark:border-stone-800">
+                                                    <img src={item.dataUrl} alt={item.name} className="size-full object-cover" />
+                                                    <span className="absolute left-1 top-1 rounded bg-black/60 px-1.5 py-0.5 text-[10px] font-medium text-white">
+                                                        {imageReferenceMode === "first_last" && index < 2 ? (index === 0 ? "首帧" : "尾帧") : seedanceReferenceLabel("image", index)}
+                                                    </span>
+                                                    <ReferenceOrderButtons index={index} total={references.length} onMove={(offset) => setReferences((value) => moveListItem(value, index, offset))} />
+                                                    <button
+                                                        type="button"
+                                                        className="absolute right-1 top-1 hidden size-6 items-center justify-center rounded bg-black/60 text-white group-hover:flex"
+                                                        onClick={() => setReferences((value) => value.filter((ref) => ref.id !== item.id))}
+                                                        aria-label="移除参考图"
+                                                    >
+                                                        <Trash2 className="size-3.5" />
+                                                    </button>
+                                                </div>
+                                            ))}
+                                            {!references.length ? <div className="flex min-w-full items-center justify-center text-sm text-stone-500">暂无参考图，最多 9 张</div> : null}
+                                        </div>
+                                    </div>
+
+                                    <div className="min-w-0">
+                                        <div className="mb-2 flex items-center justify-between gap-3">
+                                            <span className="text-base font-semibold">参考视频</span>
+                                            <Button size="small" icon={<Upload className="size-3.5" />} onClick={() => fileInputRef.current?.click()}>
+                                                上传
+                                            </Button>
+                                        </div>
+                                        <div className="hover-scrollbar hover-scrollbar-hint flex min-h-24 w-full min-w-0 max-w-full gap-2 overflow-x-scroll overflow-y-hidden rounded-lg border border-dashed border-stone-300 p-2 pb-3 overscroll-x-contain dark:border-stone-700">
+                                            {videoReferences.map((item, index) => (
+                                                <div key={item.id} className="group relative h-20 w-32 shrink-0 overflow-hidden rounded-md border border-stone-200 bg-black dark:border-stone-800">
+                                                    <video src={item.url} className="size-full object-cover" muted preload="metadata" />
+                                                    <span className="absolute left-1 top-1 rounded bg-black/60 px-1.5 py-0.5 text-[10px] font-medium text-white">{seedanceReferenceLabel("video", index)}</span>
+                                                    <ReferenceOrderButtons index={index} total={videoReferences.length} onMove={(offset) => setVideoReferences((value) => moveListItem(value, index, offset))} />
+                                                    <button
+                                                        type="button"
+                                                        className="absolute right-1 top-1 hidden size-6 items-center justify-center rounded bg-black/60 text-white group-hover:flex"
+                                                        onClick={() => setVideoReferences((value) => value.filter((ref) => ref.id !== item.id))}
+                                                        aria-label="移除参考视频"
+                                                    >
+                                                        <Trash2 className="size-3.5" />
+                                                    </button>
+                                                </div>
+                                            ))}
+                                            {!videoReferences.length ? <div className="flex min-w-full items-center justify-center text-sm text-stone-500">暂无参考视频，最多 3 个</div> : null}
+                                        </div>
+                                    </div>
+
+                                    <div className="min-w-0">
+                                        <div className="mb-2 flex items-center justify-between gap-3">
+                                            <span className="text-base font-semibold">参考音频</span>
+                                            <Button size="small" icon={<Upload className="size-3.5" />} onClick={() => fileInputRef.current?.click()}>
+                                                上传
+                                            </Button>
+                                        </div>
+                                        <div className="hover-scrollbar hover-scrollbar-hint flex min-h-24 w-full min-w-0 max-w-full gap-2 overflow-x-scroll overflow-y-hidden rounded-lg border border-dashed border-stone-300 p-2 pb-3 overscroll-x-contain dark:border-stone-700">
+                                            {audioReferences.map((item, index) => (
+                                                <div key={item.id} className="group relative flex h-20 w-48 shrink-0 flex-col justify-center gap-2 rounded-md border border-stone-200 bg-stone-50 px-2 dark:border-stone-800 dark:bg-stone-900">
+                                                    <div className="flex min-w-0 items-center gap-2 text-xs text-stone-500 dark:text-stone-400">
+                                                        <Music2 className="size-4 shrink-0" />
+                                                        <span className="shrink-0 rounded bg-stone-200 px-1 text-[10px] text-stone-700 dark:bg-stone-800 dark:text-stone-200">{seedanceReferenceLabel("audio", index)}</span>
+                                                        <span className="truncate">{item.name}</span>
+                                                    </div>
+                                                    <audio src={item.url} controls className="h-8 w-full" preload="metadata" />
+                                                    <ReferenceOrderButtons index={index} total={audioReferences.length} onMove={(offset) => setAudioReferences((value) => moveListItem(value, index, offset))} />
+                                                    <button
+                                                        type="button"
+                                                        className="absolute right-1 top-1 hidden size-6 items-center justify-center rounded bg-black/60 text-white group-hover:flex"
+                                                        onClick={() => setAudioReferences((value) => value.filter((ref) => ref.id !== item.id))}
+                                                        aria-label="移除参考音频"
+                                                    >
+                                                        <Trash2 className="size-3.5" />
+                                                    </button>
+                                                </div>
+                                            ))}
+                                            {!audioReferences.length ? <div className="flex min-w-full items-center justify-center text-center text-sm text-stone-500">暂无参考音频，最多 3 个，mp3/wav，单个 15MB 内</div> : null}
+                                        </div>
                                     </div>
                                 </>
                             ) : null}
@@ -554,7 +571,15 @@ export default function VideoPage() {
                             </div>
 
                             <div className="hidden gap-4 sm:grid sm:grid-cols-2">
-                                <GenerationSettings config={effectiveConfig} model={model} updateConfig={updateConfig} openConfigDialog={openConfigDialog} customVideoRuntime={normalizedCustomVideoRuntime} onCustomVideoRuntimeChange={setCustomVideoRuntime} onCustomVideoMediaRoleOpen={(role) => document.getElementById(`custom-video-role-${role}`)?.scrollIntoView({ behavior: "smooth", block: "center" })} />
+                                <GenerationSettings
+                                    config={effectiveConfig}
+                                    model={model}
+                                    updateConfig={updateConfig}
+                                    openConfigDialog={openConfigDialog}
+                                    customVideoRuntime={normalizedCustomVideoRuntime}
+                                    onCustomVideoRuntimeChange={setCustomVideoRuntime}
+                                    onCustomVideoMediaRoleOpen={(role) => document.getElementById(`custom-video-role-${role}`)?.scrollIntoView({ behavior: "smooth", block: "center" })}
+                                />
                             </div>
                         </div>
 
@@ -616,7 +641,15 @@ export default function VideoPage() {
             </Drawer>
             <Drawer title="参数" placement="bottom" height="82vh" open={settingsOpen} onClose={() => setSettingsOpen(false)}>
                 <div className="grid grid-cols-2 gap-3 pb-4">
-                    <GenerationSettings config={effectiveConfig} model={model} updateConfig={updateConfig} openConfigDialog={openConfigDialog} customVideoRuntime={normalizedCustomVideoRuntime} onCustomVideoRuntimeChange={setCustomVideoRuntime} onCustomVideoMediaRoleOpen={(role) => document.getElementById(`custom-video-role-${role}`)?.scrollIntoView({ behavior: "smooth", block: "center" })} />
+                    <GenerationSettings
+                        config={effectiveConfig}
+                        model={model}
+                        updateConfig={updateConfig}
+                        openConfigDialog={openConfigDialog}
+                        customVideoRuntime={normalizedCustomVideoRuntime}
+                        onCustomVideoRuntimeChange={setCustomVideoRuntime}
+                        onCustomVideoMediaRoleOpen={(role) => document.getElementById(`custom-video-role-${role}`)?.scrollIntoView({ behavior: "smooth", block: "center" })}
+                    />
                 </div>
             </Drawer>
             <PromptSelectDialog open={promptDialogOpen} onOpenChange={setPromptDialogOpen} onSelect={setPrompt} />
@@ -628,7 +661,23 @@ export default function VideoPage() {
     );
 }
 
-function GenerationSettings({ config, model, updateConfig, openConfigDialog, customVideoRuntime, onCustomVideoRuntimeChange, onCustomVideoMediaRoleOpen }: { config: AiConfig; model: string; updateConfig: UpdateAiConfig; openConfigDialog: (shouldPromptContinue?: boolean) => void; customVideoRuntime?: CustomVideoRuntimeSnapshot; onCustomVideoRuntimeChange: (runtime: CustomVideoRuntimeSnapshot) => void; onCustomVideoMediaRoleOpen: (role: CustomVideoMediaFeature) => void }) {
+function GenerationSettings({
+    config,
+    model,
+    updateConfig,
+    openConfigDialog,
+    customVideoRuntime,
+    onCustomVideoRuntimeChange,
+    onCustomVideoMediaRoleOpen,
+}: {
+    config: AiConfig;
+    model: string;
+    updateConfig: UpdateAiConfig;
+    openConfigDialog: (shouldPromptContinue?: boolean) => void;
+    customVideoRuntime?: CustomVideoRuntimeSnapshot;
+    onCustomVideoRuntimeChange: (runtime: CustomVideoRuntimeSnapshot) => void;
+    onCustomVideoMediaRoleOpen: (role: CustomVideoMediaFeature) => void;
+}) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
 
     return (
@@ -638,7 +687,17 @@ function GenerationSettings({ config, model, updateConfig, openConfigDialog, cus
                 <ModelPicker config={config} value={model} onChange={(value) => updateConfig("videoModel", value)} capability="video" fullWidth onMissingConfig={() => openConfigDialog(false)} />
             </label>
             <div className="col-span-2">
-                <VideoSettingsPanel config={config} model={model} onConfigChange={(key, value) => updateConfig(key, value)} theme={theme} showTitle={false} className="space-y-4" customVideoRuntime={customVideoRuntime} onCustomVideoRuntimeChange={onCustomVideoRuntimeChange} onCustomVideoMediaRoleOpen={onCustomVideoMediaRoleOpen} />
+                <VideoSettingsPanel
+                    config={config}
+                    model={model}
+                    onConfigChange={(key, value) => updateConfig(key, value)}
+                    theme={theme}
+                    showTitle={false}
+                    className="space-y-4"
+                    customVideoRuntime={customVideoRuntime}
+                    onCustomVideoRuntimeChange={onCustomVideoRuntimeChange}
+                    onCustomVideoMediaRoleOpen={onCustomVideoMediaRoleOpen}
+                />
             </div>
         </>
     );

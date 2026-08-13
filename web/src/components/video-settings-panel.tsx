@@ -51,7 +51,17 @@ export type VideoSettingsPanelProps = {
     onCustomVideoMediaRoleOpen?: (role: CustomVideoMediaFeature) => void;
 };
 
-export function VideoSettingsPanel({ config, model: selectedModel, onConfigChange, theme, showTitle = true, className = "w-[320px] space-y-4 rounded-2xl px-1 py-0.5", customVideoRuntime, onCustomVideoRuntimeChange, onCustomVideoMediaRoleOpen }: VideoSettingsPanelProps) {
+export function VideoSettingsPanel({
+    config,
+    model: selectedModel,
+    onConfigChange,
+    theme,
+    showTitle = true,
+    className = "w-[320px] space-y-4 rounded-2xl px-1 py-0.5",
+    customVideoRuntime,
+    onCustomVideoRuntimeChange,
+    onCustomVideoMediaRoleOpen,
+}: VideoSettingsPanelProps) {
     const model = selectedModel || config.videoModel || config.model;
     const resolvedConfig = { ...config, videoModel: model, model };
     if (videoRouteForModel(resolvedConfig, model) === "binghuo") {
@@ -166,13 +176,23 @@ function BinghuoVideoSettingsPanel({ config, model, onConfigChange, theme, showT
                 {showTitle ? <div className="text-lg font-semibold">视频设置</div> : null}
                 <SettingGroup title="清晰度" color={theme.node.muted}>
                     <div className="grid grid-cols-3 gap-2.5">
-                        {binghuoResolutionOptions.map((value) => <OptionPill key={value} selected={resolution === value} theme={theme} onClick={() => onConfigChange("vquality", value)}>{value}</OptionPill>)}
+                        {binghuoResolutionOptions.map((value) => (
+                            <OptionPill key={value} selected={resolution === value} theme={theme} onClick={() => onConfigChange("vquality", value)}>
+                                {value}
+                            </OptionPill>
+                        ))}
                     </div>
                 </SettingGroup>
                 <SettingGroup title="比例" color={theme.node.muted}>
                     <div className="grid grid-cols-4 gap-2.5">
                         {binghuoRatioOptions.map((value) => (
-                            <button key={value} type="button" className="flex h-[64px] cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border bg-transparent text-sm transition hover:opacity-80" style={{ borderColor: ratio === value ? theme.node.text : theme.node.stroke, color: theme.node.text }} onClick={() => onConfigChange("size", value)}>
+                            <button
+                                key={value}
+                                type="button"
+                                className="flex h-[64px] cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border bg-transparent text-sm transition hover:opacity-80"
+                                style={{ borderColor: ratio === value ? theme.node.text : theme.node.stroke, color: theme.node.text }}
+                                onClick={() => onConfigChange("size", value)}
+                            >
                                 <SizePreview width={ratioPreview(value).width} height={ratioPreview(value).height} color={theme.node.text} />
                                 <span>{value}</span>
                             </button>
@@ -181,14 +201,29 @@ function BinghuoVideoSettingsPanel({ config, model, onConfigChange, theme, showT
                 </SettingGroup>
                 <SettingGroup title="时长" color={theme.node.muted}>
                     <div className="grid grid-cols-3 gap-2.5">
-                        {(configuredDurations.length ? configuredDurations : fixedDuration ? [fixedDuration] : secondOptions).map((value) => <OptionPill key={value} selected={seconds === String(value)} theme={theme} onClick={() => onConfigChange("videoSeconds", String(value))}>{value}s</OptionPill>)}
-                        <NumberInput value={seconds} min={configuredDurations[0] || fixedDuration || 1} max={configuredDurations.at(-1) || fixedDuration || 20} disabled={Boolean(fixedDuration) || (configuredDurations.length > 0 && !customizable)} theme={theme} onChange={(value) => onConfigChange("videoSeconds", value)} />
+                        {(configuredDurations.length ? configuredDurations : fixedDuration ? [fixedDuration] : secondOptions).map((value) => (
+                            <OptionPill key={value} selected={seconds === String(value)} theme={theme} onClick={() => onConfigChange("videoSeconds", String(value))}>
+                                {value}s
+                            </OptionPill>
+                        ))}
+                        <NumberInput
+                            value={seconds}
+                            min={configuredDurations[0] || fixedDuration || 1}
+                            max={configuredDurations.at(-1) || fixedDuration || 20}
+                            disabled={Boolean(fixedDuration) || (configuredDurations.length > 0 && !customizable)}
+                            theme={theme}
+                            onChange={(value) => onConfigChange("videoSeconds", value)}
+                        />
                     </div>
                 </SettingGroup>
                 <SettingGroup title="参考图模式" color={theme.node.muted}>
                     <div className="grid grid-cols-2 gap-2.5">
-                        <OptionPill selected={referenceMode === "reference"} theme={theme} onClick={() => onConfigChange("videoReferenceMode", "reference")}>普通参考图</OptionPill>
-                        <OptionPill selected={referenceMode === "first_last"} theme={theme} onClick={() => onConfigChange("videoReferenceMode", "first_last")}>首尾帧</OptionPill>
+                        <OptionPill selected={referenceMode === "reference"} theme={theme} onClick={() => onConfigChange("videoReferenceMode", "reference")}>
+                            普通参考图
+                        </OptionPill>
+                        <OptionPill selected={referenceMode === "first_last"} theme={theme} onClick={() => onConfigChange("videoReferenceMode", "first_last")}>
+                            首尾帧
+                        </OptionPill>
                     </div>
                 </SettingGroup>
                 <SettingGroup title="输出" color={theme.node.muted}>

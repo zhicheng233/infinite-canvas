@@ -251,26 +251,23 @@ describe("video aspect ratio routing", () => {
     });
 
     it("uses yijia JSON when a raw model resolves to a selected yijia channel model", async () => {
-        useConfigStore.getState().applyServerChannelCatalog(
-            [{ id: 7, name: "Yijia", enabled: true, video_api_standard: "default" }],
-            {
-                7: [
-                    {
-                        id: 77,
-                        channel_id: 7,
-                        model_name: "omni_flash",
-                        capabilities: ["video"],
-                        enabled: true,
-                        image_generate_route: "auto",
-                        image_edit_route: "auto",
-                        video_route: "yijia",
-                        video_durations: [],
-                        video_customizable: false,
-                        sort_order: 0,
-                    },
-                ],
-            },
-        );
+        useConfigStore.getState().applyServerChannelCatalog([{ id: 7, name: "Yijia", enabled: true, video_api_standard: "default" }], {
+            7: [
+                {
+                    id: 77,
+                    channel_id: 7,
+                    model_name: "omni_flash",
+                    capabilities: ["video"],
+                    enabled: true,
+                    image_generate_route: "auto",
+                    image_edit_route: "auto",
+                    video_route: "yijia",
+                    video_durations: [],
+                    video_customizable: false,
+                    sort_order: 0,
+                },
+            ],
+        });
         const post = jest.spyOn(axios, "post").mockResolvedValue({ data: { id: "task_yijia" }, headers: {} });
         const config = {
             ...defaultConfig,
@@ -301,26 +298,23 @@ describe("video aspect ratio routing", () => {
 
     it("uses yijia JSON when a default-standard merge model inherits a yijia physical route", async () => {
         useConfigStore.setState({ config: { ...defaultConfig, model: "merge://7::omni_flash", videoModel: "merge://7::omni_flash", videoChannelId: 7, size: "720x1280" } });
-        useConfigStore.getState().applyServerChannelCatalog(
-            [{ id: 7, name: "混合渠道1", enabled: true, video_api_standard: "default" }],
-            {
-                7: [
-                    {
-                        id: 77,
-                        channel_id: 7,
-                        model_name: "omni_flash",
-                        capabilities: ["video"],
-                        enabled: true,
-                        image_generate_route: "auto",
-                        image_edit_route: "auto",
-                        video_route: "yijia",
-                        video_durations: [6],
-                        video_customizable: true,
-                        sort_order: 0,
-                    },
-                ],
-            },
-        );
+        useConfigStore.getState().applyServerChannelCatalog([{ id: 7, name: "混合渠道1", enabled: true, video_api_standard: "default" }], {
+            7: [
+                {
+                    id: 77,
+                    channel_id: 7,
+                    model_name: "omni_flash",
+                    capabilities: ["video"],
+                    enabled: true,
+                    image_generate_route: "auto",
+                    image_edit_route: "auto",
+                    video_route: "yijia",
+                    video_durations: [6],
+                    video_customizable: true,
+                    sort_order: 0,
+                },
+            ],
+        });
         useConfigStore.getState().applyServerOptionMetadata([{ model: "omni_flash", credits_per_unit: 1, unit_type: "per_video" }], null);
         useConfigStore.getState().applyServerMergeGroups(7, [
             {
@@ -437,7 +431,7 @@ describe("video aspect ratio routing", () => {
         const dispatchEvent = jest.fn();
         (globalThis.window as unknown as { dispatchEvent: typeof dispatchEvent }).dispatchEvent = dispatchEvent;
         jest.spyOn(axios, "get").mockResolvedValue({
-            data: { code: "fail_to_fetch_task", message: "{\"error\":{\"message\":\"task failed\"}}" },
+            data: { code: "fail_to_fetch_task", message: '{"error":{"message":"task failed"}}' },
             headers: { "x-credits-refund": "8" },
         });
 

@@ -207,15 +207,9 @@ function ModelRow({ model, newApiChannelId }: { model: ModelMetrics; newApiChann
                     </span>
                     {newApiChannelId === 0 && (
                         <>
-                            <span>
-                                平均延迟：{model.avg_latency_ms != null ? `${(model.avg_latency_ms / 1000).toFixed(1)}s` : "—"}
-                            </span>
-                            <span>
-                                TPS：{model.avg_tps != null ? model.avg_tps.toFixed(1) : "—"}
-                            </span>
-                            <span>
-                                近期成功率：{(model.recent_success_rates?.length ?? 0) > 0 ? model.recent_success_rates!.join(", ") : "—"}
-                            </span>
+                            <span>平均延迟：{model.avg_latency_ms != null ? `${(model.avg_latency_ms / 1000).toFixed(1)}s` : "—"}</span>
+                            <span>TPS：{model.avg_tps != null ? model.avg_tps.toFixed(1) : "—"}</span>
+                            <span>近期成功率：{(model.recent_success_rates?.length ?? 0) > 0 ? model.recent_success_rates!.join(", ") : "—"}</span>
                         </>
                     )}
                 </div>
@@ -251,12 +245,7 @@ function CountSummary({ requestCount, successCount }: { requestCount: number; su
 
 function RateValue({ rate, status, prominent = false }: { rate: number | null; status: string; prominent?: boolean }) {
     return (
-        <span
-            className={`${prominent ? "text-lg" : "text-sm"} whitespace-nowrap font-semibold ${
-                rate === null ? "text-stone-400 dark:text-stone-500" : ""
-            }`}
-            style={rate !== null ? { color: `hsl(${rate * 1.2}, 75%, 40%)` } : undefined}
-        >
+        <span className={`${prominent ? "text-lg" : "text-sm"} whitespace-nowrap font-semibold ${rate === null ? "text-stone-400 dark:text-stone-500" : ""}`} style={rate !== null ? { color: `hsl(${rate * 1.2}, 75%, 40%)` } : undefined}>
             {rate === null ? unavailableRateText(status) : `${Math.round(rate)}%`}
         </span>
     );

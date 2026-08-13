@@ -218,6 +218,30 @@ func TestUpdateChannelModelRequiresConfigForCustomRoute(t *testing.T) {
 	}
 }
 
+func TestUpdateChannelModelPreservesCustomConfigForSortOnlyPatch(t *testing.T) {
+	configJSON, err := json.Marshal(serviceTestCustomVideoConfig())
+	if err != nil {
+		t.Fatalf("marshal fixture: %v", err)
+	}
+	repo := &channelModelRepoStub{item: &model.ChannelModel{Capabilities: `[]`, VideoDurations: `[]`, VideoRoute: "custom", VideoCustomConfig: string(configJSON)}}
+	service := NewChannelModelService(nil, nil, repo, nil)
+	sortOrder := 7
+
+	info, err := service.Update(1, model.UpdateChannelModelInput{SortOrder: &sortOrder})
+	if err != nil {
+		t.Fatalf("sort-only update failed: %v", err)
+	}
+	if repo.saveCalls != 1 || repo.item.SortOrder != sortOrder {
+		t.Fatalf("save calls=%d sort order=%d, want 1 and %d", repo.saveCalls, repo.item.SortOrder, sortOrder)
+	}
+	if repo.item.VideoRoute != "custom" || repo.item.VideoCustomConfig != string(configJSON) {
+		t.Fatalf("persisted custom route/config changed: route=%q config=%q", repo.item.VideoRoute, repo.item.VideoCustomConfig)
+	}
+	if info.VideoCustomConfig == nil || info.VideoCustomConfig.Seconds.Default != 6 {
+		t.Fatalf("returned custom config was not preserved: %#v", info.VideoCustomConfig)
+	}
+}
+
 func TestUpdateChannelModelSavesAndReturnsCustomConfig(t *testing.T) {
 	repo := &channelModelRepoStub{item: &model.ChannelModel{Capabilities: "[]", VideoDurations: "[]", VideoRoute: "auto"}}
 	service := NewChannelModelService(nil, nil, repo, nil)
