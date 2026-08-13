@@ -13,11 +13,16 @@ import (
 )
 
 type ChannelModelService struct {
-	channelService *ChannelService
+	channelService channelModelChannelService
 	channelRepo    channelModelChannelRepo
 	modelRepo      channelModelRepo
 	creditRepo     pricingMapReader
 	httpClient     *http.Client
+}
+
+type channelModelChannelService interface {
+	ListEnabled() ([]model.ChannelInfo, error)
+	DecryptedApiKey(id uint) (string, error)
 }
 
 type channelModelChannelRepo interface {
@@ -38,7 +43,7 @@ type pricingMapReader interface {
 	FindPricingMap(tenantID uint) (map[string]map[uint]model.CreditPricing, error)
 }
 
-func NewChannelModelService(channelService *ChannelService, channelRepo channelModelChannelRepo, modelRepo channelModelRepo, creditRepo pricingMapReader) *ChannelModelService {
+func NewChannelModelService(channelService channelModelChannelService, channelRepo channelModelChannelRepo, modelRepo channelModelRepo, creditRepo pricingMapReader) *ChannelModelService {
 	return &ChannelModelService{
 		channelService: channelService,
 		channelRepo:    channelRepo,
@@ -46,6 +51,25 @@ func NewChannelModelService(channelService *ChannelService, channelRepo channelM
 		creditRepo:     creditRepo,
 		httpClient:     &http.Client{Timeout: 30 * time.Second},
 	}
+}
+
+func (s *ChannelModelService) ListTenantCatalog(tenantID uint) ([]model.ChannelCatalogItem, error) {
+	if s.channelService == nil {
+		return nil, errors.New("channel service is not configured")
+	}
+	channels, err := s.channelService.ListEnabled()
+	if err != nil {
+		return nil, err
+	}
+	result := make([]model.ChannelCatalogItem, 0, len(channels))
+	for _, channel := range channels {
+		models, err := s.ListUserCatalog(tenantID, channel.ID)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, model.ChannelCatalogItem{ChannelID: channel.ID, ChannelName: channel.Name, Models: models})
+	}
+	return result, nil
 }
 
 type discoveredModel struct {
@@ -170,6 +194,9 @@ func (s *ChannelModelService) Update(id uint, input model.UpdateChannelModelInpu
 		}
 		item.Capabilities = string(encoded)
 	}
+	if err := applyVideoCustomConfig(item, input.VideoCustomConfig); err != nil {
+		return nil, err
+	}
 	if err := s.modelRepo.Save(item); err != nil {
 		return nil, err
 	}
@@ -269,7 +296,39 @@ func channelModelToInfo(item *model.ChannelModel) (model.ChannelModelInfo, error
 			return model.ChannelModelInfo{}, err
 		}
 	}
-	return model.ChannelModelInfo{ID: item.ID, ChannelID: item.ChannelID, ModelName: item.ModelName, Capabilities: capabilities, Enabled: item.Enabled, ImageGenerateRoute: item.ImageGenerateRoute, ImageEditRoute: item.ImageEditRoute, VideoRoute: item.VideoRoute, VideoDurations: durations, VideoCustomizable: item.VideoCustomizable, SortOrder: item.SortOrder}, nil
+	var customConfig *model.CustomVideoConfig
+	if item.VideoRoute == "custom" {
+		if strings.TrimSpace(item.VideoCustomConfig) == "" {
+			return model.ChannelModelInfo{}, errors.New("video_custom_config 不能为空")
+		}
+		customConfig = &model.CustomVideoConfig{}
+		if err := json.Unmarshal([]byte(item.VideoCustomConfig), customConfig); err != nil {
+			return model.ChannelModelInfo{}, fmt.Errorf("解析 video_custom_config: %w", err)
+		}
+		if err := model.NormalizeAndValidateCustomVideoConfig(customConfig); err != nil {
+			return model.ChannelModelInfo{}, fmt.Errorf("校验 video_custom_config: %w", err)
+		}
+	}
+	return model.ChannelModelInfo{ID: item.ID, ChannelID: item.ChannelID, ModelName: item.ModelName, Capabilities: capabilities, Enabled: item.Enabled, ImageGenerateRoute: item.ImageGenerateRoute, ImageEditRoute: item.ImageEditRoute, VideoRoute: item.VideoRoute, VideoDurations: durations, VideoCustomizable: item.VideoCustomizable, VideoCustomConfig: customConfig, SortOrder: item.SortOrder}, nil
+}
+
+func applyVideoCustomConfig(item *model.ChannelModel, config *model.CustomVideoConfig) error {
+	if item.VideoRoute != "custom" {
+		item.VideoCustomConfig = ""
+		return nil
+	}
+	if config == nil {
+		return errors.New("自定义视频路由必须提供 video_custom_config")
+	}
+	if err := model.NormalizeAndValidateCustomVideoConfig(config); err != nil {
+		return fmt.Errorf("video_custom_config 无效: %w", err)
+	}
+	encoded, err := json.Marshal(config)
+	if err != nil {
+		return err
+	}
+	item.VideoCustomConfig = string(encoded)
+	return nil
 }
 
 func buildChannelModelsURL(baseURL string) string {

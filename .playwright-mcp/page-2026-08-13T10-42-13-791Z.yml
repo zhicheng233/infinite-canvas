@@ -1,0 +1,36 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e3]:
+    - banner [ref=e4]:
+      - generic [ref=e5]:
+        - generic [ref=e6]:
+          - link [ref=e7] [cursor=pointer]:
+            - /url: /
+            - img "Logo" [ref=e8]
+          - navigation [ref=e9]:
+            - link "我的画布" [ref=e10] [cursor=pointer]:
+              - /url: /canvas
+            - link "生图工作台" [ref=e17] [cursor=pointer]:
+              - /url: /image
+            - link "视频创作台" [ref=e23] [cursor=pointer]:
+              - /url: /video
+            - link "提示词库" [ref=e28] [cursor=pointer]:
+              - /url: /prompts
+            - link "我的素材" [ref=e33] [cursor=pointer]:
+              - /url: /assets
+            - link "渠道状态" [ref=e40] [cursor=pointer]:
+              - /url: /channel-status
+            - button "积分充值" [ref=e44]
+        - generic [ref=e49]:
+          - button "切换到深色主题" [ref=e50]
+          - button "登录" [ref=e54]
+    - main [ref=e59]:
+      - generic [ref=e60]:
+        - generic [ref=e61]:
+          - generic [ref=e62]:
+            - paragraph [ref=e63]: 画布库
+            - heading "无限画布" [level=1] [ref=e64]
+          - generic [ref=e65]:
+            - button [disabled] [ref=e66]
+            - button [disabled] [ref=e72]
+        - generic [ref=e75]: 正在加载画布...
+  - button "Open Next.js Dev Tools" [ref=e81] [cursor=pointer]

@@ -7,18 +7,24 @@ import { Button } from "antd";
 
 import { VideoSettingsPanel, videoResolutionLabel, videoSecondsLabel, videoSizeLabel } from "@/components/video-settings-panel";
 import { canvasThemes } from "@/lib/canvas-theme";
+import { customVideoConfigForModel, normalizeVideoDurationForModel, type AiConfig } from "@/stores/use-config-store";
+import type { CustomVideoMediaFeature } from "@/lib/custom-video-config";
+import type { CustomVideoRuntimeSnapshot } from "@/lib/custom-video-runtime";
 import { useThemeStore } from "@/stores/use-theme-store";
-import { normalizeVideoDurationForModel, type AiConfig } from "@/stores/use-config-store";
+import { CanvasCustomVideoReferenceInputs } from "./canvas-custom-video-reference-inputs";
+import { canvasCustomVideoRuntimeForModel } from "./canvas-custom-video-runtime";
 
 type CanvasVideoSettingsPopoverProps = {
     config: AiConfig;
     model?: string;
     onConfigChange: (key: keyof AiConfig, value: string) => void;
+    customVideoRuntime?: CustomVideoRuntimeSnapshot;
+    onCustomVideoRuntimeChange?: (runtime: CustomVideoRuntimeSnapshot) => void;
     buttonClassName?: string;
     placement?: "topLeft" | "top" | "topRight" | "bottomLeft" | "bottom" | "bottomRight";
 };
 
-export function CanvasVideoSettingsPopover({ config, model, onConfigChange, buttonClassName, placement = "topLeft" }: CanvasVideoSettingsPopoverProps) {
+export function CanvasVideoSettingsPopover({ config, model, onConfigChange, customVideoRuntime, onCustomVideoRuntimeChange, buttonClassName, placement = "topLeft" }: CanvasVideoSettingsPopoverProps) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const displaySeconds = normalizeVideoDurationForModel(config, model || config.model || config.videoModel, config.videoSeconds);
     const buttonRef = useRef<HTMLSpanElement>(null);
@@ -47,7 +53,20 @@ export function CanvasVideoSettingsPopover({ config, model, onConfigChange, butt
         };
     }, [open]);
 
-    const panel = open && buttonRect ? <VideoSettingsPortal buttonRect={buttonRect} panelRef={panelRef} placement={placement} theme={theme} config={config} model={model} onConfigChange={onConfigChange} /> : null;
+    const panel =
+        open && buttonRect ? (
+            <VideoSettingsPortal
+                buttonRect={buttonRect}
+                panelRef={panelRef}
+                placement={placement}
+                theme={theme}
+                config={config}
+                model={model}
+                onConfigChange={onConfigChange}
+                customVideoRuntime={customVideoRuntime}
+                onCustomVideoRuntimeChange={onCustomVideoRuntimeChange}
+            />
+        ) : null;
 
     return (
         <>
@@ -78,6 +97,8 @@ function VideoSettingsPortal({
     config,
     model,
     onConfigChange,
+    customVideoRuntime,
+    onCustomVideoRuntimeChange,
 }: {
     buttonRect: DOMRect;
     panelRef: RefObject<HTMLDivElement | null>;
@@ -86,7 +107,13 @@ function VideoSettingsPortal({
     config: AiConfig;
     model?: string;
     onConfigChange: (key: keyof AiConfig, value: string) => void;
+    customVideoRuntime?: CustomVideoRuntimeSnapshot;
+    onCustomVideoRuntimeChange?: (runtime: CustomVideoRuntimeSnapshot) => void;
 }) {
+    const selectedModel = model || config.videoModel || config.model;
+    const customConfig = customVideoConfigForModel(config, selectedModel);
+    const normalizedRuntime = canvasCustomVideoRuntimeForModel(config, selectedModel, customVideoRuntime);
+    const [focusRole, setFocusRole] = useState<CustomVideoMediaFeature>();
     const width = 356;
     const gap = 8;
     const margin = 12;
@@ -110,7 +137,17 @@ function VideoSettingsPortal({
 
     return createPortal(
         <div ref={panelRef} className="canvas-image-settings-popover" style={style} onPointerDown={(event) => event.stopPropagation()} onMouseDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()}>
-            <VideoSettingsPanel config={config} model={model} onConfigChange={(key, value) => onConfigChange(key, value)} theme={theme} className="space-y-4" />
+            <VideoSettingsPanel
+                config={config}
+                model={model}
+                onConfigChange={(key, value) => onConfigChange(key, value)}
+                theme={theme}
+                className="space-y-4"
+                customVideoRuntime={normalizedRuntime}
+                onCustomVideoRuntimeChange={onCustomVideoRuntimeChange}
+                onCustomVideoMediaRoleOpen={setFocusRole}
+            />
+            {customConfig && normalizedRuntime && onCustomVideoRuntimeChange ? <CanvasCustomVideoReferenceInputs config={customConfig} runtime={normalizedRuntime} theme={theme} focusRole={focusRole} onChange={onCustomVideoRuntimeChange} /> : null}
         </div>,
         document.body,
     );

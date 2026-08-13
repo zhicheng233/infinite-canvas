@@ -1,0 +1,26 @@
+- generic [ref=e1]:
+  - main [ref=e4]:
+    - generic [ref=e5]:
+      - img "无限画布" [ref=e7]
+      - heading "登录" [level=1] [ref=e8]
+      - generic [ref=e9]:
+        - textbox "用户名" [ref=e15]: admin
+        - generic [ref=e21]:
+          - textbox "密码" [ref=e22]: de4366851909551c8af5e617e716d5b65eab7c8ab8cad33a
+          - button "显示" [ref=e24] [cursor=pointer]:
+            - img "eye-invisible" [ref=e25]
+        - button "登 录" [active] [ref=e34] [cursor=pointer]
+      - paragraph [ref=e35]:
+        - text: 还没有账号？
+        - link "注册" [ref=e36] [cursor=pointer]:
+          - /url: /auth/register
+  - generic [ref=e41] [cursor=pointer]:
+    - button "Open Next.js Dev Tools" [ref=e42]
+    - generic [ref=e47]:
+      - button "Open issues overlay" [ref=e48]:
+        - generic [ref=e49]:
+          - generic [ref=e50]: "0"
+          - generic [ref=e51]: "1"
+        - generic [ref=e52]: Issue
+      - button "Collapse issues badge" [ref=e53]
+  - alert [ref=e56]

@@ -84,7 +84,7 @@ func (s *ChannelModelSyncService) Sync(channelID uint) ([]model.ChannelModelInfo
 		if findErr != nil && !errors.Is(findErr, gorm.ErrRecordNotFound) {
 			return s.failSync(channel, findErr)
 		}
-		itemModel := &model.ChannelModel{ChannelID: channelID, ModelName: name, Enabled: true, Capabilities: defaultChannelModelCapabilitiesJSON(), VideoDurations: "[]"}
+		itemModel := &model.ChannelModel{ChannelID: channelID, ModelName: name, Enabled: true, Capabilities: defaultChannelModelCapabilitiesJSON(), ImageGenerateRoute: "auto", ImageEditRoute: "auto", VideoRoute: "auto", VideoDurations: "[]", VideoCustomConfig: ""}
 		if findErr == nil {
 			itemModel = existing
 			if strings.TrimSpace(itemModel.Capabilities) == "" {
@@ -147,10 +147,16 @@ func (s *ChannelModelSyncService) Update(id uint, input model.UpdateChannelModel
 	if input.SortOrder != nil {
 		item.SortOrder = *input.SortOrder
 	}
+	if err := applyVideoCustomConfig(item, input.VideoCustomConfig); err != nil {
+		return nil, err
+	}
 	if err := s.channelModelRepo.Save(item); err != nil {
 		return nil, err
 	}
-	converted := channelModelInfo(item)
+	converted, err := channelModelToInfo(item)
+	if err != nil {
+		return nil, err
+	}
 	return &converted, nil
 }
 
@@ -165,21 +171,11 @@ func (s *ChannelModelSyncService) listInfoWithEnabled(channelID uint, enabledOnl
 	}
 	result := make([]model.ChannelModelInfo, 0, len(items))
 	for index := range items {
-		result = append(result, channelModelInfo(&items[index]))
+		info, err := channelModelToInfo(&items[index])
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, info)
 	}
 	return result, nil
-}
-
-func channelModelInfo(item *model.ChannelModel) model.ChannelModelInfo {
-	capabilities := make([]string, 0)
-	_ = json.Unmarshal([]byte(item.Capabilities), &capabilities)
-	durations := make([]int, 0)
-	_ = json.Unmarshal([]byte(item.VideoDurations), &durations)
-	return model.ChannelModelInfo{
-		ID: item.ID, ChannelID: item.ChannelID, ModelName: item.ModelName,
-		Capabilities: capabilities, Enabled: item.Enabled,
-		ImageGenerateRoute: item.ImageGenerateRoute, ImageEditRoute: item.ImageEditRoute,
-		VideoRoute: item.VideoRoute, VideoDurations: durations,
-		VideoCustomizable: item.VideoCustomizable, SortOrder: item.SortOrder,
-	}
 }

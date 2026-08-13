@@ -4,15 +4,15 @@ import "time"
 
 // ChannelInfo is returned to authenticated users (never contains ApiKey).
 type ChannelInfo struct {
-	ID              uint       `json:"id"`
-	Name            string     `json:"name"`
-	Enabled         bool       `json:"enabled"`
+	ID               uint       `json:"id"`
+	Name             string     `json:"name"`
+	Enabled          bool       `json:"enabled"`
 	VideoAPIStandard string     `json:"video_api_standard"`
-	NewApiChannelID *int       `json:"new_api_channel_id,omitempty"`
-	MetricsBaseUrl  *string    `json:"metrics_base_url,omitempty"`
-	SyncStatus      string     `json:"sync_status"`
-	SyncError       string     `json:"sync_error,omitempty"`
-	SyncedAt        *time.Time `json:"synced_at,omitempty"`
+	NewApiChannelID  *int       `json:"new_api_channel_id,omitempty"`
+	MetricsBaseUrl   *string    `json:"metrics_base_url,omitempty"`
+	SyncStatus       string     `json:"sync_status"`
+	SyncError        string     `json:"sync_error,omitempty"`
+	SyncedAt         *time.Time `json:"synced_at,omitempty"`
 }
 
 // ChannelAdminInfo is returned to SuperAdmin (has BaseUrl + HasKey, no raw key).
@@ -25,41 +25,43 @@ type ChannelAdminInfo struct {
 
 // SaveChannelInput is the request body for SuperAdmin create/update.
 type SaveChannelInput struct {
-	Name            string  `json:"name"`
-	BaseUrl         string  `json:"base_url"`
-	ApiKey          string  `json:"api_key"` // empty means "keep existing"
-	Enabled         *bool   `json:"enabled,omitempty"`
+	Name             string  `json:"name"`
+	BaseUrl          string  `json:"base_url"`
+	ApiKey           string  `json:"api_key"` // empty means "keep existing"
+	Enabled          *bool   `json:"enabled,omitempty"`
 	VideoAPIStandard *string `json:"video_api_standard,omitempty"`
-	NewApiChannelID *int    `json:"new_api_channel_id,omitempty"`
-	MetricsBaseUrl  *string `json:"metrics_base_url,omitempty"`
-	Remark          string  `json:"remark,omitempty"`
+	NewApiChannelID  *int    `json:"new_api_channel_id,omitempty"`
+	MetricsBaseUrl   *string `json:"metrics_base_url,omitempty"`
+	Remark           string  `json:"remark,omitempty"`
 }
 
 // ChannelModelInfo is a single model row (no key, no BaseUrl).
 type ChannelModelInfo struct {
-	ID                 uint     `json:"id"`
-	ChannelID          uint     `json:"channel_id"`
-	ModelName          string   `json:"model_name"`
-	Capabilities       []string `json:"capabilities"`
-	Enabled            bool     `json:"enabled"`
-	ImageGenerateRoute string   `json:"image_generate_route"`
-	ImageEditRoute     string   `json:"image_edit_route"`
-	VideoRoute         string   `json:"video_route"`
-	VideoDurations     []int    `json:"video_durations"`
-	VideoCustomizable  bool     `json:"video_customizable"`
-	SortOrder          int      `json:"sort_order"`
+	ID                 uint               `json:"id"`
+	ChannelID          uint               `json:"channel_id"`
+	ModelName          string             `json:"model_name"`
+	Capabilities       []string           `json:"capabilities"`
+	Enabled            bool               `json:"enabled"`
+	ImageGenerateRoute string             `json:"image_generate_route"`
+	ImageEditRoute     string             `json:"image_edit_route"`
+	VideoRoute         string             `json:"video_route"`
+	VideoDurations     []int              `json:"video_durations"`
+	VideoCustomizable  bool               `json:"video_customizable"`
+	VideoCustomConfig  *CustomVideoConfig `json:"video_custom_config,omitempty"`
+	SortOrder          int                `json:"sort_order"`
 }
 
 // UpdateChannelModelInput is for SuperAdmin enable/disable/route edits.
 type UpdateChannelModelInput struct {
-	Enabled            *bool     `json:"enabled,omitempty"`
-	ImageGenerateRoute *string   `json:"image_generate_route,omitempty"`
-	ImageEditRoute     *string   `json:"image_edit_route,omitempty"`
-	VideoRoute         *string   `json:"video_route,omitempty"`
-	VideoDurations     []int     `json:"video_durations,omitempty"`
-	VideoCustomizable  *bool     `json:"video_customizable,omitempty"`
-	SortOrder          *int      `json:"sort_order,omitempty"`
-	Capabilities       []string  `json:"capabilities,omitempty"`
+	Enabled            *bool              `json:"enabled,omitempty"`
+	ImageGenerateRoute *string            `json:"image_generate_route,omitempty"`
+	ImageEditRoute     *string            `json:"image_edit_route,omitempty"`
+	VideoRoute         *string            `json:"video_route,omitempty"`
+	VideoDurations     []int              `json:"video_durations,omitempty"`
+	VideoCustomizable  *bool              `json:"video_customizable,omitempty"`
+	VideoCustomConfig  *CustomVideoConfig `json:"video_custom_config,omitempty"`
+	SortOrder          *int               `json:"sort_order,omitempty"`
+	Capabilities       []string           `json:"capabilities,omitempty"`
 }
 
 // ChannelCatalogItem is returned by GET /api-config/catalog for authenticated users.
@@ -73,12 +75,12 @@ type ChannelCatalogItem struct {
 // MetricsModelRate is a single model's performance data.
 // SuccessRate is nil when no data is available (distinct from 0.0).
 type MetricsModelRate struct {
-	ChannelModelID uint     `json:"channel_model_id"`
-	ChannelID      uint     `json:"channel_id"`
-	ModelName      string   `json:"model_name"`
-	RequestCount   int      `json:"request_count"`
-	SuccessCount   int      `json:"success_count"`
-	SuccessRate    *float64 `json:"success_rate"` // nil = unavailable, 0.0 = real zero
+	ChannelModelID     uint     `json:"channel_model_id"`
+	ChannelID          uint     `json:"channel_id"`
+	ModelName          string   `json:"model_name"`
+	RequestCount       int      `json:"request_count"`
+	SuccessCount       int      `json:"success_count"`
+	SuccessRate        *float64 `json:"success_rate"` // nil = unavailable, 0.0 = real zero
 	Status             string   `json:"status"`
 	AvgLatencyMs       *float64 `json:"avg_latency_ms,omitempty"`
 	AvgTps             *float64 `json:"avg_tps,omitempty"`

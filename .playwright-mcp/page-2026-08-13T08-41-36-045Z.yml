@@ -1,0 +1,17 @@
+- generic [active] [ref=e1]:
+  - main [ref=e4]:
+    - generic [ref=e5]:
+      - img "无限画布" [ref=e7]
+      - heading "登录" [level=1] [ref=e8]
+      - generic [ref=e9]:
+        - textbox "用户名" [ref=e15]
+        - generic [ref=e21]:
+          - textbox "密码" [ref=e22]
+          - button "显示" [ref=e24]:
+            - img "eye-invisible" [ref=e25]
+        - button "登 录" [ref=e34]
+      - paragraph [ref=e35]:
+        - text: 还没有账号？
+        - link "注册" [ref=e36] [cursor=pointer]:
+          - /url: /auth/register
+  - button "Open Next.js Dev Tools" [ref=e42] [cursor=pointer]

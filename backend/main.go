@@ -33,6 +33,7 @@ func main() {
 		&model.TenantApiConfig{},
 		&model.Channel{},
 		&model.ChannelModel{},
+		&model.VideoConfigPreset{},
 		&model.MetricsConfig{},
 		&model.RechargeOrder{},
 		&model.CanvasProject{},
@@ -55,6 +56,7 @@ func main() {
 	modelCallLogRepo := repository.NewModelCallLogRepo(db)
 	channelRepo := repository.NewChannelRepo(db)
 	channelModelRepo := repository.NewChannelModelRepo(db)
+	videoConfigPresetRepo := repository.NewVideoConfigPresetRepo(db)
 	metricsConfigRepo := repository.NewMetricsConfigRepo(db)
 	webhookRepo := repository.NewWebhookRepo(db)
 	mergeGroupRepo := repository.NewMergeGroupRepo(db)
@@ -70,6 +72,7 @@ func main() {
 	creditService := service.NewCreditService(creditRepo)
 	channelService := service.NewChannelService(channelRepo, cfg.ApiKeyEncryptKey)
 	channelModelService := service.NewChannelModelService(channelService, channelRepo, channelModelRepo, creditRepo)
+	videoConfigPresetService := service.NewVideoConfigPresetService(videoConfigPresetRepo)
 	metricsService := service.NewMetricsService(metricsConfigRepo, channelRepo, channelModelRepo)
 	modelCallLogService := service.NewModelCallLogService(modelCallLogRepo, userRepo)
 	onDemandRepairService := service.NewOnDemandRepairService(cfg.OnDemandRepairURL, cfg.OnDemandRepairUser, cfg.OnDemandRepairPass, cfg.OnDemandRepairTimeoutSeconds)
@@ -87,7 +90,7 @@ func main() {
 	userHandler := handler.NewUserHandler(userService)
 	creditHandler := handler.NewCreditHandler(creditService, creditRepo, generateService, channelModelRepo, channelRepo)
 	generateHandler := handler.NewGenerateHandler(generateService)
-	apiConfigHandler := handler.NewApiConfigHandler(apiConfigRepo, creditRepo, generateService, cfg)
+	apiConfigHandler := handler.NewApiConfigHandler(apiConfigRepo, creditRepo, channelModelService, generateService, cfg)
 	proxyHandler := handler.NewProxyHandler(generateService)
 	canvasHandler := handler.NewCanvasHandler(canvasRepo)
 	generationRecordHandler := handler.NewGenerationRecordHandler(generationRecordRepo)
@@ -97,13 +100,14 @@ func main() {
 	channelStatusHandler := handler.NewChannelStatusHandler(channelStatusService)
 	channelHandler := handler.NewChannelHandler(channelService, autoChannelService)
 	channelModelHandler := handler.NewChannelModelHandler(channelModelService)
+	videoConfigPresetHandler := handler.NewVideoConfigPresetHandler(videoConfigPresetService)
 	metricsHandler := handler.NewMetricsHandler(metricsService)
 	webhookHandler := handler.NewWebhookHandler(webhookService)
 	mergeGroupHandler := handler.NewMergeGroupHandler(mergeGroupService)
 	siteAnnouncementHandler := handler.NewSiteAnnouncementHandler(siteAnnouncementService)
 
 	r := gin.Default()
-	router.Setup(r, authService, authHandler, adminHandler, userHandler, creditHandler, generateHandler, apiConfigHandler, proxyHandler, canvasHandler, generationRecordHandler, rechargeHandler, captchaHandler, tempMediaHandler, channelStatusHandler, channelHandler, channelModelHandler, metricsHandler, webhookHandler, mergeGroupHandler, siteAnnouncementHandler)
+	router.Setup(r, authService, authHandler, adminHandler, userHandler, creditHandler, generateHandler, apiConfigHandler, videoConfigPresetHandler, proxyHandler, canvasHandler, generationRecordHandler, rechargeHandler, captchaHandler, tempMediaHandler, channelStatusHandler, channelHandler, channelModelHandler, metricsHandler, webhookHandler, mergeGroupHandler, siteAnnouncementHandler)
 
 	log.Printf("Server starting on port %s", cfg.Port)
 	if err := r.Run(":" + cfg.Port); err != nil {

@@ -15,6 +15,7 @@ import { testApiModel, type ApiModelTestResult } from "@/services/api/api-config
 import { listWebhookConfigs, saveWebhookConfig, testWebhookSend, listWebhookLogs } from "@/services/api/webhook";
 import type { WebhookConfig, WebhookLogItem, TestSendResult } from "@/services/api/webhook";
 import { listMergeGroups, deleteMergeGroup, autoCreateMergeGroups, type MergeGroup } from "@/services/api/merge-groups-admin";
+import { initialVideoModelFormValues, ModelVideoConfigFields, normalizeVideoModelFormValues } from "./components/model-video-config-fields";
 
 const imageRouteOptions = [
     { label: "自动判断", value: "auto" },
@@ -24,63 +25,18 @@ const imageRouteOptions = [
     { label: "/v1/chat/completions（Banana 参数）", value: "banana" },
 ];
 
-const videoRouteOptions = [
-    { label: "默认 /v1/videos", value: "auto" },
-    { label: "/v1/videos", value: "openai" },
-    { label: "/v1/videos（JSON / veo）", value: "veo_json" },
-    { label: "/v1/videos（JSON / yijia）", value: "yijia" },
-    { label: "/v1/videos JSON / Waninter", value: "waninter" },
-    { label: "/v1/videos/generations", value: "xai" },
-    { label: "/v1/video/generations", value: "newapi" },
-    { label: "Seedance /contents/generations/tasks", value: "seedance" },
-];
-
 const WEBHOOK_PLATFORMS = ["feishu", "dtalk", "wecom", "telegram"];
 const PLATFORM_LABELS: Record<string, string> = {
-  feishu: "飞书",
-  dtalk: "钉钉",
+    feishu: "飞书",
+    dtalk: "钉钉",
     wecom: "企业微信",
     telegram: "Telegram",
 };
 
-function parseDurationInput(value: string) {
-    return Array.from(
-        new Set(
-            String(value || "")
-                .split(",")
-                .map((item) => Math.floor(Number(item.trim()) || 0))
-                .filter((item) => item > 0),
-        ),
-    ).sort((left, right) => left - right);
-}
-
-function formatDurationInput(values?: number[]) {
-    return (values || []).join(",");
-}
-
-function PricingScopeModal({
-    open,
-    channels,
-    onApplyGlobal,
-    onApplyLocal,
-    onCancel,
-}: {
-    open: boolean;
-    channels: Array<{ channel_id: number; channel_name: string }>;
-    onApplyGlobal: () => void;
-    onApplyLocal: () => void;
-    onCancel: () => void;
-}) {
+function PricingScopeModal({ open, channels, onApplyGlobal, onApplyLocal, onCancel }: { open: boolean; channels: Array<{ channel_id: number; channel_name: string }>; onApplyGlobal: () => void; onApplyLocal: () => void; onCancel: () => void }) {
     return (
-        <Modal
-            title="该模型存在于多个渠道"
-            open={open}
-            onCancel={onCancel}
-            footer={null}
-        >
-            <p className="mb-3 text-sm text-stone-600 dark:text-stone-400">
-                该模型在以下渠道均存在，请选择计费设置的作用范围：
-            </p>
+        <Modal title="该模型存在于多个渠道" open={open} onCancel={onCancel} footer={null}>
+            <p className="mb-3 text-sm text-stone-600 dark:text-stone-400">该模型在以下渠道均存在，请选择计费设置的作用范围：</p>
             <ul className="mb-4 space-y-1">
                 {channels.map((ch) => (
                     <li key={ch.channel_id} className="text-sm text-stone-800 dark:text-stone-200">
@@ -90,7 +46,9 @@ function PricingScopeModal({
             </ul>
             <div className="flex justify-end gap-2">
                 <Button onClick={onApplyLocal}>仅本渠道</Button>
-                <Button type="primary" onClick={onApplyGlobal}>应用到所有渠道</Button>
+                <Button type="primary" onClick={onApplyGlobal}>
+                    应用到所有渠道
+                </Button>
             </div>
         </Modal>
     );
@@ -100,7 +58,9 @@ function PricingScopeModal({
 function PricingInput({ value, onChange, ...rest }: { value: number; onChange: (v: number) => void } & Omit<React.ComponentProps<typeof InputNumber>, "value" | "onChange">) {
     const [localVal, setLocalVal] = useState(value);
     // Sync external changes (e.g., after save resets pricingData)
-    useEffect(() => { setLocalVal(value); }, [value]);
+    useEffect(() => {
+        setLocalVal(value);
+    }, [value]);
     return <InputNumber size="small" min={0} value={localVal} onChange={(v) => setLocalVal(v ?? 0)} onBlur={() => onChange(localVal)} {...rest} />;
 }
 
@@ -209,8 +169,11 @@ export default function AdminApiConfigPage() {
         try {
             const groups = await listMergeGroups(channelId);
             setMergeGroups(groups || []);
-        } catch { setMergeGroups([]); }
-        finally { setLoadingMergeGroups(false); }
+        } catch {
+            setMergeGroups([]);
+        } finally {
+            setLoadingMergeGroups(false);
+        }
     };
 
     const fetchPricing = async () => {
@@ -464,7 +427,7 @@ export default function AdminApiConfigPage() {
             models.map((model) => {
                 const caps = modelCapabilities[model.id] || model.capabilities;
                 return updateChannelModel(selectedChannel.id, model.id, { capabilities: caps });
-            })
+            }),
         );
         const succeeded = results.filter((r) => r.status === "fulfilled").length;
         const failed = results.filter((r) => r.status === "rejected").length;
@@ -709,9 +672,7 @@ export default function AdminApiConfigPage() {
             sort_order: model.sort_order,
             image_generate_route: model.image_generate_route || "auto",
             image_edit_route: model.image_edit_route || "auto",
-            video_route: model.video_route || "auto",
-            video_durations: formatDurationInput(model.video_durations),
-            video_customizable: model.video_customizable,
+            ...initialVideoModelFormValues(model.video_route, model.video_durations, model.video_customizable, model.video_custom_config),
         });
         setIsModelModalOpen(true);
     };
@@ -720,20 +681,28 @@ export default function AdminApiConfigPage() {
     const handleSaveModel = async (values: any) => {
         if (!selectedChannel || !editingModel) return;
         try {
-            const durations = parseDurationInput(values.video_durations);
             await updateChannelModel(selectedChannel.id, editingModel.id, {
                 sort_order: values.sort_order,
                 image_generate_route: values.image_generate_route,
                 image_edit_route: values.image_edit_route,
-                video_route: values.video_route,
-                video_durations: durations,
-                video_customizable: values.video_customizable,
+                ...values.video,
             });
             message.success("修改模型配置成功");
             setIsModelModalOpen(false);
             void fetchModels(selectedChannel.id);
         } catch (err: any) {
             message.error(err?.message || "保存模型配置失败");
+        }
+    };
+
+    const handleModelFormFinish = (values: any) => {
+        try {
+            void handleSaveModel({
+                ...values,
+                video: normalizeVideoModelFormValues(values),
+            });
+        } catch (err: any) {
+            message.error(err?.message || "自定义视频配置无效");
         }
     };
 
@@ -747,7 +716,7 @@ export default function AdminApiConfigPage() {
             dataIndex: "video_api_standard",
             key: "video_api_standard",
             width: 130,
-            render: (value: ChannelAdminInfo["video_api_standard"]) => value === "binghuo" ? <Tag color="volcano">炳火 API</Tag> : <Tag>默认</Tag>,
+            render: (value: ChannelAdminInfo["video_api_standard"]) => (value === "binghuo" ? <Tag color="volcano">炳火 API</Tag> : <Tag>默认</Tag>),
         },
         {
             title: "API Key",
@@ -830,13 +799,7 @@ export default function AdminApiConfigPage() {
                     <Button size="small" onClick={() => handleSync(record.id)} loading={syncingChannelId === record.id} disabled={!isSuperAdmin}>
                         同步模型
                     </Button>
-                    <Popconfirm
-                        title={`确定删除渠道 "${record.name}"？如有关联模型则无法删除`}
-                        onConfirm={() => handleDelete(record.id)}
-                        okText="确定"
-                        cancelText="取消"
-                        okButtonProps={{ danger: true }}
-                    >
+                    <Popconfirm title={`确定删除渠道 "${record.name}"？如有关联模型则无法删除`} onConfirm={() => handleDelete(record.id)} okText="确定" cancelText="取消" okButtonProps={{ danger: true }}>
                         <Button size="small" danger disabled={!isSuperAdmin}>
                             删除
                         </Button>
@@ -847,196 +810,163 @@ export default function AdminApiConfigPage() {
     ];
 
     // Model table columns inside panel
-    const modelColumns: ColumnsType<ChannelModelInfo> = useMemo(() => [
-        { title: "模型名称", dataIndex: "model_name", key: "model_name", width: 200, ellipsis: true },
-        {
-            title: "能力",
-            dataIndex: "capabilities",
-            key: "capabilities",
-            width: 220,
-            render: (caps: string[], record) => {
-                const current = modelCapabilities[record.id] || caps || [];
-                return (
-                    <Space size={4} wrap>
-                        {(["image", "video", "text", "audio"] as const).map((cap) => {
-                            const labels: Record<string, string> = { image: "图片", video: "视频", text: "文本", audio: "音频" };
-                            return (
-                                <Checkbox
-                                    key={cap}
-                                    checked={current.includes(cap)}
-                                    disabled={!isSuperAdmin}
-                                    onChange={() => toggleCap(record, cap)}
-                                >
-                                    {labels[cap]}
-                                </Checkbox>
-                            );
-                        })}
-                    </Space>
-                );
+    const modelColumns: ColumnsType<ChannelModelInfo> = useMemo(
+        () => [
+            { title: "模型名称", dataIndex: "model_name", key: "model_name", width: 200, ellipsis: true },
+            {
+                title: "能力",
+                dataIndex: "capabilities",
+                key: "capabilities",
+                width: 220,
+                render: (caps: string[], record) => {
+                    const current = modelCapabilities[record.id] || caps || [];
+                    return (
+                        <Space size={4} wrap>
+                            {(["image", "video", "text", "audio"] as const).map((cap) => {
+                                const labels: Record<string, string> = { image: "图片", video: "视频", text: "文本", audio: "音频" };
+                                return (
+                                    <Checkbox key={cap} checked={current.includes(cap)} disabled={!isSuperAdmin} onChange={() => toggleCap(record, cap)}>
+                                        {labels[cap]}
+                                    </Checkbox>
+                                );
+                            })}
+                        </Space>
+                    );
+                },
             },
-        },
-        { title: "权重", dataIndex: "sort_order", key: "sort_order", width: 80 },
-        {
-            title: "计费方式",
-            key: "pricing_mode",
-            width: 200,
-            render: (_, record) => {
-                const pricing = getPricingForModel(record.id, record.model_name, selectedChannel?.id);
-                const rule = parsePricingRule(pricing.pricing_rule);
-                const isDynamic = pricing.pricing_mode === "video_dynamic";
-                return (
-                    <Space direction="vertical" size={4} style={{ width: "100%" }}>
+            { title: "权重", dataIndex: "sort_order", key: "sort_order", width: 80 },
+            {
+                title: "计费方式",
+                key: "pricing_mode",
+                width: 200,
+                render: (_, record) => {
+                    const pricing = getPricingForModel(record.id, record.model_name, selectedChannel?.id);
+                    const rule = parsePricingRule(pricing.pricing_rule);
+                    const isDynamic = pricing.pricing_mode === "video_dynamic";
+                    return (
+                        <Space direction="vertical" size={4} style={{ width: "100%" }}>
+                            <Select
+                                value={pricing.pricing_mode}
+                                onChange={(v) => handlePricingChange(record.id, "pricing_mode", v)}
+                                style={{ width: "100%" }}
+                                size="small"
+                                disabled={!isSuperAdmin}
+                                options={[
+                                    { label: "按次计费", value: "per_unit" },
+                                    { label: "视频动态计费", value: "video_dynamic" },
+                                ]}
+                            />
+                            {isDynamic && (
+                                <div className="border-t pt-1 space-y-1 w-full">
+                                    <div className="text-xs text-stone-500">基础积分:</div>
+                                    <PricingInput value={rule.base_credits} onChange={(v) => handlePricingRuleChange(record.id, "base_credits", v)} disabled={!isSuperAdmin} style={{ width: "100%" }} />
+                                    <div className="text-xs text-stone-500 mt-1">分辨率速率:</div>
+                                    {["720p", "1080p"].map((res) => (
+                                        <div key={res} className="flex items-center gap-1">
+                                            <span className="text-xs text-stone-500 w-10">{res}:</span>
+                                            <PricingInput value={rule.resolution_second_rates[res] || 0} onChange={(v) => handlePricingRuleChange(record.id, res, v)} disabled={!isSuperAdmin} style={{ width: "70%" }} />
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </Space>
+                    );
+                },
+            },
+            {
+                title: "计费单位",
+                key: "unit_type",
+                width: 150,
+                render: (_, record) => {
+                    const pricing = getPricingForModel(record.id, record.model_name, selectedChannel?.id);
+                    return (
                         <Select
-                            value={pricing.pricing_mode}
-                            onChange={(v) => handlePricingChange(record.id, "pricing_mode", v)}
+                            value={pricing.unit_type}
+                            onChange={(v) => handlePricingChange(record.id, "unit_type", v)}
                             style={{ width: "100%" }}
                             size="small"
                             disabled={!isSuperAdmin}
                             options={[
-                                { label: "按次计费", value: "per_unit" },
-                                { label: "视频动态计费", value: "video_dynamic" },
+                                { label: "每次图片", value: "per_image" },
+                                { label: "每次视频", value: "per_video" },
+                                { label: "每秒视频", value: "per_video_second" },
+                                { label: "每Token", value: "per_token" },
                             ]}
                         />
-                        {isDynamic && (
-                            <div className="border-t pt-1 space-y-1 w-full">
-                                <div className="text-xs text-stone-500">基础积分:</div>
-                                <PricingInput
-                                    value={rule.base_credits}
-                                    onChange={(v) => handlePricingRuleChange(record.id, "base_credits", v)}
-                                    disabled={!isSuperAdmin}
-                                    style={{ width: "100%" }}
-                                />
-                                <div className="text-xs text-stone-500 mt-1">分辨率速率:</div>
-                                {["720p", "1080p"].map((res) => (
-                                    <div key={res} className="flex items-center gap-1">
-                                        <span className="text-xs text-stone-500 w-10">{res}:</span>
-                                        <PricingInput
-                                            value={rule.resolution_second_rates[res] || 0}
-                                            onChange={(v) => handlePricingRuleChange(record.id, res, v)}
-                                            disabled={!isSuperAdmin}
-                                            style={{ width: "70%" }}
-                                        />
-                                    </div>
-                                ))}
-                            </div>
-                        )}
-                    </Space>
-                );
+                    );
+                },
             },
-        },
-        {
-            title: "计费单位",
-            key: "unit_type",
-            width: 150,
-            render: (_, record) => {
-                const pricing = getPricingForModel(record.id, record.model_name, selectedChannel?.id);
-                return (
-                    <Select
-                        value={pricing.unit_type}
-                        onChange={(v) => handlePricingChange(record.id, "unit_type", v)}
-                        style={{ width: "100%" }}
-                        size="small"
-                        disabled={!isSuperAdmin}
-                        options={[
-                            { label: "每次图片", value: "per_image" },
-                            { label: "每次视频", value: "per_video" },
-                            { label: "每秒视频", value: "per_video_second" },
-                            { label: "每Token", value: "per_token" },
-                        ]}
-                    />
-                );
+            {
+                title: "积分",
+                key: "credits_per_unit",
+                width: 100,
+                render: (_, record) => {
+                    const pricing = getPricingForModel(record.id, record.model_name, selectedChannel?.id);
+                    return <PricingInput value={pricing.credits_per_unit} onChange={(v) => handlePricingChange(record.id, "credits_per_unit", v)} disabled={!isSuperAdmin} style={{ width: "100%" }} />;
+                },
             },
-        },
-        {
-            title: "积分",
-            key: "credits_per_unit",
-            width: 100,
-            render: (_, record) => {
-                const pricing = getPricingForModel(record.id, record.model_name, selectedChannel?.id);
-                return (
-                    <PricingInput
-                        value={pricing.credits_per_unit}
-                        onChange={(v) => handlePricingChange(record.id, "credits_per_unit", v)}
-                        disabled={!isSuperAdmin}
-                        style={{ width: "100%" }}
-                    />
-                );
-            },
-        },
-        {
-            title: "路由与定制配置",
-            key: "route_config",
-            width: 250,
-            render: (_, record) => {
-                const configItems = [];
-                if (record.capabilities.includes("image")) {
-                    configItems.push(`生图: ${record.image_generate_route || "auto"}`);
-                    configItems.push(`修图: ${record.image_edit_route || "auto"}`);
-                }
-                if (record.capabilities.includes("video")) {
-                    configItems.push(selectedChannel?.video_api_standard === "binghuo" ? "视频: binghuo（渠道覆盖）" : `视频: ${record.video_route || "auto"}`);
-                    if (record.video_durations?.length) {
-                        configItems.push(`时长: [${record.video_durations.join(",")}]`);
+            {
+                title: "路由与定制配置",
+                key: "route_config",
+                width: 250,
+                render: (_, record) => {
+                    const configItems = [];
+                    if (record.capabilities.includes("image")) {
+                        configItems.push(`生图: ${record.image_generate_route || "auto"}`);
+                        configItems.push(`修图: ${record.image_edit_route || "auto"}`);
                     }
-                    if (record.video_customizable) {
-                        configItems.push("允许自定义");
+                    if (record.capabilities.includes("video")) {
+                        configItems.push(selectedChannel?.video_api_standard === "binghuo" ? "视频: binghuo（渠道覆盖）" : `视频: ${record.video_route || "auto"}`);
+                        if (record.video_durations?.length) {
+                            configItems.push(`时长: [${record.video_durations.join(",")}]`);
+                        }
+                        if (record.video_customizable) {
+                            configItems.push("允许自定义");
+                        }
                     }
-                }
-                return (
-                    <div className="text-xs text-stone-500 space-y-0.5">
-                        {configItems.map((item, idx) => (
-                            <div key={idx}>{item}</div>
-                        ))}
-                    </div>
-                );
+                    return (
+                        <div className="text-xs text-stone-500 space-y-0.5">
+                            {configItems.map((item, idx) => (
+                                <div key={idx}>{item}</div>
+                            ))}
+                        </div>
+                    );
+                },
             },
-        },
-        {
-            title: "状态",
-            dataIndex: "enabled",
-            key: "enabled",
-            width: 100,
-            render: (enabled: boolean, record) => <Switch checked={enabled} disabled={!isSuperAdmin} onChange={(checked) => handleToggleModel(record, checked)} />,
-        },
-        {
-            title: "操作",
-            key: "actions",
-            width: 340,
-            render: (_, record) => {
-                const caps = modelCapabilities[record.id] || record.capabilities || [];
-                return (
-                    <Space size="small" wrap>
-                        <Button size="small" onClick={() => openModelModal(record)} disabled={!isSuperAdmin}>
-                            配置
-                        </Button>
-                        <Button
-                            size="small"
-                            onClick={() => handleSaveCapabilities(record)}
-                            disabled={!isSuperAdmin || caps.length === 0}
-                            loading={savingCapabilities[record.id]}
-                        >
-                            保存能力
-                        </Button>
-                        <Button
-                            size="small"
-                            onClick={() => handleSavePricing(record)}
-                            disabled={!isSuperAdmin}
-                            loading={savingPricing[record.id]}
-                        >
-                            保存计费
-                        </Button>
-                        <Button
-                            size="small"
-                            icon={<Play className="size-3" />}
-                            onClick={() => handleOpenTest(record)}
-                        >
-                            测试
-                        </Button>
-                    </Space>
-                );
+            {
+                title: "状态",
+                dataIndex: "enabled",
+                key: "enabled",
+                width: 100,
+                render: (enabled: boolean, record) => <Switch checked={enabled} disabled={!isSuperAdmin} onChange={(checked) => handleToggleModel(record, checked)} />,
             },
-        },
-    ], [modelCapabilities, modelPricing, pricingData, selectedChannel, isSuperAdmin, toggleCap, handlePricingChange, handlePricingRuleChange, handleSavePricing, handleSaveCapabilities, openModelModal, handleToggleModel, handleOpenTest]);
+            {
+                title: "操作",
+                key: "actions",
+                width: 340,
+                render: (_, record) => {
+                    const caps = modelCapabilities[record.id] || record.capabilities || [];
+                    return (
+                        <Space size="small" wrap>
+                            <Button size="small" onClick={() => openModelModal(record)} disabled={!isSuperAdmin}>
+                                配置
+                            </Button>
+                            <Button size="small" onClick={() => handleSaveCapabilities(record)} disabled={!isSuperAdmin || caps.length === 0} loading={savingCapabilities[record.id]}>
+                                保存能力
+                            </Button>
+                            <Button size="small" onClick={() => handleSavePricing(record)} disabled={!isSuperAdmin} loading={savingPricing[record.id]}>
+                                保存计费
+                            </Button>
+                            <Button size="small" icon={<Play className="size-3" />} onClick={() => handleOpenTest(record)}>
+                                测试
+                            </Button>
+                        </Space>
+                    );
+                },
+            },
+        ],
+        [modelCapabilities, modelPricing, pricingData, selectedChannel, isSuperAdmin, toggleCap, handlePricingChange, handlePricingRuleChange, handleSavePricing, handleSaveCapabilities, openModelModal, handleToggleModel, handleOpenTest],
+    );
 
     return (
         <div>
@@ -1107,14 +1037,7 @@ export default function AdminApiConfigPage() {
                                     width: 140,
                                     render: (_, record) => {
                                         const value = localConfigs[record.platform]?.cooldown_minutes ?? 10;
-                                        return (
-                                            <InputNumber
-                                                size="small"
-                                                min={0}
-                                                value={value}
-                                                onChange={(next) => handleConfigChange(record.platform, "cooldown_minutes", next ?? 10)}
-                                            />
-                                        );
+                                        return <InputNumber size="small" min={0} value={value} onChange={(next) => handleConfigChange(record.platform, "cooldown_minutes", next ?? 10)} />;
                                     },
                                 },
                                 {
@@ -1158,7 +1081,7 @@ export default function AdminApiConfigPage() {
                             rowKey="id"
                             dataSource={webhookLogs}
                             columns={[
-                                { title: "时间", dataIndex: "created_at", key: "created_at", width: 170, render: (val: string) => val ? new Date(val).toLocaleString("zh-CN") : "-" },
+                                { title: "时间", dataIndex: "created_at", key: "created_at", width: 170, render: (val: string) => (val ? new Date(val).toLocaleString("zh-CN") : "-") },
                                 { title: "平台", dataIndex: "platform", key: "platform", width: 100, render: (p: string) => PLATFORM_LABELS[p] || p },
                                 {
                                     title: "渠道",
@@ -1187,9 +1110,7 @@ export default function AdminApiConfigPage() {
                                     title: "推送结果",
                                     key: "success",
                                     width: 100,
-                                    render: (_, record) => record.cooldown_skipped
-                                        ? <Tag>冷却跳过</Tag>
-                                        : <Tag color={record.success ? "green" : "red"}>{record.success ? "成功" : "失败"}</Tag>,
+                                    render: (_, record) => (record.cooldown_skipped ? <Tag>冷却跳过</Tag> : <Tag color={record.success ? "green" : "red"}>{record.success ? "成功" : "失败"}</Tag>),
                                 },
                             ]}
                             loading={loadingLogs}
@@ -1233,18 +1154,20 @@ export default function AdminApiConfigPage() {
                         <InputNumber min={0} className="w-full" placeholder="例如: 5" disabled={!isSuperAdmin} />
                     </Form.Item>
                     <Form.Item name="video_api_standard" label="视频 API 标准">
-                        <Segmented block options={[{ label: "默认标准", value: "default" }, { label: "炳火 API 标准", value: "binghuo" }]} disabled={!isSuperAdmin} />
+                        <Segmented
+                            block
+                            options={[
+                                { label: "默认标准", value: "default" },
+                                { label: "炳火 API 标准", value: "binghuo" },
+                            ]}
+                            disabled={!isSuperAdmin}
+                        />
                     </Form.Item>
                     <Form.Item name="metrics_base_url" label="指标服务地址 (可选)" extra="为空则使用渠道 BaseUrl + /api。配置旧版 New-API 时可留空。">
                         <Input placeholder="https://old-api.example.com" disabled={!isSuperAdmin} />
                     </Form.Item>
                     <Form.Item name="remark" label="备注">
-                        <Input.TextArea
-                            placeholder="渠道维护备注（可选，最多500字符）"
-                            maxLength={500}
-                            showCount
-                            rows={3}
-                        />
+                        <Input.TextArea placeholder="渠道维护备注（可选，最多500字符）" maxLength={500} showCount rows={3} />
                     </Form.Item>
                     <Form.Item name="enabled" valuePropName="checked" label="启用渠道">
                         <Switch disabled={!isSuperAdmin} />
@@ -1259,28 +1182,15 @@ export default function AdminApiConfigPage() {
                     title={`模型管理 - ${selectedChannel.name}`}
                     extra={
                         <Space>
-                            <Button
-                                icon={<RefreshCw className="size-4" />}
-                                onClick={() => handleSync(selectedChannel.id)}
-                                loading={syncingChannelId === selectedChannel.id}
-                                disabled={!isSuperAdmin}
-                            >
+                            <Button icon={<RefreshCw className="size-4" />} onClick={() => handleSync(selectedChannel.id)} loading={syncingChannelId === selectedChannel.id} disabled={!isSuperAdmin}>
                                 同步模型
                             </Button>
                             <Tooltip title="根据模型名称自动推断能力（匹配 video/sora/omni → 视频+音频，image/seedance → 图片）">
-                                <Button
-                                    onClick={handleAutoDetect}
-                                    disabled={!isSuperAdmin || models.length === 0}
-                                >
+                                <Button onClick={handleAutoDetect} disabled={!isSuperAdmin || models.length === 0}>
                                     自动检测
                                 </Button>
                             </Tooltip>
-                            <Button
-                                icon={<Save className="size-4" />}
-                                onClick={handleSaveAll}
-                                disabled={!isSuperAdmin || models.length === 0}
-                                loading={savingAll}
-                            >
+                            <Button icon={<Save className="size-4" />} onClick={handleSaveAll} disabled={!isSuperAdmin || models.length === 0} loading={savingAll}>
                                 保存全部
                             </Button>
                             <Button icon={<X className="size-4" />} onClick={closePanel}>
@@ -1308,13 +1218,10 @@ export default function AdminApiConfigPage() {
                             <Button onClick={() => handleAutoMerge(selectedChannel.id)} loading={loadingMergeGroups} disabled={!isSuperAdmin}>
                                 模糊合并
                             </Button>
-                            <span style={{ fontSize: 12, color: "#888" }}>
-                                {mergeGroups.length > 0 ? `${mergeGroups.length} 个合并组` : "点击按钮自动识别相似模型并合并"}
-                            </span>
+                            <span style={{ fontSize: 12, color: "#888" }}>{mergeGroups.length > 0 ? `${mergeGroups.length} 个合并组` : "点击按钮自动识别相似模型并合并"}</span>
                         </div>
-                        {mergeGroups.map(g => (
-                            <Tag key={g.id} closable onClose={() => handleDeleteMergeGroup(selectedChannel.id, g.id)} 
-                                style={{ marginBottom: 4 }}>
+                        {mergeGroups.map((g) => (
+                            <Tag key={g.id} closable onClose={() => handleDeleteMergeGroup(selectedChannel.id, g.id)} style={{ marginBottom: 4 }}>
                                 {g.group_name} ({g.pattern})
                             </Tag>
                         ))}
@@ -1337,7 +1244,7 @@ export default function AdminApiConfigPage() {
                     </Button>,
                 ]}
             >
-                <Form form={modelForm} layout="vertical" onFinish={handleSaveModel}>
+                <Form form={modelForm} layout="vertical" onFinish={handleModelFormFinish}>
                     <Form.Item name="sort_order" label="排序权重" rules={[{ required: true, message: "请输入排序权重" }]}>
                         <InputNumber min={0} className="w-full" disabled={!isSuperAdmin} />
                     </Form.Item>
@@ -1353,31 +1260,12 @@ export default function AdminApiConfigPage() {
                         </>
                     )}
 
-                    {editingModel?.capabilities.includes("video") && (
-                        <>
-                            <Form.Item name="video_route" label="视频生成接口路由">
-                                <Select options={videoRouteOptions} disabled={!isSuperAdmin || selectedChannel?.video_api_standard === "binghuo"} />
-                            </Form.Item>
-                            {selectedChannel?.video_api_standard === "binghuo" ? <Alert className="mb-4" type="info" showIcon message="该渠道使用炳火 API 标准，模型视频路由暂不生效。" /> : null}
-                            <Form.Item name="video_durations" label="可选视频时长 (逗号分隔)" help="多个时长用半角逗号分隔，例如: 5,10">
-                                <Input placeholder="如: 5,10" disabled={!isSuperAdmin} />
-                            </Form.Item>
-                            <Form.Item name="video_customizable" valuePropName="checked" label="允许用户自定义视频时长">
-                                <Switch disabled={!isSuperAdmin} />
-                            </Form.Item>
-                        </>
-                    )}
+                    {editingModel?.capabilities.includes("video") ? <ModelVideoConfigFields form={modelForm} disabled={!isSuperAdmin} binghuo={selectedChannel?.video_api_standard === "binghuo"} /> : null}
                 </Form>
             </Modal>
 
             {/* Pricing Scope Modal */}
-            <PricingScopeModal
-                open={pricingModal.open}
-                channels={pricingModal.channels}
-                onApplyGlobal={handlePricingApplyGlobal}
-                onApplyLocal={handlePricingApplyLocal}
-                onCancel={handlePricingCancel}
-            />
+            <PricingScopeModal open={pricingModal.open} channels={pricingModal.channels} onApplyGlobal={handlePricingApplyGlobal} onApplyLocal={handlePricingApplyLocal} onCancel={handlePricingCancel} />
 
             {/* Model Test Modal */}
             <Modal
@@ -1419,7 +1307,9 @@ export default function AdminApiConfigPage() {
                             {testResult.route && (
                                 <div className="mb-1">
                                     <span className="text-stone-400">路由: </span>
-                                    <code className="text-xs bg-stone-100 dark:bg-stone-800 px-1 rounded">{testResult.method} {testResult.path}</code>
+                                    <code className="text-xs bg-stone-100 dark:bg-stone-800 px-1 rounded">
+                                        {testResult.method} {testResult.path}
+                                    </code>
                                 </div>
                             )}
                             {testResult.error_message && (
@@ -1456,23 +1346,12 @@ export default function AdminApiConfigPage() {
                 <div className="space-y-4">
                     <div>
                         <label className="text-sm text-stone-500 mb-1 block">测试消息</label>
-                        <Input.TextArea
-                            rows={4}
-                            value={webhookTestMessage}
-                            onChange={(e) => setWebhookTestMessage(e.target.value)}
-                            placeholder="输入要发送的测试消息内容"
-                        />
+                        <Input.TextArea rows={4} value={webhookTestMessage} onChange={(e) => setWebhookTestMessage(e.target.value)} placeholder="输入要发送的测试消息内容" />
                     </div>
                     {webhookTestSendResult && (
                         <div className={`rounded-lg border p-3 text-sm ${webhookTestSendResult.success ? "border-green-200 bg-green-50 dark:border-green-800 dark:bg-green-950" : "border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-950"}`}>
-                            <Tag color={webhookTestSendResult.success ? "green" : "red"}>
-                                {webhookTestSendResult.success ? "发送成功" : "发送失败"}
-                            </Tag>
-                            {webhookTestSendResult.error && (
-                                <pre className="mt-2 whitespace-pre-wrap text-xs font-mono bg-stone-100 dark:bg-stone-800 p-2 rounded max-h-40 overflow-auto">
-                                    {webhookTestSendResult.error}
-                                </pre>
-                            )}
+                            <Tag color={webhookTestSendResult.success ? "green" : "red"}>{webhookTestSendResult.success ? "发送成功" : "发送失败"}</Tag>
+                            {webhookTestSendResult.error && <pre className="mt-2 whitespace-pre-wrap text-xs font-mono bg-stone-100 dark:bg-stone-800 p-2 rounded max-h-40 overflow-auto">{webhookTestSendResult.error}</pre>}
                         </div>
                     )}
                 </div>

@@ -14,14 +14,28 @@ import (
 )
 
 type ApiConfigHandler struct {
-	apiConfigRepo *repository.ApiConfigRepo
-	creditRepo    *repository.CreditRepo
-	generateSvc   *service.GenerateService
-	cfg           *config.Config
+	apiConfigRepo  apiConfigRepository
+	creditRepo     apiConfigPricingReader
+	channelCatalog apiConfigChannelCatalog
+	generateSvc    *service.GenerateService
+	cfg            *config.Config
 }
 
-func NewApiConfigHandler(apiConfigRepo *repository.ApiConfigRepo, creditRepo *repository.CreditRepo, generateSvc *service.GenerateService, cfg *config.Config) *ApiConfigHandler {
-	return &ApiConfigHandler{apiConfigRepo: apiConfigRepo, creditRepo: creditRepo, generateSvc: generateSvc, cfg: cfg}
+type apiConfigRepository interface {
+	FindByTenant(tenantID uint) (*model.TenantApiConfig, error)
+	Save(cfg *model.TenantApiConfig) error
+}
+
+type apiConfigPricingReader interface {
+	FindPricingMap(tenantID uint) (map[string]map[uint]model.CreditPricing, error)
+}
+
+type apiConfigChannelCatalog interface {
+	ListTenantCatalog(tenantID uint) ([]model.ChannelCatalogItem, error)
+}
+
+func NewApiConfigHandler(apiConfigRepo *repository.ApiConfigRepo, creditRepo *repository.CreditRepo, channelCatalog apiConfigChannelCatalog, generateSvc *service.GenerateService, cfg *config.Config) *ApiConfigHandler {
+	return &ApiConfigHandler{apiConfigRepo: apiConfigRepo, creditRepo: creditRepo, channelCatalog: channelCatalog, generateSvc: generateSvc, cfg: cfg}
 }
 
 type SaveApiConfigInput struct {
@@ -87,6 +101,11 @@ func (h *ApiConfigHandler) Catalog(c *gin.Context) {
 		model.Fail(c, 500, "读取定价配置失败")
 		return
 	}
+	channels, err := h.channelCatalog.ListTenantCatalog(claims.TenantID)
+	if err != nil {
+		model.Fail(c, 500, "读取渠道模型失败")
+		return
+	}
 
 	enabledModels := filterModelsByPricing(models, pricingMap)
 	model.OK(c, gin.H{
@@ -103,6 +122,7 @@ func (h *ApiConfigHandler) Catalog(c *gin.Context) {
 		"total_models":             len(models),
 		"enabled_count":            len(enabledModels),
 		"disabled_models":          collectDisabledModels(models, pricingMap),
+		"channels":                 channels,
 	})
 }
 

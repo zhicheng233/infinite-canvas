@@ -1,0 +1,56 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e3]:
+    - banner [ref=e48]:
+      - generic [ref=e49]:
+        - generic [ref=e50]:
+          - link [ref=e51] [cursor=pointer]:
+            - /url: /
+            - img "Logo" [ref=e52]
+          - navigation [ref=e53]:
+            - link "我的画布" [ref=e54] [cursor=pointer]:
+              - /url: /canvas
+            - link "生图工作台" [ref=e61] [cursor=pointer]:
+              - /url: /image
+            - link "视频创作台" [ref=e67] [cursor=pointer]:
+              - /url: /video
+            - link "提示词库" [ref=e72] [cursor=pointer]:
+              - /url: /prompts
+            - link "我的素材" [ref=e77] [cursor=pointer]:
+              - /url: /assets
+            - link "渠道状态" [ref=e84] [cursor=pointer]:
+              - /url: /channel-status
+            - button "积分充值" [ref=e88]
+            - link "管理后台" [ref=e92] [cursor=pointer]:
+              - /url: /admin
+        - generic [ref=e97]:
+          - button "配置" [ref=e98]
+          - button "切换到深色主题" [ref=e102]
+          - button "用户菜单" [ref=e106]:
+            - generic [ref=e107]: 系统管理员
+    - main [ref=e111]:
+      - generic [ref=e112]:
+        - generic [ref=e113]:
+          - heading "无限画布" [level=1] [ref=e114]
+          - paragraph [ref=e115]:
+            - text: 在
+            - generic [ref=e116]: 无限画布
+            - text: 中生成、连接和重组
+            - generic [ref=e118]: 图片、文字与图形
+            - text: ，让创作从单次生成变成连续推演。
+          - generic [ref=e120]:
+            - link "开始使用" [ref=e121] [cursor=pointer]:
+              - /url: /canvas
+            - link "打开画布" [ref=e126] [cursor=pointer]:
+              - /url: /canvas
+        - generic [ref=e129]:
+          - generic [ref=e130]:
+            - heading "沉淀每一次好结果" [level=2] [ref=e131]
+            - paragraph [ref=e132]: 收藏稳定出图的提示词、参考风格和结果图片，让下一次创作从已有经验开始。
+          - link "查看提示词库" [ref=e133] [cursor=pointer]:
+            - /url: /prompts
+  - button "Open Next.js Dev Tools" [ref=e42] [cursor=pointer]
+  - alert [ref=e47]
+  - alert [ref=e138]:
+    - generic [ref=e139]:
+      - img "check-circle" [ref=e141]
+      - generic [ref=e144]: 登录成功

@@ -8,7 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func Setup(r *gin.Engine, authService *service.AuthService, authHandler *handler.AuthHandler, adminHandler *handler.AdminHandler, userHandler *handler.UserHandler, creditHandler *handler.CreditHandler, generateHandler *handler.GenerateHandler, apiConfigHandler *handler.ApiConfigHandler, proxyHandler *handler.ProxyHandler, canvasHandler *handler.CanvasHandler, generationRecordHandler *handler.GenerationRecordHandler, rechargeHandler *handler.RechargeHandler, captchaHandler *handler.CaptchaHandler, tempMediaHandler *handler.TempMediaHandler, channelStatusHandler *handler.ChannelStatusHandler, channelHandler *handler.ChannelHandler, channelModelHandler *handler.ChannelModelHandler, metricsHandler *handler.MetricsHandler, webhookHandler *handler.WebhookHandler, mergeGroupHandler *handler.MergeGroupHandler, siteAnnouncementHandler *handler.SiteAnnouncementHandler) {
+func Setup(r *gin.Engine, authService *service.AuthService, authHandler *handler.AuthHandler, adminHandler *handler.AdminHandler, userHandler *handler.UserHandler, creditHandler *handler.CreditHandler, generateHandler *handler.GenerateHandler, apiConfigHandler *handler.ApiConfigHandler, videoConfigPresetHandler *handler.VideoConfigPresetHandler, proxyHandler *handler.ProxyHandler, canvasHandler *handler.CanvasHandler, generationRecordHandler *handler.GenerationRecordHandler, rechargeHandler *handler.RechargeHandler, captchaHandler *handler.CaptchaHandler, tempMediaHandler *handler.TempMediaHandler, channelStatusHandler *handler.ChannelStatusHandler, channelHandler *handler.ChannelHandler, channelModelHandler *handler.ChannelModelHandler, metricsHandler *handler.MetricsHandler, webhookHandler *handler.WebhookHandler, mergeGroupHandler *handler.MergeGroupHandler, siteAnnouncementHandler *handler.SiteAnnouncementHandler) {
 	r.Use(middleware.Cors())
 
 	api := r.Group("/backend-api")
@@ -33,6 +33,9 @@ func Setup(r *gin.Engine, authService *service.AuthService, authHandler *handler
 		auth.GET("/credits/pricing", creditHandler.ListPricing)
 		auth.GET("/credits/pricing/compare", creditHandler.ComparePricing)
 		auth.GET("/api-config/catalog", apiConfigHandler.Catalog)
+		auth.GET("/api-config/video-presets", videoConfigPresetHandler.List)
+		auth.POST("/api-config/video-presets", videoConfigPresetHandler.Create)
+		auth.DELETE("/api-config/video-presets/:presetId", videoConfigPresetHandler.Delete)
 		auth.GET("/channels", channelHandler.List)
 		auth.GET("/channels/auto", channelHandler.GetAuto)
 		auth.GET("/channels/auto/models", channelHandler.ListAutoModels)

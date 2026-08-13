@@ -1,0 +1,79 @@
+- generic [active] [ref=f2e1]:
+  - generic [ref=f2e3]:
+    - banner [ref=f2e4]:
+      - generic [ref=f2e5]:
+        - generic [ref=f2e6]:
+          - link [ref=f2e7] [cursor=pointer]:
+            - /url: /
+            - img "Logo" [ref=f2e8]
+          - navigation [ref=f2e9]:
+            - link "我的画布" [ref=f2e10] [cursor=pointer]:
+              - /url: /canvas
+            - link "生图工作台" [ref=f2e17] [cursor=pointer]:
+              - /url: /image
+            - link "视频创作台" [ref=f2e23] [cursor=pointer]:
+              - /url: /video
+            - link "提示词库" [ref=f2e28] [cursor=pointer]:
+              - /url: /prompts
+            - link "我的素材" [ref=f2e33] [cursor=pointer]:
+              - /url: /assets
+            - link "渠道状态" [ref=f2e40] [cursor=pointer]:
+              - /url: /channel-status
+            - button "积分充值" [ref=f2e44]
+        - generic [ref=f2e49]:
+          - button "切换到深色主题" [ref=f2e50]
+          - button "登录" [ref=f2e54]
+    - generic [ref=f2e59]:
+      - complementary [ref=f2e60]:
+        - generic [ref=f2e62]:
+          - strong [ref=f2e67]: 管理后台
+          - menu [ref=f2e68]:
+            - menuitem "管理概览" [ref=f2e69]
+            - menuitem "用户管理" [ref=f2e75]
+            - menuitem "API 与模型配置" [ref=f2e81]
+            - menuitem "模型调用日志" [ref=f2e85]
+            - menuitem "积分充值" [ref=f2e88]
+            - menuitem "积分流水" [ref=f2e91]
+          - button "返回画布" [ref=f2e95]
+      - main [ref=f2e98]:
+        - generic [ref=f2e99]:
+          - heading "API 与模型配置" [level=2] [ref=f2e100]
+          - alert [ref=f2e104]:
+            - img "info-circle" [ref=f2e106]
+            - generic [ref=f2e109]:
+              - generic [ref=f2e110]: 这里统一管理上游全局渠道、模型目录和指标服务配置
+              - generic [ref=f2e111]: 超级管理员(SuperAdmin)可创建与编辑渠道，并同步渠道模型。同步失败时，已有模型仍会保留在列表中，并显示同步失败原因。非超级管理员仅可查看，无修改权限。
+          - alert [ref=f2e112]:
+            - generic [ref=f2e117]:
+              - generic [ref=f2e118]: 只读模式
+              - generic [ref=f2e119]: 您当前的权限为非超级管理员，无法进行任何配置修改、同步模型或启用/禁用操作。
+          - generic [ref=f2e120]:
+            - tablist [ref=f2e121]:
+              - generic [ref=f2e123]:
+                - tab "渠道与模型管理" [selected] [ref=f2e125]
+                - tab "消息推送" [ref=f2e127]
+            - tabpanel [ref=f2e131]:
+              - generic [ref=f2e132]:
+                - generic [ref=f2e134]:
+                  - generic [ref=f2e135]: 全局渠道列表
+                  - button [disabled] [ref=f2e137]
+                - table [ref=f2e147]:
+                  - rowgroup [ref=f2e159]:
+                    - row [ref=f2e160]:
+                      - columnheader "ID" [ref=f2e161]
+                      - columnheader "渠道名称" [ref=f2e162]
+                      - columnheader "接口地址" [ref=f2e163]
+                      - columnheader "视频标准" [ref=f2e164]
+                      - columnheader "API Key" [ref=f2e165]
+                      - columnheader "New-API ID" [ref=f2e166]
+                      - columnheader "同步状态" [ref=f2e167]
+                      - columnheader "备注" [ref=f2e168]
+                      - columnheader "状态" [ref=f2e169]
+                      - columnheader "操作" [ref=f2e170]
+                  - rowgroup [ref=f2e171]:
+                    - row [ref=f2e172]:
+                      - cell "暂无数据 暂无数据" [ref=f2e173]:
+                        - generic [ref=f2e174]:
+                          - img "暂无数据" [ref=f2e176]
+                          - generic [ref=f2e182]: 暂无数据
+  - button "Open Next.js Dev Tools" [ref=f2e188] [cursor=pointer]

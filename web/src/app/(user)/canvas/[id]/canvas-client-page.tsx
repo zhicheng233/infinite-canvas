@@ -10,7 +10,7 @@ import { beautifyVideoError, formatVideoGenerationError, isBalanceError, extract
 import { requestEdit, requestGeneration, requestImageQuestion } from "@/services/api/image";
 import { requestAudioGeneration, storeGeneratedAudio } from "@/services/api/audio";
 import { requestVideoGeneration, storeGeneratedVideo } from "@/services/api/video";
-import { defaultConfig, resolveCapabilityModel, type AiConfig, useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
+import { defaultConfig, resolveCapabilityModel, videoRouteForModel, type AiConfig, useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
 import { resolveImageUrl, uploadImage, type UploadedImage } from "@/services/image-storage";
 import { resolveMediaUrl, uploadMediaFile, type UploadedFile } from "@/services/file-storage";
 import { nanoid } from "nanoid";
@@ -26,6 +26,7 @@ import { NODE_DEFAULT_SIZE, getNodeSpec } from "../constants";
 import { ActiveConnectionPath, ConnectionPath } from "../components/canvas-connections";
 import { CanvasConfigComposer } from "../components/canvas-config-composer";
 import { CanvasConfigNodePanel } from "../components/canvas-config-node-panel";
+import { canvasCustomVideoRuntimeForModel, canvasVideoGenerationOptions } from "../components/canvas-custom-video-runtime";
 import { CANVAS_AGENT_PANEL_MOTION_MS, CanvasAssistantPanel } from "../components/canvas-assistant-panel";
 import { CanvasNodeContextMenu } from "../components/canvas-context-menu";
 import { CanvasNodeAngleDialog, type CanvasImageAngleParams } from "../components/canvas-node-angle-dialog";
@@ -2238,6 +2239,8 @@ function InfiniteCanvasPage() {
 
                 if (mode === "video") {
                     const spec = nodeSizeFromRatio(generationConfig.size, NODE_DEFAULT_SIZE[CanvasNodeType.Video].width, NODE_DEFAULT_SIZE[CanvasNodeType.Video].height) || NODE_DEFAULT_SIZE[CanvasNodeType.Video];
+                    const isCustomVideo = videoRouteForModel(generationConfig, generationConfig.model) === "custom";
+                    const customVideoRuntime = canvasCustomVideoRuntimeForModel(generationConfig, generationConfig.model, sourceNode?.metadata?.customVideoRuntime);
                     const isEmptyVideoNode = sourceNode?.type === CanvasNodeType.Video && !sourceNode.metadata?.content;
                     const videoId = isEmptyVideoNode ? nodeId : nanoid();
                     const parent = sourceNode?.position || { x: 0, y: 0 };
@@ -2258,7 +2261,8 @@ function InfiniteCanvasPage() {
                             generateAudio: generationConfig.videoGenerateAudio,
                             watermark: generationConfig.videoWatermark,
                             videoReferenceMode: generationConfig.videoReferenceMode,
-                            references: generationReferenceUrls(generationContext),
+                            ...(isCustomVideo ? {} : { references: generationReferenceUrls(generationContext) }),
+                            ...(customVideoRuntime ? { customVideoRuntime } : {}),
                         },
                     };
                     pendingChildIds = [videoId];
@@ -2271,7 +2275,14 @@ function InfiniteCanvasPage() {
                     const controller = startGenerationRequest(videoId, nodeId, nodeId, runController);
                     try {
                         const video = await storeGeneratedVideo(
-                            await requestVideoGeneration(generationConfig, effectivePrompt, generationContext.referenceImages, generationContext.referenceVideos, generationContext.referenceAudios, { signal: controller.signal }),
+                            await requestVideoGeneration(
+                                generationConfig,
+                                effectivePrompt,
+                                isCustomVideo ? [] : generationContext.referenceImages,
+                                isCustomVideo ? [] : generationContext.referenceVideos,
+                                isCustomVideo ? [] : generationContext.referenceAudios,
+                                canvasVideoGenerationOptions(generationConfig, generationConfig.model, customVideoRuntime, controller.signal),
+                            ),
                         );
                         const videoSize = fitNodeSize(video.width || spec.width, video.height || spec.height, VIDEO_NODE_MAX_WIDTH, VIDEO_NODE_MAX_HEIGHT);
                         setNodes((prev) =>
@@ -2293,7 +2304,8 @@ function InfiniteCanvasPage() {
                                               generateAudio: generationConfig.videoGenerateAudio,
                                               watermark: generationConfig.videoWatermark,
                                               videoReferenceMode: generationConfig.videoReferenceMode,
-                                              references: generationReferenceUrls(generationContext),
+                                              ...(isCustomVideo ? {} : { references: generationReferenceUrls(generationContext) }),
+                                              ...(customVideoRuntime ? { customVideoRuntime } : {}),
                                           },
                                       }
                                     : node,
@@ -2401,7 +2413,9 @@ function InfiniteCanvasPage() {
                     const formatted = formatVideoGenerationError(error);
                     message.error(formatted.message);
                     setNodes((prev) =>
-                        prev.map((node) => (node.id === nodeId || pendingChildIds.includes(node.id) ? (node.id === nodeId && !markSourceStatus ? node : { ...node, metadata: { ...node.metadata, status: NODE_STATUS_ERROR, errorDetails: formatted.message } }) : node)),
+                        prev.map((node) =>
+                            node.id === nodeId || pendingChildIds.includes(node.id) ? (node.id === nodeId && !markSourceStatus ? node : { ...node, metadata: { ...node.metadata, status: NODE_STATUS_ERROR, errorDetails: formatted.message } }) : node,
+                        ),
                     );
                     return;
                 }
@@ -2432,7 +2446,7 @@ function InfiniteCanvasPage() {
             const batchRoot = node.metadata?.batchRootId ? nodesRef.current.find((item) => item.id === node.metadata?.batchRootId) : null;
             const savedImageMetadata = node.type === CanvasNodeType.Image ? { ...batchRoot?.metadata, ...node.metadata } : undefined;
             const hasSavedImageMetadata = Boolean(savedImageMetadata?.generationType);
-            const generationConfig =
+            let generationConfig =
                 hasSavedImageMetadata && savedImageMetadata
                     ? {
                           ...effectiveConfig,
@@ -2442,6 +2456,11 @@ function InfiniteCanvasPage() {
                           count: "1",
                       }
                     : { ...buildGenerationConfig(effectiveConfig, sourceNode, node.type === CanvasNodeType.Text ? "text" : node.type === CanvasNodeType.Video ? "video" : node.type === CanvasNodeType.Audio ? "audio" : "image"), count: "1" };
+            const savedVideoModel = node.type === CanvasNodeType.Video ? node.metadata?.model : undefined;
+            if (savedVideoModel && videoRouteForModel(effectiveConfig, savedVideoModel) === "custom") {
+                generationConfig = { ...generationConfig, model: savedVideoModel, videoModel: savedVideoModel };
+            }
+            const isCustomVideoRetry = node.type === CanvasNodeType.Video && videoRouteForModel(generationConfig, generationConfig.model) === "custom";
             if (!isAiConfigReady(generationConfig, generationConfig.model)) {
                 openConfigDialog(true);
                 return;
@@ -2454,7 +2473,7 @@ function InfiniteCanvasPage() {
                 return;
             }
             const generationType = savedImageMetadata?.generationType;
-            const useReferenceImages = generationType ? generationType === "edit" : Boolean(context?.referenceImages.length);
+            const useReferenceImages = isCustomVideoRetry ? false : generationType ? generationType === "edit" : Boolean(context?.referenceImages.length);
             const retryReferenceImages =
                 hasSavedImageMetadata && savedImageMetadata ? await resolveMetadataReferences(savedImageMetadata) : useReferenceImages ? (context?.referenceImages.length ? context.referenceImages : sourceNodeReferenceImages(batchRoot || sourceNode)) : [];
             if (useReferenceImages && !retryReferenceImages) {
@@ -2485,7 +2504,17 @@ function InfiniteCanvasPage() {
                     return;
                 }
                 if (node.type === CanvasNodeType.Video) {
-                    const video = await storeGeneratedVideo(await requestVideoGeneration(generationConfig, prompt, retryImages, context?.referenceVideos || [], context?.referenceAudios || [], { signal: controller.signal }));
+                    const customVideoRuntime = canvasCustomVideoRuntimeForModel(generationConfig, generationConfig.model, node.metadata?.customVideoRuntime);
+                    const video = await storeGeneratedVideo(
+                        await requestVideoGeneration(
+                            generationConfig,
+                            prompt,
+                            isCustomVideoRetry ? [] : retryImages,
+                            isCustomVideoRetry ? [] : context?.referenceVideos || [],
+                            isCustomVideoRetry ? [] : context?.referenceAudios || [],
+                            canvasVideoGenerationOptions(generationConfig, generationConfig.model, customVideoRuntime, controller.signal),
+                        ),
+                    );
                     const videoSize = fitNodeSize(video.width || node.width, video.height || node.height, VIDEO_NODE_MAX_WIDTH, VIDEO_NODE_MAX_HEIGHT);
                     setNodes((prev) =>
                         prev.map((item) =>
@@ -2506,6 +2535,7 @@ function InfiniteCanvasPage() {
                                           generateAudio: generationConfig.videoGenerateAudio,
                                           watermark: generationConfig.videoWatermark,
                                           videoReferenceMode: generationConfig.videoReferenceMode,
+                                          ...(customVideoRuntime ? { customVideoRuntime } : {}),
                                       },
                                   }
                                 : item,
@@ -3321,7 +3351,11 @@ function getGenerationCount(count: string) {
 
 function applyNodeConfigPatch(node: CanvasNodeData, patch: Partial<CanvasNodeData["metadata"]>) {
     const safePatch = patch || {};
-    const next = { ...node, metadata: { ...node.metadata, ...safePatch } };
+    const { customVideoRuntime, ...metadataPatch } = safePatch;
+    const metadata = { ...node.metadata, ...metadataPatch };
+    if (customVideoRuntime) metadata.customVideoRuntime = customVideoRuntime;
+    else if ("customVideoRuntime" in safePatch) delete metadata.customVideoRuntime;
+    const next = { ...node, metadata };
     const spec = node.type === CanvasNodeType.Video ? NODE_DEFAULT_SIZE[CanvasNodeType.Video] : NODE_DEFAULT_SIZE[CanvasNodeType.Image];
     const size = typeof safePatch.size === "string" && !node.metadata?.content ? nodeSizeFromRatio(safePatch.size, spec.width, spec.height) : null;
     return size && (node.type === CanvasNodeType.Image || node.type === CanvasNodeType.Video) ? { ...next, ...size, position: { x: node.position.x + node.width / 2 - size.width / 2, y: node.position.y + node.height / 2 - size.height / 2 } } : next;

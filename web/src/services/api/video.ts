@@ -3,13 +3,15 @@ import { isLoggedIn } from "./ai-proxy";
 import { API_BASE } from "./client";
 
 import { notifyCreditBalanceChanged } from "@/constant/credits";
+import { customVideoMediaFeatureNames, normalizeAndValidateCustomVideoConfig, type CustomVideoConfig, type CustomVideoMediaFeature } from "@/lib/custom-video-config";
+import { normalizeCustomVideoRuntimeState, type CustomVideoRuntimeSnapshot } from "@/lib/custom-video-runtime";
 import { dataUrlToFile, getDataUrlByteSize } from "@/lib/image-utils";
 import { getMediaBlob, uploadMediaFile, type UploadedFile } from "@/services/file-storage";
 import { getImageBlob, imageToDataUrl } from "@/services/image-storage";
 import { uploadTempImage, uploadTempMedia } from "@/services/api/temp-media";
 import { normalizeBinghuoRatio, normalizeBinghuoReferenceMode, normalizeBinghuoResolution } from "@/lib/binghuo-video";
 import { boolConfig, buildSeedancePromptText, isSeedanceVideoConfig, normalizeSeedanceDuration, normalizeSeedanceRatio, normalizeSeedanceResolution, seedanceVideoReferenceError, SEEDANCE_REFERENCE_LIMITS } from "@/lib/seedance-video";
-import { buildApiUrl, buildProxyApiUrl, modelOptionName, normalizeVideoDurationForModel, readLocalAiCredentials, resolveModelRequestConfig, videoRouteForModel, type AiConfig } from "@/stores/use-config-store";
+import { buildApiUrl, buildProxyApiUrl, customVideoConfigForModel, modelOptionName, normalizeVideoDurationForModel, readLocalAiCredentials, resolveModelRequestConfig, videoRouteForModel, type AiConfig } from "@/stores/use-config-store";
 import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
 
@@ -55,7 +57,7 @@ type SeedanceTask = {
     content?: { video_url?: string; last_frame_url?: string } | null;
 };
 type ApiEnvelope<T> = T | { code?: number | string; ok?: boolean; data?: T | null; msg?: string; message?: string; error?: string | { message?: string }; error_detail?: string };
-type RequestOptions = { signal?: AbortSignal };
+type RequestOptions = { readonly signal?: AbortSignal; readonly customVideoRuntime?: CustomVideoRuntimeSnapshot };
 
 class ExplicitVideoDownloadError extends Error {}
 
@@ -145,6 +147,7 @@ export async function createVideoGenerationTask(config: AiConfig, prompt: string
         if (configuredRoute !== "seedance" && configuredRoute !== "binghuo" && (videoReferences.length || audioReferences.length)) {
             throw new Error("当前视频模型暂不支持参考视频或参考音频，请仅保留参考图片");
         }
+        if (configuredRoute === "custom") return createCustomVideoTask(requestConfig, selectedModel, prompt, options?.customVideoRuntime, options);
         if (configuredRoute === "openai") return createOpenAIVideoTask(requestConfig, selectedModel, prompt, references, options);
         if (configuredRoute === "veo_json") return createVeoJsonVideoTask(requestConfig, selectedModel, prompt, references, options);
         if (configuredRoute === "waninter") return createWaninterVideoTask(requestConfig, selectedModel, prompt, references, options);
@@ -200,6 +203,64 @@ async function createOpenAIVideoTask(config: AiConfig, model: string, prompt: st
         size: normalizeVideoSize(config.size) || "1280x720",
     };
     if (references[0]) body.input_reference = await resolveYijiaInputReference(references[0]);
+    return createOpenAIVideoLifecycleTask(config, model, body, options);
+}
+
+async function createCustomVideoTask(config: AiConfig, model: string, prompt: string, runtime: CustomVideoRuntimeSnapshot | undefined, options?: RequestOptions): Promise<VideoGenerationTask> {
+    const configured = customVideoConfigForModel(config, model);
+    const result = normalizeAndValidateCustomVideoConfig(configured);
+    if (!result.ok) throw new Error(`该模型的自定义视频配置无效：${result.errors.join("；")}`);
+    const body = serializeCustomVideoBody(result.config, model, prompt, runtime);
+    return createOpenAIVideoLifecycleTask(config, model, body, options);
+}
+
+function serializeCustomVideoBody(config: CustomVideoConfig, model: string, prompt: string, runtime: CustomVideoRuntimeSnapshot | undefined) {
+    const normalized = normalizeCustomVideoRuntime(config, runtime);
+    const body: Record<string, unknown> = { model: modelOptionName(model), prompt };
+    if (config.seconds.enabled) body[config.seconds.key] = normalized.values.seconds;
+    if (config.dimensions.enabled) body[config.dimensions.key] = normalized.values.dimension;
+    for (const role of customVideoMediaFeatureNames) addCustomVideoMedia(body, config, normalized, role);
+    if (config.reference_mode.enabled && normalized.media.reference_images.length && normalized.values.reference_mode) body[config.reference_mode.key] = normalized.values.reference_mode;
+    if (config.audio.enabled) body[config.audio.key] = config.audio.mode === "fixed" ? config.audio.value : normalized.values.audio;
+    if (config.n.enabled) body[config.n.key] = config.n.value;
+    return body;
+}
+
+function normalizeCustomVideoRuntime(config: CustomVideoConfig, runtime: CustomVideoRuntimeSnapshot | undefined) {
+    if (!runtime) throw new Error("自定义视频运行参数缺失");
+    const seconds = runtime.values.seconds;
+    if (config.seconds.enabled) {
+        const valid =
+            typeof seconds === "number" &&
+            Number.isInteger(seconds) &&
+            (config.seconds.mode === "options" ? config.seconds.options.includes(seconds) : seconds >= config.seconds.min && seconds <= config.seconds.max && (seconds - config.seconds.min) % config.seconds.step === 0);
+        if (!valid) throw new Error("自定义视频 seconds 参数无效");
+    }
+    const dimension = runtime.values.dimension;
+    if (config.dimensions.enabled && (typeof dimension !== "string" || !config.dimensions.options.includes(dimension))) throw new Error(`自定义视频 dimensions (${config.dimensions.mode}) 参数无效`);
+    if (config.audio.enabled && config.audio.mode === "user" && runtime.values.audio !== undefined && typeof runtime.values.audio !== "boolean") throw new Error("自定义视频 audio 参数无效");
+    if (config.reference_mode.enabled && runtime.values.reference_mode !== undefined && !config.reference_mode.options.includes(runtime.values.reference_mode)) throw new Error("自定义视频 reference_mode 参数无效");
+    const normalized = normalizeCustomVideoRuntimeState(config, runtime.values, runtime.media);
+    for (const role of customVideoMediaFeatureNames) {
+        const values = runtime.media[role];
+        if (!config[role].enabled) continue;
+        if (!Array.isArray(values)) throw new Error(`自定义视频 ${role} 素材格式错误`);
+        if (values.some((value) => typeof value !== "string")) throw new Error(`自定义视频 ${role} 素材格式错误`);
+        const nonEmptyCount = values.filter((value) => value.trim()).length;
+        if (nonEmptyCount > config[role].max_count) throw new Error(`自定义视频 ${role} 素材最多 ${config[role].max_count} 项`);
+        if (normalized.media[role].length !== nonEmptyCount) throw new Error(`自定义视频 ${role} 素材地址无效`);
+    }
+    return normalized;
+}
+
+function addCustomVideoMedia(body: Record<string, unknown>, config: CustomVideoConfig, runtime: CustomVideoRuntimeSnapshot, role: CustomVideoMediaFeature) {
+    if (!config[role].enabled) return;
+    const values = runtime.media[role];
+    if (!values.length) return;
+    body[config[role].key] = values.length === 1 ? values[0] : [...values];
+}
+
+async function createOpenAIVideoLifecycleTask(config: AiConfig, model: string, body: Record<string, unknown>, options?: RequestOptions): Promise<VideoGenerationTask> {
     try {
         const response = await axios.post<ApiVideoResponse>(aiApiUrl(config, "/videos", { model }), body, { headers: aiHeaders(config, "application/json"), signal: options?.signal });
         const created = unwrapVideoResponse(response.data);

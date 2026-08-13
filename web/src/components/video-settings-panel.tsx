@@ -4,6 +4,7 @@ import { type ReactNode } from "react";
 import { Switch } from "antd";
 
 import { ImageSettingsTheme } from "@/components/image-settings-panel";
+import { CustomVideoSettingsPanel } from "@/components/custom-video-settings-panel";
 import {
     boolConfig,
     isSeedanceFastModel,
@@ -17,8 +18,10 @@ import {
     seedanceResolutionOptions,
 } from "@/lib/seedance-video";
 import { type CanvasTheme } from "@/lib/canvas-theme";
+import { type CustomVideoMediaFeature } from "@/lib/custom-video-config";
+import { type CustomVideoRuntimeSnapshot } from "@/lib/custom-video-runtime";
 import { binghuoRatioOptions, binghuoResolutionOptions, normalizeBinghuoRatio, normalizeBinghuoReferenceMode, normalizeBinghuoResolution } from "@/lib/binghuo-video";
-import { fixedConfiguredVideoDurationForModel, isVideoDurationCustomizable, modelOptionName, normalizeVideoDurationForModel, videoDurationOptionsForModel, videoRouteForModel, type AiConfig } from "@/stores/use-config-store";
+import { customVideoConfigForModel, fixedConfiguredVideoDurationForModel, isVideoDurationCustomizable, modelOptionName, normalizeVideoDurationForModel, videoDurationOptionsForModel, videoRouteForModel, type AiConfig } from "@/stores/use-config-store";
 
 const resolutionOptions = [
     { value: "720", label: "720p" },
@@ -36,20 +39,36 @@ const sizeOptions = [
 
 const secondOptions = [6, 10, 12, 16, 20];
 
-type VideoSettingsPanelProps = {
+export type VideoSettingsPanelProps = {
     config: AiConfig;
     model?: string;
     onConfigChange: (key: "vquality" | "size" | "videoSeconds" | "videoGenerateAudio" | "videoWatermark" | "videoReferenceMode", value: string) => void;
     theme: CanvasTheme;
     showTitle?: boolean;
     className?: string;
+    customVideoRuntime?: CustomVideoRuntimeSnapshot;
+    onCustomVideoRuntimeChange?: (runtime: CustomVideoRuntimeSnapshot) => void;
+    onCustomVideoMediaRoleOpen?: (role: CustomVideoMediaFeature) => void;
 };
 
-export function VideoSettingsPanel({ config, model: selectedModel, onConfigChange, theme, showTitle = true, className = "w-[320px] space-y-4 rounded-2xl px-1 py-0.5" }: VideoSettingsPanelProps) {
+export function VideoSettingsPanel({ config, model: selectedModel, onConfigChange, theme, showTitle = true, className = "w-[320px] space-y-4 rounded-2xl px-1 py-0.5", customVideoRuntime, onCustomVideoRuntimeChange, onCustomVideoMediaRoleOpen }: VideoSettingsPanelProps) {
     const model = selectedModel || config.videoModel || config.model;
     const resolvedConfig = { ...config, videoModel: model, model };
     if (videoRouteForModel(resolvedConfig, model) === "binghuo") {
         return <BinghuoVideoSettingsPanel config={resolvedConfig} model={model} onConfigChange={onConfigChange} theme={theme} showTitle={showTitle} className={className} />;
+    }
+    if (videoRouteForModel(resolvedConfig, model) === "custom") {
+        return (
+            <CustomVideoSettingsPanel
+                config={customVideoConfigForModel(resolvedConfig, model)}
+                runtime={customVideoRuntime}
+                onRuntimeChange={onCustomVideoRuntimeChange}
+                onMediaRoleOpen={onCustomVideoMediaRoleOpen}
+                theme={theme}
+                showTitle={showTitle}
+                className={className}
+            />
+        );
     }
     if (isSeedanceVideoConfig(resolvedConfig)) {
         return <SeedanceVideoSettingsPanel config={resolvedConfig} model={model} onConfigChange={onConfigChange} theme={theme} showTitle={showTitle} className={className} />;

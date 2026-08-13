@@ -1,0 +1,65 @@
+- generic [ref=e1]:
+  - generic [ref=e80] [cursor=pointer]:
+    - button "Open Next.js Dev Tools" [ref=e81]
+    - generic [ref=e85]:
+      - button "Open issues overlay" [ref=e86]:
+        - generic [ref=e87]:
+          - generic [ref=e88]: "1"
+          - generic [ref=e89]: "2"
+        - generic [ref=e90]:
+          - text: Issue
+          - generic [ref=e91]: s
+      - button "Collapse issues badge" [ref=e92]
+  - generic [ref=e96]:
+    - banner [ref=e97]:
+      - generic [ref=e98]:
+        - generic [ref=e99]:
+          - link [ref=e100] [cursor=pointer]:
+            - /url: /
+            - img "Logo" [ref=e101]
+          - navigation [ref=e102]:
+            - link "我的画布" [ref=e103] [cursor=pointer]:
+              - /url: /canvas
+            - link "生图工作台" [ref=e110] [cursor=pointer]:
+              - /url: /image
+            - link "视频创作台" [ref=e116] [cursor=pointer]:
+              - /url: /video
+            - link "提示词库" [ref=e121] [cursor=pointer]:
+              - /url: /prompts
+            - link "我的素材" [ref=e126] [cursor=pointer]:
+              - /url: /assets
+            - link "渠道状态" [ref=e133] [cursor=pointer]:
+              - /url: /channel-status
+            - button "积分充值" [ref=e137]
+            - link "管理后台" [ref=e141] [cursor=pointer]:
+              - /url: /admin
+        - generic [ref=e146]:
+          - link "0" [ref=e147] [cursor=pointer]:
+            - /url: /credits
+          - button "配置" [ref=e151]
+          - button "切换到深色主题" [ref=e155]
+          - button "用户菜单" [ref=e159]:
+            - generic [ref=e160]: 系统管理员
+    - main [ref=e164]:
+      - generic [ref=e165]:
+        - generic [ref=e166]:
+          - generic [ref=e167]:
+            - paragraph [ref=e168]: 画布库
+            - heading "无限画布" [level=1] [ref=e169]
+          - generic [ref=e170]:
+            - button "删除全部" [ref=e190] [cursor=pointer]
+            - button "导入画布" [ref=e171] [cursor=pointer]
+            - button "新建画布" [active] [ref=e178] [cursor=pointer]
+        - article [ref=e193] [cursor=pointer]:
+          - generic [ref=e194]:
+            - checkbox "选择 无限画布 1" [ref=e195]
+            - button [ref=e196]:
+              - heading "无限画布 1" [level=2] [ref=e197]
+              - paragraph [ref=e198]: 0 个节点 · 0 条连线
+          - generic [ref=e199]:
+            - paragraph [ref=e200]: 更新于 08/13 18:43
+            - generic [ref=e201]:
+              - button "导出" [ref=e202]
+              - button "重命名" [ref=e207]
+              - button "删除" [ref=e212]
+  - alert [ref=e189]

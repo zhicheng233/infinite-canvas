@@ -2,11 +2,96 @@ package service
 
 import (
 	"encoding/json"
+	"errors"
 	"reflect"
+	"strings"
 	"testing"
 
 	"infinite-canvas-server/model"
 )
+
+type channelModelRepoStub struct {
+	item      *model.ChannelModel
+	saveCalls int
+}
+
+func (repo *channelModelRepoStub) FindByID(uint) (*model.ChannelModel, error) {
+	if repo.item == nil {
+		return nil, errors.New("not found")
+	}
+	return repo.item, nil
+}
+
+func (*channelModelRepoStub) FindByChannelAndName(uint, string) (*model.ChannelModel, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (repo *channelModelRepoStub) ListByChannel(channelID uint, enabledOnly bool) ([]model.ChannelModel, error) {
+	if repo.item == nil || repo.item.ChannelID != channelID || (enabledOnly && !repo.item.Enabled) {
+		return []model.ChannelModel{}, nil
+	}
+	return []model.ChannelModel{*repo.item}, nil
+}
+
+func (repo *channelModelRepoStub) Save(*model.ChannelModel) error {
+	repo.saveCalls++
+	return nil
+}
+
+func (*channelModelRepoStub) Upsert(*model.ChannelModel) error { return errors.New("not implemented") }
+
+func (*channelModelRepoStub) DeleteStaleModels(uint, []string) error {
+	return errors.New("not implemented")
+}
+
+type channelModelCatalogChannelServiceStub struct {
+	channels []model.ChannelInfo
+}
+
+func (stub channelModelCatalogChannelServiceStub) ListEnabled() ([]model.ChannelInfo, error) {
+	return stub.channels, nil
+}
+
+func (channelModelCatalogChannelServiceStub) DecryptedApiKey(uint) (string, error) {
+	return "", errors.New("not implemented")
+}
+
+type channelModelCatalogChannelRepoStub struct {
+	channel *model.Channel
+}
+
+func (stub channelModelCatalogChannelRepoStub) FindByID(uint) (*model.Channel, error) {
+	return stub.channel, nil
+}
+
+func (channelModelCatalogChannelRepoStub) Save(*model.Channel) error { return nil }
+
+type channelModelCatalogPricingStub struct {
+	items map[string]map[uint]model.CreditPricing
+}
+
+func (stub channelModelCatalogPricingStub) FindPricingMap(uint) (map[string]map[uint]model.CreditPricing, error) {
+	return stub.items, nil
+}
+
+func newChannelModelCatalogTestService(item *model.ChannelModel) *ChannelModelService {
+	return NewChannelModelService(
+		channelModelCatalogChannelServiceStub{channels: []model.ChannelInfo{{ID: item.ChannelID, Name: "A", Enabled: true}}},
+		channelModelCatalogChannelRepoStub{channel: &model.Channel{BaseModel: model.BaseModel{ID: item.ChannelID}, Name: "A", Enabled: true}},
+		&channelModelRepoStub{item: item},
+		channelModelCatalogPricingStub{items: map[string]map[uint]model.CreditPricing{
+			item.ModelName: {item.ChannelID: {ChannelID: item.ChannelID, Model: item.ModelName, CreditsPerUnit: 1, UnitType: model.UnitPerVideo}},
+		}},
+	)
+}
+
+func serviceTestCustomVideoConfig() *model.CustomVideoConfig {
+	return &model.CustomVideoConfig{
+		Seconds:    model.CustomVideoSecondsConfig{Enabled: true, Key: "seconds", Mode: "range", Min: 3, Max: 10, Step: 1, Default: 6},
+		Dimensions: model.CustomVideoDimensionsConfig{Enabled: true, Mode: "size", Key: "size", Options: []string{"1280x720", "720x1280"}, Default: "1280x720"},
+		N:          model.CustomVideoNConfig{Enabled: true, Key: "n", Value: 1},
+	}
+}
 
 func TestUniqueDiscoveredModelNames(t *testing.T) {
 	items := []discoveredModel{
@@ -118,4 +203,115 @@ func TestUpdateChannelModelCapabilities(t *testing.T) {
 			}
 		}
 	})
+}
+
+func TestUpdateChannelModelRequiresConfigForCustomRoute(t *testing.T) {
+	repo := &channelModelRepoStub{item: &model.ChannelModel{VideoRoute: "auto"}}
+	service := NewChannelModelService(nil, nil, repo, nil)
+	route := "custom"
+
+	if _, err := service.Update(1, model.UpdateChannelModelInput{VideoRoute: &route}); err == nil {
+		t.Fatal("custom route without config should fail")
+	}
+	if repo.saveCalls != 0 {
+		t.Fatalf("save calls=%d, want 0", repo.saveCalls)
+	}
+}
+
+func TestUpdateChannelModelSavesAndReturnsCustomConfig(t *testing.T) {
+	repo := &channelModelRepoStub{item: &model.ChannelModel{Capabilities: "[]", VideoDurations: "[]", VideoRoute: "auto"}}
+	service := NewChannelModelService(nil, nil, repo, nil)
+	route := "custom"
+	config := serviceTestCustomVideoConfig()
+
+	info, err := service.Update(1, model.UpdateChannelModelInput{VideoRoute: &route, VideoCustomConfig: config})
+	if err != nil {
+		t.Fatalf("update failed: %v", err)
+	}
+	if repo.saveCalls != 1 || repo.item.VideoCustomConfig == "" {
+		t.Fatalf("save calls=%d config=%q", repo.saveCalls, repo.item.VideoCustomConfig)
+	}
+	if info.VideoCustomConfig == nil || info.VideoCustomConfig.Dimensions.Mode != "size" || info.VideoCustomConfig.Dimensions.Default != "1280x720" {
+		t.Fatalf("unexpected returned config: %#v", info.VideoCustomConfig)
+	}
+}
+
+func TestUpdateChannelModelClearsConfigForNonCustomRoute(t *testing.T) {
+	repo := &channelModelRepoStub{item: &model.ChannelModel{Capabilities: "[]", VideoDurations: "[]", VideoRoute: "custom", VideoCustomConfig: `{"stale":true}`}}
+	service := NewChannelModelService(nil, nil, repo, nil)
+	route := "openai"
+
+	info, err := service.Update(1, model.UpdateChannelModelInput{VideoRoute: &route, VideoCustomConfig: serviceTestCustomVideoConfig()})
+	if err != nil {
+		t.Fatalf("update failed: %v", err)
+	}
+	if repo.item.VideoCustomConfig != "" || info.VideoCustomConfig != nil {
+		t.Fatalf("config was not cleared: stored=%q info=%#v", repo.item.VideoCustomConfig, info.VideoCustomConfig)
+	}
+}
+
+func TestChannelModelToInfoRejectsInvalidCustomConfigJSON(t *testing.T) {
+	_, err := channelModelToInfo(&model.ChannelModel{Capabilities: "[]", VideoDurations: "[]", VideoRoute: "custom", VideoCustomConfig: "{"})
+	if err == nil {
+		t.Fatal("invalid persisted config should fail conversion")
+	}
+}
+
+func TestChannelModelCatalogPreservesCustomConfigAfterAdminUpdate(t *testing.T) {
+	item := &model.ChannelModel{BaseModel: model.BaseModel{ID: 91}, ChannelID: 1, ModelName: "catalog-video", Capabilities: `["video"]`, Enabled: true, VideoRoute: "auto", VideoDurations: "[]"}
+	service := newChannelModelCatalogTestService(item)
+	route := "custom"
+	inputConfig := serviceTestCustomVideoConfig()
+	inputConfig.Seconds.Key = " seconds "
+	inputConfig.Dimensions.Options = []string{"720x1280", "1280x720", "1280x720"}
+
+	updated, err := service.Update(item.ID, model.UpdateChannelModelInput{VideoRoute: &route, VideoCustomConfig: inputConfig})
+	if err != nil {
+		t.Fatalf("admin update failed: %v", err)
+	}
+	catalog, err := service.ListTenantCatalog(7)
+	if err != nil {
+		t.Fatalf("catalog readback failed: %v", err)
+	}
+	if len(catalog) != 1 || len(catalog[0].Models) != 1 {
+		t.Fatalf("unexpected catalog: %#v", catalog)
+	}
+	if !reflect.DeepEqual(catalog[0].Models[0].VideoCustomConfig, updated.VideoCustomConfig) {
+		t.Fatalf("catalog config %#v does not match update %#v", catalog[0].Models[0].VideoCustomConfig, updated.VideoCustomConfig)
+	}
+	payload, err := json.Marshal(catalog)
+	if err != nil {
+		t.Fatalf("marshal catalog: %v", err)
+	}
+	if !strings.Contains(string(payload), `"video_custom_config":{`) {
+		t.Fatalf("catalog JSON omitted custom config: %s", payload)
+	}
+}
+
+func TestChannelModelCatalogClearsCustomConfigAfterNonCustomAdminUpdate(t *testing.T) {
+	configJSON, err := json.Marshal(serviceTestCustomVideoConfig())
+	if err != nil {
+		t.Fatalf("marshal fixture: %v", err)
+	}
+	item := &model.ChannelModel{BaseModel: model.BaseModel{ID: 92}, ChannelID: 1, ModelName: "catalog-video", Capabilities: `["video"]`, Enabled: true, VideoRoute: "custom", VideoDurations: "[]", VideoCustomConfig: string(configJSON)}
+	service := newChannelModelCatalogTestService(item)
+	route := "openai"
+
+	if _, err := service.Update(item.ID, model.UpdateChannelModelInput{VideoRoute: &route, VideoCustomConfig: nil}); err != nil {
+		t.Fatalf("admin update failed: %v", err)
+	}
+	catalog, err := service.ListTenantCatalog(7)
+	if err != nil {
+		t.Fatalf("catalog readback failed: %v", err)
+	}
+	if len(catalog) != 1 || len(catalog[0].Models) != 1 || catalog[0].Models[0].VideoCustomConfig != nil {
+		t.Fatalf("non-custom catalog retained config: %#v", catalog)
+	}
+	payload, err := json.Marshal(catalog)
+	if err != nil {
+		t.Fatalf("marshal catalog: %v", err)
+	}
+	if strings.Contains(string(payload), `"video_custom_config"`) {
+		t.Fatalf("non-custom catalog JSON retained config: %s", payload)
+	}
 }

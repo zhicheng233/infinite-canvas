@@ -1,0 +1,77 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - generic [ref=e5]:
+      - generic [ref=e6]:
+        - link [ref=e7] [cursor=pointer]:
+          - /url: /
+          - img "Logo" [ref=e8]
+        - navigation [ref=e9]:
+          - link "我的画布" [ref=e10] [cursor=pointer]:
+            - /url: /canvas
+          - link "生图工作台" [ref=e17] [cursor=pointer]:
+            - /url: /image
+          - link "视频创作台" [ref=e23] [cursor=pointer]:
+            - /url: /video
+          - link "提示词库" [ref=e28] [cursor=pointer]:
+            - /url: /prompts
+          - link "我的素材" [ref=e33] [cursor=pointer]:
+            - /url: /assets
+          - link "渠道状态" [ref=e40] [cursor=pointer]:
+            - /url: /channel-status
+          - button "积分充值" [ref=e44]
+      - generic [ref=e49]:
+        - button "切换到深色主题" [ref=e50]
+        - button "登录" [ref=e54]
+  - generic [ref=e59]:
+    - complementary [ref=e60]:
+      - generic [ref=e62]:
+        - strong [ref=e67]: 管理后台
+        - menu [ref=e68]:
+          - menuitem "管理概览" [ref=e69]
+          - menuitem "用户管理" [ref=e75]
+          - menuitem "API 与模型配置" [ref=e81]
+          - menuitem "模型调用日志" [ref=e85]
+          - menuitem "积分充值" [ref=e88]
+          - menuitem "积分流水" [ref=e91]
+        - button "返回画布" [ref=e95]
+    - main [ref=e98]:
+      - generic [ref=e99]:
+        - heading "API 与模型配置" [level=2] [ref=e100]
+        - alert [ref=e104]:
+          - img "info-circle" [ref=e106]
+          - generic [ref=e109]:
+            - generic [ref=e110]: 这里统一管理上游全局渠道、模型目录和指标服务配置
+            - generic [ref=e111]: 超级管理员(SuperAdmin)可创建与编辑渠道，并同步渠道模型。同步失败时，已有模型仍会保留在列表中，并显示同步失败原因。非超级管理员仅可查看，无修改权限。
+        - alert [ref=e112]:
+          - generic [ref=e117]:
+            - generic [ref=e118]: 只读模式
+            - generic [ref=e119]: 您当前的权限为非超级管理员，无法进行任何配置修改、同步模型或启用/禁用操作。
+        - generic [ref=e120]:
+          - tablist [ref=e121]:
+            - generic [ref=e123]:
+              - tab "渠道与模型管理" [selected] [ref=e125]
+              - tab "消息推送" [ref=e127]
+          - tabpanel [ref=e131]:
+            - generic [ref=e132]:
+              - generic [ref=e134]:
+                - generic [ref=e135]: 全局渠道列表
+                - button [disabled] [ref=e137]
+              - table [ref=e147]:
+                - rowgroup [ref=e159]:
+                  - row [ref=e160]:
+                    - columnheader "ID" [ref=e161]
+                    - columnheader "渠道名称" [ref=e162]
+                    - columnheader "接口地址" [ref=e163]
+                    - columnheader "视频标准" [ref=e164]
+                    - columnheader "API Key" [ref=e165]
+                    - columnheader "New-API ID" [ref=e166]
+                    - columnheader "同步状态" [ref=e167]
+                    - columnheader "备注" [ref=e168]
+                    - columnheader "状态" [ref=e169]
+                    - columnheader "操作" [ref=e170]
+                - rowgroup [ref=e171]:
+                  - row [ref=e172]:
+                    - cell "暂无数据 暂无数据" [ref=e173]:
+                      - generic [ref=e174]:
+                        - img "暂无数据" [ref=e176]
+                        - generic [ref=e182]: 暂无数据

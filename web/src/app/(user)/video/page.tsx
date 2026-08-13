@@ -12,7 +12,10 @@ import { PromptSelectDialog } from "@/components/prompts/prompt-select-dialog";
 import { creditEstimateButtonText, CreditCostHint, CreditHelpActions, isInsufficientCreditError, useEstimatedCreditCost, useUserCreditBalance } from "@/constant/credits";
 import { formatVideoGenerationError } from "@/lib/error-helper";
 import { VideoSettingsPanel, normalizeVideoResolutionValue, normalizeVideoSizeValue, videoSizeLabel } from "@/components/video-settings-panel";
+import { CustomVideoReferenceInputs } from "./custom-video-reference-inputs";
 import { canvasThemes } from "@/lib/canvas-theme";
+import { customVideoMediaFeatureNames, type CustomVideoMediaFeature } from "@/lib/custom-video-config";
+import { normalizeCustomVideoRuntimeState, type CustomVideoRuntimeContainer, type CustomVideoRuntimeSnapshot } from "@/lib/custom-video-runtime";
 import { formatBytes, formatDuration } from "@/lib/image-utils";
 import { boolConfig, isSeedanceVideoConfig, normalizeSeedanceRatio, seedanceReferenceLabel, seedanceVideoReferenceError, seedanceVideoReferenceHint, SEEDANCE_REFERENCE_LIMITS } from "@/lib/seedance-video";
 import { normalizeBinghuoRatio, normalizeBinghuoReferenceMode, normalizeBinghuoResolution } from "@/lib/binghuo-video";
@@ -21,7 +24,7 @@ import { deleteGenerationRecords, listGenerationRecords, saveGenerationRecord } 
 import { resolveImageUrl, uploadImage } from "@/services/image-storage";
 import { createVideoGenerationTask, pollVideoGenerationTask, storeGeneratedVideo, type VideoGenerationTask } from "@/services/api/video";
 import { useAssetStore } from "@/stores/use-asset-store";
-import { modelOptionLabel, useConfigStore, useEffectiveConfig, videoRouteForModel, type AiConfig } from "@/stores/use-config-store";
+import { customVideoConfigForModel, modelOptionLabel, useConfigStore, useEffectiveConfig, videoRouteForModel, type AiConfig } from "@/stores/use-config-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
@@ -45,7 +48,7 @@ type GenerationResult = {
     rawDetail?: string;
 };
 
-type GenerationLog = {
+type GenerationLog = CustomVideoRuntimeContainer & {
     id: string;
     createdAt: number;
     title: string;
@@ -84,6 +87,7 @@ export default function VideoPage() {
     const [references, setReferences] = useState<ReferenceImage[]>([]);
     const [videoReferences, setVideoReferences] = useState<ReferenceVideo[]>([]);
     const [audioReferences, setAudioReferences] = useState<ReferenceAudio[]>([]);
+    const [customVideoRuntime, setCustomVideoRuntime] = useState<CustomVideoRuntimeSnapshot>();
     const [results, setResults] = useState<GenerationResult[]>([]);
     const [logs, setLogs] = useState<GenerationLog[]>([]);
     const [running, setRunning] = useState(false);
@@ -98,8 +102,13 @@ export default function VideoPage() {
     const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
 
     const model = effectiveConfig.videoModel || effectiveConfig.model;
-    const imageReferenceMode = videoRouteForModel(effectiveConfig, model) === "binghuo" ? normalizeBinghuoReferenceMode(effectiveConfig.videoReferenceMode) : "reference";
-    const canGenerate = Boolean(prompt.trim());
+    const route = videoRouteForModel(effectiveConfig, model);
+    const customVideoConfig = customVideoConfigForModel(effectiveConfig, model);
+    const isCustomVideoModel = route === "custom";
+    const normalizedCustomVideoRuntime = customVideoConfig ? normalizeCustomVideoRuntimeState(customVideoConfig, customVideoRuntime?.values, customVideoRuntime?.media) : undefined;
+    const customRuntimeError = isCustomVideoModel ? customRuntimeGenerationError(customVideoConfig, customVideoRuntime) : "";
+    const imageReferenceMode = route === "binghuo" ? normalizeBinghuoReferenceMode(effectiveConfig.videoReferenceMode) : "reference";
+    const canGenerate = Boolean(prompt.trim()) && !customRuntimeError;
     const creditEstimate = useEstimatedCreditCost(model, 1, { type: "video", seconds: effectiveConfig.videoSeconds, resolution: effectiveConfig.vquality, size: effectiveConfig.size });
     const balance = useUserCreditBalance();
 
@@ -112,6 +121,10 @@ export default function VideoPage() {
     useEffect(() => {
         void refreshLogs();
     }, []);
+
+    useEffect(() => {
+        setCustomVideoRuntime((current) => (customVideoConfig ? normalizeCustomVideoRuntimeState(customVideoConfig, current?.values, current?.media) : undefined));
+    }, [customVideoConfig, model]);
 
     const addReferences = async (files?: FileList | null) => {
         const selectedFiles = Array.from(files || []);
@@ -167,6 +180,21 @@ export default function VideoPage() {
             message.error("剪切板里没有可读取的图片");
         }
     };
+    const addCustomVideoMedia = async (role: CustomVideoMediaFeature, files: FileList | null) => {
+        if (!customVideoConfig || !files) return [];
+        const available = customVideoConfig[role].max_count - (normalizedCustomVideoRuntime?.media[role].length || 0);
+        if (available <= 0) return [];
+        const isVideo = role === "input_video";
+        const candidates = Array.from(files)
+            .filter((file) => (isVideo ? file.type.startsWith("video/") && file.size <= SEEDANCE_REFERENCE_LIMITS.videoMaxBytes : file.type.startsWith("image/") && file.size <= SEEDANCE_REFERENCE_LIMITS.imageMaxBytes))
+            .slice(0, available);
+        if (candidates.length !== files.length) message.warning(isVideo ? "已忽略不支持或超过 50MB 的源视频" : "已忽略不支持或超过 30MB 的参考图");
+        return await Promise.all(
+            candidates.map(async (file) => {
+                return readDataUrl(file);
+            }),
+        );
+    };
     const generate = async () => {
         const snapshot = buildRequestSnapshot();
         if (!snapshot) return;
@@ -178,7 +206,7 @@ export default function VideoPage() {
         setStartedAt(batchStartedAt);
         try {
             const task = await createVideoGenerationTask(snapshot.config, snapshot.text, snapshot.references, snapshot.videoReferences, snapshot.audioReferences);
-            const log = buildLog({ prompt: snapshot.text, model, config: snapshot.config, references: snapshot.references, videoReferences: snapshot.videoReferences, audioReferences: snapshot.audioReferences, durationMs: 0, status: "生成中", task });
+            const log = buildLog({ prompt: snapshot.text, model, config: snapshot.config, references: snapshot.references, videoReferences: snapshot.videoReferences, audioReferences: snapshot.audioReferences, customVideoRuntime: snapshot.customVideoRuntime, durationMs: 0, status: "生成中", task });
             await saveLog(log);
             void pollGenerationLog(log, snapshot.config);
         } catch (error) {
@@ -192,6 +220,7 @@ export default function VideoPage() {
                     references: snapshot.references,
                     videoReferences: snapshot.videoReferences,
                     audioReferences: snapshot.audioReferences,
+                    customVideoRuntime: snapshot.customVideoRuntime,
                     durationMs: performance.now() - batchStartedAt,
                     status: "失败",
                     error: formatted.message,
@@ -213,13 +242,16 @@ export default function VideoPage() {
             openConfigDialog(true);
             return null;
         }
-        const route = videoRouteForModel(effectiveConfig, model);
+        if (customRuntimeError) {
+            message.error(customRuntimeError);
+            return null;
+        }
         const videoReferenceError = route === "seedance" ? seedanceVideoReferenceError(videoReferences) : "";
         if (videoReferenceError) {
             message.error(`${videoReferenceError}。${seedanceVideoReferenceHint}`);
             return null;
         }
-        return { text, config: buildVideoConfig(effectiveConfig, model), references: [...references], videoReferences: [...videoReferences], audioReferences: [...audioReferences] };
+        return { text, config: buildVideoConfig(effectiveConfig, model), references: [...references], videoReferences: [...videoReferences], audioReferences: [...audioReferences], customVideoRuntime: normalizedCustomVideoRuntime };
     };
 
     const retryResult = () => {
@@ -260,6 +292,7 @@ export default function VideoPage() {
         setReferences([]);
         setVideoReferences([]);
         setAudioReferences([]);
+        setCustomVideoRuntime(undefined);
         setResults([]);
         setElapsedMs(0);
         setStartedAt(0);
@@ -351,6 +384,7 @@ export default function VideoPage() {
         setReferences(log.references || []);
         setVideoReferences(log.videoReferences || []);
         setAudioReferences(log.audioReferences || []);
+        setCustomVideoRuntime(log.customVideoRuntime);
         if (log.config.videoModel || log.model) updateConfig("videoModel", log.config.videoModel || log.model);
         if (log.config.size) updateConfig("size", log.config.size);
         if (log.config.vquality) updateConfig("vquality", log.config.vquality);
@@ -398,15 +432,27 @@ export default function VideoPage() {
                                         <Button size="small" icon={<BookOpen className="size-3.5" />} onClick={() => setPromptDialogOpen(true)}>
                                             查看提示词库
                                         </Button>
-                                        <Button size="small" icon={<FolderPlus className="size-3.5" />} onClick={() => setAssetPickerOpen(true)}>
+                                        {!isCustomVideoModel ? <Button size="small" icon={<FolderPlus className="size-3.5" />} onClick={() => setAssetPickerOpen(true)}>
                                             查看我的素材
-                                        </Button>
+                                        </Button> : null}
                                     </div>
                                 </div>
                                 <Input.TextArea value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={7} placeholder="描述镜头运动、主体动作、场景氛围和画面风格" />
                             </div>
 
-                            <div className="min-w-0">
+                            {isCustomVideoModel && customVideoConfig && normalizedCustomVideoRuntime ? (
+                                <CustomVideoReferenceInputs
+                                    config={customVideoConfig}
+                                    media={normalizedCustomVideoRuntime.media}
+                                    referenceMode={normalizedCustomVideoRuntime.values.reference_mode}
+                                    onUpload={addCustomVideoMedia}
+                                    onChange={({ media, referenceMode }) => setCustomVideoRuntime((current) => normalizeCustomVideoRuntimeState(customVideoConfig, { ...current?.values, ...(referenceMode ? { reference_mode: referenceMode } : {}) }, media))}
+                                />
+                            ) : null}
+
+                            {!isCustomVideoModel ? (
+                                <>
+                                    <div className="min-w-0">
                                 <div className="mb-2 flex items-center justify-between gap-3">
                                     <span className="text-base font-semibold">参考图</span>
                                     <div className="flex gap-2">
@@ -436,9 +482,9 @@ export default function VideoPage() {
                                     ))}
                                     {!references.length ? <div className="flex min-w-full items-center justify-center text-sm text-stone-500">暂无参考图，最多 9 张</div> : null}
                                 </div>
-                            </div>
+                                    </div>
 
-                            <div className="min-w-0">
+                                    <div className="min-w-0">
                                 <div className="mb-2 flex items-center justify-between gap-3">
                                     <span className="text-base font-semibold">参考视频</span>
                                     <Button size="small" icon={<Upload className="size-3.5" />} onClick={() => fileInputRef.current?.click()}>
@@ -463,9 +509,9 @@ export default function VideoPage() {
                                     ))}
                                     {!videoReferences.length ? <div className="flex min-w-full items-center justify-center text-sm text-stone-500">暂无参考视频，最多 3 个</div> : null}
                                 </div>
-                            </div>
+                                    </div>
 
-                            <div className="min-w-0">
+                                    <div className="min-w-0">
                                 <div className="mb-2 flex items-center justify-between gap-3">
                                     <span className="text-base font-semibold">参考音频</span>
                                     <Button size="small" icon={<Upload className="size-3.5" />} onClick={() => fileInputRef.current?.click()}>
@@ -494,7 +540,9 @@ export default function VideoPage() {
                                     ))}
                                     {!audioReferences.length ? <div className="flex min-w-full items-center justify-center text-center text-sm text-stone-500">暂无参考音频，最多 3 个，mp3/wav，单个 15MB 内</div> : null}
                                 </div>
-                            </div>
+                                    </div>
+                                </>
+                            ) : null}
 
                             <div className="flex items-center justify-between rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 text-sm dark:border-stone-800 dark:bg-stone-900 sm:hidden">
                                 <span className="truncate text-stone-500 dark:text-stone-400">
@@ -506,7 +554,7 @@ export default function VideoPage() {
                             </div>
 
                             <div className="hidden gap-4 sm:grid sm:grid-cols-2">
-                                <GenerationSettings config={effectiveConfig} model={model} updateConfig={updateConfig} openConfigDialog={openConfigDialog} />
+                                <GenerationSettings config={effectiveConfig} model={model} updateConfig={updateConfig} openConfigDialog={openConfigDialog} customVideoRuntime={normalizedCustomVideoRuntime} onCustomVideoRuntimeChange={setCustomVideoRuntime} onCustomVideoMediaRoleOpen={(role) => document.getElementById(`custom-video-role-${role}`)?.scrollIntoView({ behavior: "smooth", block: "center" })} />
                             </div>
                         </div>
 
@@ -568,11 +616,11 @@ export default function VideoPage() {
             </Drawer>
             <Drawer title="参数" placement="bottom" height="82vh" open={settingsOpen} onClose={() => setSettingsOpen(false)}>
                 <div className="grid grid-cols-2 gap-3 pb-4">
-                    <GenerationSettings config={effectiveConfig} model={model} updateConfig={updateConfig} openConfigDialog={openConfigDialog} />
+                    <GenerationSettings config={effectiveConfig} model={model} updateConfig={updateConfig} openConfigDialog={openConfigDialog} customVideoRuntime={normalizedCustomVideoRuntime} onCustomVideoRuntimeChange={setCustomVideoRuntime} onCustomVideoMediaRoleOpen={(role) => document.getElementById(`custom-video-role-${role}`)?.scrollIntoView({ behavior: "smooth", block: "center" })} />
                 </div>
             </Drawer>
             <PromptSelectDialog open={promptDialogOpen} onOpenChange={setPromptDialogOpen} onSelect={setPrompt} />
-            <AssetPickerModal open={assetPickerOpen} defaultTab="my-assets" onInsert={(payload) => void insertPickedAsset(payload)} onClose={() => setAssetPickerOpen(false)} />
+            <AssetPickerModal open={assetPickerOpen} onInsert={(payload) => void insertPickedAsset(payload)} onClose={() => setAssetPickerOpen(false)} />
             <Modal title="删除生成记录" open={deleteConfirmOpen} onCancel={() => setDeleteConfirmOpen(false)} onOk={deleteSelectedLogs} okText="删除" okButtonProps={{ danger: true }} cancelText="取消">
                 确定删除选中的 {selectedLogIds.length} 条生成记录吗？
             </Modal>
@@ -580,7 +628,7 @@ export default function VideoPage() {
     );
 }
 
-function GenerationSettings({ config, model, updateConfig, openConfigDialog }: { config: AiConfig; model: string; updateConfig: UpdateAiConfig; openConfigDialog: (shouldPromptContinue?: boolean) => void }) {
+function GenerationSettings({ config, model, updateConfig, openConfigDialog, customVideoRuntime, onCustomVideoRuntimeChange, onCustomVideoMediaRoleOpen }: { config: AiConfig; model: string; updateConfig: UpdateAiConfig; openConfigDialog: (shouldPromptContinue?: boolean) => void; customVideoRuntime?: CustomVideoRuntimeSnapshot; onCustomVideoRuntimeChange: (runtime: CustomVideoRuntimeSnapshot) => void; onCustomVideoMediaRoleOpen: (role: CustomVideoMediaFeature) => void }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
 
     return (
@@ -590,7 +638,7 @@ function GenerationSettings({ config, model, updateConfig, openConfigDialog }: {
                 <ModelPicker config={config} value={model} onChange={(value) => updateConfig("videoModel", value)} capability="video" fullWidth onMissingConfig={() => openConfigDialog(false)} />
             </label>
             <div className="col-span-2">
-                <VideoSettingsPanel config={config} model={model} onConfigChange={(key, value) => updateConfig(key, value)} theme={theme} showTitle={false} className="space-y-4" />
+                <VideoSettingsPanel config={config} model={model} onConfigChange={(key, value) => updateConfig(key, value)} theme={theme} showTitle={false} className="space-y-4" customVideoRuntime={customVideoRuntime} onCustomVideoRuntimeChange={onCustomVideoRuntimeChange} onCustomVideoMediaRoleOpen={onCustomVideoMediaRoleOpen} />
             </div>
         </>
     );
@@ -782,6 +830,7 @@ async function normalizeLog(log: Partial<GenerationLog>): Promise<GenerationLog>
         time: log.time || new Date().toLocaleString("zh-CN", { hour12: false }),
         model: log.model || config.videoModel || "",
         config,
+        customVideoRuntime: log.customVideoRuntime,
         references,
         videoReferences,
         audioReferences,
@@ -868,6 +917,7 @@ function buildLog({
     references,
     videoReferences,
     audioReferences,
+    customVideoRuntime,
     durationMs,
     status,
     task,
@@ -880,6 +930,7 @@ function buildLog({
     references: ReferenceImage[];
     videoReferences: ReferenceVideo[];
     audioReferences: ReferenceAudio[];
+    customVideoRuntime?: CustomVideoRuntimeSnapshot;
     durationMs: number;
     status: GenerationLog["status"];
     task?: VideoGenerationTask;
@@ -907,6 +958,7 @@ function buildLog({
         references,
         videoReferences,
         audioReferences,
+        customVideoRuntime,
         durationMs,
         size: logConfig.size,
         resolution: logConfig.vquality,
@@ -916,6 +968,25 @@ function buildLog({
         video,
         error,
     };
+}
+
+function customRuntimeGenerationError(config: ReturnType<typeof customVideoConfigForModel>, runtime?: CustomVideoRuntimeSnapshot) {
+    if (!config) return "该模型的自定义视频配置无效，请联系管理员";
+    if (customVideoMediaFeatureNames.some((role) => (runtime?.media[role].length || 0) > config[role].max_count)) return "参考素材数量超过当前模型限制";
+    const normalized = normalizeCustomVideoRuntimeState(config, runtime?.values, runtime?.media);
+    if (config.seconds.enabled && normalized.values.seconds === undefined) return "缺少有效的视频秒数";
+    if (config.dimensions.enabled && !normalized.values.dimension) return "缺少有效的视频尺寸";
+    if (config.reference_images.enabled && config.reference_mode.enabled && !normalized.values.reference_mode) return "缺少有效的参考图模式";
+    return "";
+}
+
+function readDataUrl(file: Blob) {
+    return new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || ""));
+        reader.onerror = () => reject(reader.error || new Error("读取媒体失败"));
+        reader.readAsDataURL(file);
+    });
 }
 
 function buildVideoConfig(config: AiConfig, model: string): AiConfig {

@@ -14,6 +14,7 @@ import { CanvasPromptLibrary } from "./canvas-prompt-library";
 import { CanvasAudioSettingsPopover, type CanvasAudioSettingKey } from "./canvas-audio-settings-popover";
 import { CanvasResourceMentionTextarea } from "./canvas-resource-mention-textarea";
 import { CanvasVideoSettingsPopover } from "./canvas-video-settings-popover";
+import { canvasCustomVideoRuntimeForModel } from "./canvas-custom-video-runtime";
 import { CanvasNodeType, type CanvasGenerationMode, type CanvasNodeData } from "../types";
 import type { CanvasResourceReference } from "../utils/canvas-resource-references";
 
@@ -93,12 +94,20 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                         </>
                     ) : mode === "video" ? (
                         <>
-                            <ModelPicker config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability="video" onMissingConfig={() => openConfigDialog(true)} />
+                            <ModelPicker
+                                config={config}
+                                value={config.model}
+                                onChange={(model) => onConfigChange(node.id, { model, customVideoRuntime: canvasCustomVideoRuntimeForModel(config, model, node.metadata?.customVideoRuntime) })}
+                                capability="video"
+                                onMissingConfig={() => openConfigDialog(true)}
+                            />
                             <CanvasVideoSettingsPopover
                                 config={config}
                                 model={config.model}
                                 buttonClassName="!h-10 !max-w-[170px] !justify-start !rounded-full !px-3"
                                 onConfigChange={(key, value) => onConfigChange(node.id, videoConfigPatch(key, value))}
+                                customVideoRuntime={node.metadata?.customVideoRuntime}
+                                onCustomVideoRuntimeChange={(customVideoRuntime) => onConfigChange(node.id, { customVideoRuntime })}
                             />
                         </>
                     ) : mode === "audio" ? (

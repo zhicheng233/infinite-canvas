@@ -1,4 +1,5 @@
 import apiClient from "./client";
+import type { CustomVideoConfig } from "@/lib/custom-video-config";
 
 /**
  * Redacted channel representation for authenticated users.
@@ -30,7 +31,14 @@ export type ChannelModelInfo = {
     video_route: string;
     video_durations: number[];
     video_customizable: boolean;
+    video_custom_config?: CustomVideoConfig | null;
     sort_order: number;
+};
+
+export type ChannelCatalogItem = {
+    channel_id: number;
+    channel_name: string;
+    models: ChannelModelInfo[];
 };
 
 /**

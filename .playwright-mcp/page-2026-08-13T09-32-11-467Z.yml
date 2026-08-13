@@ -1,0 +1,129 @@
+- generic [active] [ref=f1e1]:
+  - generic [ref=f1e3]:
+    - banner [ref=f1e4]:
+      - generic [ref=f1e5]:
+        - generic [ref=f1e6]:
+          - link [ref=f1e7] [cursor=pointer]:
+            - /url: /
+            - img "Logo" [ref=f1e8]
+          - navigation [ref=f1e9]:
+            - link "我的画布" [ref=f1e10] [cursor=pointer]:
+              - /url: /canvas
+            - link "生图工作台" [ref=f1e17] [cursor=pointer]:
+              - /url: /image
+            - link "视频创作台" [ref=f1e23] [cursor=pointer]:
+              - /url: /video
+            - link "提示词库" [ref=f1e28] [cursor=pointer]:
+              - /url: /prompts
+            - link "我的素材" [ref=f1e33] [cursor=pointer]:
+              - /url: /assets
+            - link "渠道状态" [ref=f1e40] [cursor=pointer]:
+              - /url: /channel-status
+            - button "积分充值" [ref=f1e44]
+        - generic [ref=f1e49]:
+          - button "切换到深色主题" [ref=f1e50]
+          - button "登录" [ref=f1e54]
+    - main [ref=f1e60]:
+      - complementary [ref=f1e61]:
+        - generic [ref=f1e62]:
+          - heading "生成记录" [level=2] [ref=f1e63]
+          - generic [ref=f1e64]: "0"
+        - generic [ref=f1e65]:
+          - button [ref=f1e66]
+          - button [disabled] [ref=f1e69]
+          - button [disabled] [ref=f1e74]
+        - generic [ref=f1e79]: 暂无生成记录
+      - generic [ref=f1e81]:
+        - generic [ref=f1e82]:
+          - heading "视频创作台" [level=1] [ref=f1e84]
+          - generic [ref=f1e85]:
+            - generic [ref=f1e86]:
+              - generic [ref=f1e87]:
+                - generic [ref=f1e88]: 提示词
+                - generic [ref=f1e89]:
+                  - button [ref=f1e90]
+                  - button [ref=f1e94]
+              - textbox "描述镜头运动、主体动作、场景氛围和画面风格" [ref=f1e98]
+            - generic [ref=f1e99]:
+              - generic [ref=f1e100]:
+                - generic [ref=f1e101]: 参考图
+                - generic [ref=f1e102]:
+                  - button [ref=f1e103]
+                  - button [ref=f1e110]
+              - generic [ref=f1e115]: 暂无参考图，最多 9 张
+            - generic [ref=f1e117]:
+              - generic [ref=f1e118]:
+                - generic [ref=f1e119]: 参考视频
+                - button [ref=f1e120]
+              - generic [ref=f1e125]: 暂无参考视频，最多 3 个
+            - generic [ref=f1e127]:
+              - generic [ref=f1e128]:
+                - generic [ref=f1e129]: 参考音频
+                - button [ref=f1e130]
+              - generic [ref=f1e135]: 暂无参考音频，最多 3 个，mp3/wav，单个 15MB 内
+            - generic [ref=f1e137]:
+              - generic [ref=f1e138]:
+                - generic [ref=f1e139]: 模型
+                - generic [ref=f1e140]:
+                  - combobox "模型" [ref=f1e141]:
+                    - generic [ref=f1e142]: 选择渠道
+                  - combobox [ref=f1e143]
+                  - generic [ref=f1e144]:
+                    - combobox "grok-imagine-video" [ref=f1e145]
+                    - combobox [ref=f1e147]
+              - generic [ref=f1e149]:
+                - generic [ref=f1e150]:
+                  - generic [ref=f1e151]: 清晰度
+                  - generic [ref=f1e152]:
+                    - button "720p" [ref=f1e153] [cursor=pointer]
+                    - button "480p" [ref=f1e154] [cursor=pointer]
+                    - generic [ref=f1e155]:
+                      - spinbutton "p" [ref=f1e156]: "720"
+                      - generic [ref=f1e157]: p
+                - generic [ref=f1e158]:
+                  - generic [ref=f1e159]: 尺寸
+                  - generic [ref=f1e160]:
+                    - generic [ref=f1e161]:
+                      - generic [ref=f1e162]: W
+                      - spinbutton "W" [ref=f1e163]: "1280"
+                    - generic [ref=f1e164]: ↔
+                    - generic [ref=f1e165]:
+                      - generic [ref=f1e166]: H
+                      - spinbutton "H" [ref=f1e167]: "720"
+                  - generic [ref=f1e168]:
+                    - button "横屏 1280x720" [ref=f1e169] [cursor=pointer]:
+                      - generic [ref=f1e171]: 横屏
+                      - generic [ref=f1e172]: 1280x720
+                    - button "竖屏 720x1280" [ref=f1e173] [cursor=pointer]:
+                      - generic [ref=f1e175]: 竖屏
+                      - generic [ref=f1e176]: 720x1280
+                    - button "方形 1024x1024" [ref=f1e177] [cursor=pointer]:
+                      - generic [ref=f1e179]: 方形
+                      - generic [ref=f1e180]: 1024x1024
+                    - button "宽屏 1792x1024" [ref=f1e181] [cursor=pointer]:
+                      - generic [ref=f1e183]: 宽屏
+                      - generic [ref=f1e184]: 1792x1024
+                    - button "长图 1024x1792" [ref=f1e185] [cursor=pointer]:
+                      - generic [ref=f1e187]: 长图
+                      - generic [ref=f1e188]: 1024x1792
+                    - button "auto" [ref=f1e189] [cursor=pointer]
+                - generic [ref=f1e191]:
+                  - generic [ref=f1e192]: 秒数
+                  - generic [ref=f1e193]:
+                    - button "6s" [ref=f1e194] [cursor=pointer]
+                    - button "10s" [ref=f1e195] [cursor=pointer]
+                    - button "12s" [ref=f1e196] [cursor=pointer]
+                    - button "16s" [ref=f1e197] [cursor=pointer]
+                    - button "20s" [ref=f1e198] [cursor=pointer]
+                    - spinbutton [ref=f1e199]: "6"
+          - generic [ref=f1e200]:
+            - button [disabled] [ref=f1e201]
+            - generic [ref=f1e206]:
+              - generic [ref=f1e207]: 正在预估本次扣费
+              - generic [ref=f1e211]: 正在读取计费配置
+        - generic [ref=f1e212]:
+          - heading "生成结果" [level=2] [ref=f1e214]
+          - generic [ref=f1e219]:
+            - img "暂无数据" [ref=f1e221]
+            - generic [ref=f1e227]: 还没有生成视频
+  - button "Open Next.js Dev Tools" [ref=f1e233] [cursor=pointer]

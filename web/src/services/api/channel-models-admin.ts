@@ -1,4 +1,5 @@
 import apiClient from "./client";
+import { normalizeCustomVideoConfig, type CustomVideoConfig } from "@/lib/custom-video-config";
 import type { ChannelModelInfo } from "./channel";
 
 /**
@@ -19,9 +20,20 @@ export type UpdateChannelModelInput = {
     video_route?: string;
     video_durations?: number[];
     video_customizable?: boolean;
+    video_custom_config?: CustomVideoConfig | null;
     sort_order?: number;
     capabilities?: string[];
 };
+
+export function normalizeChannelModelUpdateInput(input: UpdateChannelModelInput): UpdateChannelModelInput {
+    const videoRoute = input.video_route?.trim();
+    const { video_custom_config: _customConfig, ...metadata } = input;
+    if (videoRoute === undefined) return metadata;
+    if (videoRoute !== "custom") return { ...metadata, video_route: videoRoute, video_custom_config: null };
+    const videoCustomConfig = normalizeCustomVideoConfig(input.video_custom_config);
+    if (!videoCustomConfig) throw new Error("video_custom_config 无效");
+    return { ...metadata, video_route: videoRoute, video_custom_config: videoCustomConfig };
+}
 
 /**
  * SuperAdmin: Synchronize channel models from upstream /models endpoint.
@@ -45,7 +57,7 @@ export async function listChannelModelsAdmin(channelId: number): Promise<Channel
  * SuperAdmin: Update a single channel model's metadata and enabled state.
  */
 export async function updateChannelModel(channelId: number, modelId: number, input: UpdateChannelModelInput): Promise<ChannelModelInfo> {
-    const res = await apiClient.put(`/admin/channels/${channelId}/models/${modelId}`, input);
+    const res = await apiClient.put(`/admin/channels/${channelId}/models/${modelId}`, normalizeChannelModelUpdateInput(input));
     return res.data.data;
 }
 

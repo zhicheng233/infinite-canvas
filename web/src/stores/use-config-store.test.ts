@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { enabledCustomVideoFeatures, normalizeCustomVideoConfig, summarizeCustomVideoConfig, type CustomVideoConfig } from "@/lib/custom-video-config";
+import { normalizeChannelModelUpdateInput } from "@/services/api/channel-models-admin";
 import {
     buildChannelModelOptions,
     buildProxyApiUrl,
@@ -9,12 +11,35 @@ import {
     hasUsableAutoChannel,
     modelOptionName,
     persistedConfigState,
+    customVideoConfigForModel,
     resolveModelRequestConfig,
     selectedChannelId,
     selectedChannelIdentityForModel,
     useConfigStore,
     videoRouteForModel,
 } from "./use-config-store";
+
+const validCustomVideoConfig: CustomVideoConfig = {
+    seconds: { enabled: true, key: " seconds ", mode: "range", min: 3, max: 10, step: 1, default: 6 },
+    dimensions: { enabled: true, mode: "size", key: " size ", options: ["720x1280", "1280x720", "1280x720"], default: "1280x720" },
+    images: { enabled: true, key: "images", max_count: 1 },
+    input_reference: { enabled: false, key: "input_reference", max_count: 1 },
+    style_references: { enabled: true, key: "style_references", max_count: 4 },
+    element_references: { enabled: true, key: "element_references", max_count: 3 },
+    reference_images: { enabled: true, key: "reference_images", max_count: 1 },
+    reference_mode: { enabled: true, key: "reference_mode", options: ["element", "frame", "style", "style"], default: "element" },
+    input_video: { enabled: true, key: "input_video", max_count: 1 },
+    audio: { enabled: false, key: "audio", mode: "fixed", value: false },
+    n: { enabled: true, key: "n", value: 1 },
+};
+
+test("custom config helpers expose normalized capabilities and summary metadata", () => {
+    const config = normalizeCustomVideoConfig(validCustomVideoConfig);
+    expect(config).not.toBeNull();
+    if (!config) return;
+    expect(enabledCustomVideoFeatures(config)).toEqual(["seconds", "dimensions", "images", "style_references", "element_references", "reference_images", "reference_mode", "input_video", "n"]);
+    expect(summarizeCustomVideoConfig(config)).toMatchObject({ aliases: { seconds: "seconds", dimensions: "size" }, media_limits: { images: 1, style_references: 4 }, n: 1 });
+});
 
 const channels = [
     { id: 1, name: "A", enabled: true, sync_status: "success" },
@@ -160,14 +185,16 @@ test("Auto video inherits the highest-success candidate route and duration metad
 
 test("Binghuo channel standard overrides direct, merge, and Auto video routes", () => {
     const binghuoChannels = [{ ...channels[0], video_api_standard: "binghuo" as const }, channels[1]];
-    const videoModels = { 1: [{ ...models[1][0], id: 41, model_name: "video-model", capabilities: ["video"], video_route: "seedance" }] };
+    const videoModels = { 1: [{ ...models[1][0], id: 41, model_name: "video-model", capabilities: ["video"], video_route: "custom", video_custom_config: validCustomVideoConfig }] };
     const prices = [{ model: "video-model", credits_per_unit: 1, unit_type: "per_video" }];
     const auto = { model: "video-model", channels: [{ channel_id: 1, channel_model_id: 41, channel_name: "A", success_rate: 100 }] };
     useConfigStore.getState().applyServerChannelCatalog(binghuoChannels, videoModels);
     const direct = buildChannelModelOptions(useConfigStore.getState().serverChannels, videoModels, prices, null, "video", 1, [auto]);
     const automatic = buildChannelModelOptions(useConfigStore.getState().serverChannels, videoModels, prices, null, "video", 0, [auto]);
     expect(direct[0].videoRoute).toBe("binghuo");
+    expect(direct[0].videoCustomConfig).toBeNull();
     expect(automatic[0].videoRoute).toBe("binghuo");
+    expect(automatic[0].videoCustomConfig).toBeNull();
     expect(videoRouteForModel(defaultConfig, "merge://1::video-group")).toBe("binghuo");
 });
 
@@ -208,6 +235,112 @@ test("default-standard merge video models inherit the physical yijia route", () 
     expect(config.modelVideoDurations[mergeValue]).toEqual([6]);
     expect(config.modelVideoCustomizable[mergeValue]).toBe(true);
     expect(videoRouteForModel(config, mergeValue)).toBe("yijia");
+});
+
+test("custom physical and merge video models resolve the same normalized catalog config", () => {
+    const adminUpdate = normalizeChannelModelUpdateInput({ video_route: " custom ", video_custom_config: validCustomVideoConfig });
+    if (!adminUpdate.video_custom_config) throw new Error("expected normalized admin custom config");
+    const videoModels = {
+        1: [
+            {
+                ...models[1][0],
+                id: 61,
+                model_name: "omni_custom_v1",
+                capabilities: ["video"],
+                video_route: adminUpdate.video_route,
+                video_custom_config: adminUpdate.video_custom_config,
+            },
+        ],
+    };
+    const videoPricing = [{ model: "omni_custom_v1", credits_per_unit: 1, unit_type: "per_video" }];
+    const mergeGroup = { id: 2, channel_id: 1, group_name: "omni_custom", pattern: "omni_custom", enabled: true, created_at: "", updated_at: "" };
+    const physicalValue = "1::61::omni_custom_v1";
+    const mergeValue = "merge://1::omni_custom";
+
+    useConfigStore.setState({ config: { ...defaultConfig, videoChannelId: 1, videoModel: physicalValue, videoModels: [physicalValue] }, serverMergeGroups: {} });
+    useConfigStore.getState().applyServerChannelCatalog(channels, videoModels);
+    useConfigStore.getState().applyServerOptionMetadata(videoPricing, null);
+    useConfigStore.getState().applyServerMergeGroups(1, [mergeGroup]);
+
+    const config = useConfigStore.getState().config;
+    const expected = adminUpdate.video_custom_config;
+    expect(expected).not.toBeNull();
+    expect(videoRouteForModel(config, physicalValue)).toBe("custom");
+    expect(videoRouteForModel(config, mergeValue)).toBe("custom");
+    expect(customVideoConfigForModel(config, physicalValue)).toEqual(expected);
+    expect(customVideoConfigForModel(config, mergeValue)).toEqual(expected);
+    expect(customVideoConfigForModel(resolveModelRequestConfig(config, physicalValue), physicalValue)).toEqual(expected);
+    expect(customVideoConfigForModel(resolveModelRequestConfig(config, mergeValue), mergeValue)).toEqual(expected);
+    expect(config.modelCustomVideoConfigs[physicalValue]).toEqual(expected);
+    expect(config.modelCustomVideoConfigs[mergeValue]).toEqual(expected);
+    expect(expected?.seconds).toMatchObject({ key: "seconds", mode: "range" });
+    expect(expected?.dimensions.options).toEqual(["1280x720", "720x1280"]);
+    expect(expected?.reference_mode.options).toEqual(["frame", "style", "element"]);
+});
+
+test("channel model update payload normalizes custom config and clears every non-custom route", () => {
+    const custom = normalizeChannelModelUpdateInput({ video_route: " custom ", video_custom_config: validCustomVideoConfig });
+    expect(custom.video_route).toBe("custom");
+    expect(custom.video_custom_config).toEqual(normalizeCustomVideoConfig(validCustomVideoConfig));
+
+    const openai = normalizeChannelModelUpdateInput({ video_route: " openai ", video_custom_config: validCustomVideoConfig });
+    expect(openai).toEqual({ video_route: "openai", video_custom_config: null });
+
+    const metadataOnly = normalizeChannelModelUpdateInput({ sort_order: 3, video_custom_config: validCustomVideoConfig });
+    expect(metadataOnly).toEqual({ sort_order: 3 });
+    expect(() => normalizeChannelModelUpdateInput({ video_route: "custom", video_custom_config: null })).toThrow("video_custom_config");
+});
+
+test("catalog refresh clears custom config when the same channel model changes route", () => {
+    const customModel = {
+        ...models[1][0],
+        id: 81,
+        model_name: "route-switch-video",
+        capabilities: ["video"],
+        video_route: "custom",
+        video_custom_config: validCustomVideoConfig,
+    };
+    const value = "1::81::route-switch-video";
+    useConfigStore.setState({ config: { ...defaultConfig, videoChannelId: 1, videoModel: value, videoModels: [value] }, serverMergeGroups: {} });
+
+    useConfigStore.getState().applyServerChannelCatalog(channels, { 1: [customModel] });
+    expect(customVideoConfigForModel(useConfigStore.getState().config, value)).toEqual(normalizeCustomVideoConfig(validCustomVideoConfig));
+
+    useConfigStore.getState().applyServerChannelCatalog(channels, { 1: [{ ...customModel, video_route: "openai", video_custom_config: null }] });
+    expect(videoRouteForModel(useConfigStore.getState().config, value)).toBe("openai");
+    expect(customVideoConfigForModel(useConfigStore.getState().config, value)).toBeNull();
+    expect(useConfigStore.getState().config.modelCustomVideoConfigs).not.toHaveProperty(value);
+
+    const { video_custom_config: _removed, ...syncedModel } = customModel;
+    useConfigStore.getState().applyServerChannelCatalog(channels, { 1: [{ ...syncedModel, video_route: "auto" }] });
+    expect(customVideoConfigForModel(useConfigStore.getState().config, value)).toBeNull();
+});
+
+test("invalid custom catalog configs are dropped without breaking catalog hydration", () => {
+    const duplicateAlias = { ...validCustomVideoConfig, dimensions: { ...validCustomVideoConfig.dimensions, key: " seconds " } };
+    const emptyDimensions = { ...validCustomVideoConfig, dimensions: { ...validCustomVideoConfig.dimensions, options: [] } };
+    const videoModels = {
+        1: [
+            { ...models[1][0], id: 71, model_name: "invalid-duplicate-video", capabilities: ["video"], video_route: "custom", video_custom_config: duplicateAlias },
+            { ...models[1][0], id: 72, model_name: "invalid-empty-video", capabilities: ["video"], video_route: "custom", video_custom_config: emptyDimensions },
+        ],
+    };
+    const videoPricing = [
+        { model: "invalid-duplicate-video", credits_per_unit: 1, unit_type: "per_video" },
+        { model: "invalid-empty-video", credits_per_unit: 1, unit_type: "per_video" },
+    ];
+
+    useConfigStore.setState({ config: { ...defaultConfig, videoChannelId: 1 }, serverMergeGroups: {} });
+    const requestId = useConfigStore.getState().beginServerCatalogRefresh();
+    expect(() => useConfigStore.getState().applyServerCatalogSnapshot(requestId, { channels, channelModels: videoModels, autoChannelModels: [], pricing: videoPricing, metrics: null })).not.toThrow();
+
+    const config = useConfigStore.getState().config;
+    for (const value of ["1::71::invalid-duplicate-video", "1::72::invalid-empty-video"]) {
+        expect(videoRouteForModel(config, value)).toBe("custom");
+        expect(customVideoConfigForModel(config, value)).toBeNull();
+        expect(config.modelCustomVideoConfigs).not.toHaveProperty(value);
+    }
+    expect(useConfigStore.getState().serverCatalogLoading).toBe(false);
 });
 
 test("Auto visibility follows usable priced options rather than physical channel count", () => {
@@ -362,11 +495,15 @@ test("rates sort descending with numeric zero before unavailable metrics", () =>
 });
 
 test("persisted state excludes catalogs, identity, and API keys", () => {
-    const state = persistedConfigState({ config: { ...defaultConfig, apiKey: "secret", baseUrl: "https://secret", channelModelId: 22 } as typeof defaultConfig & Record<string, unknown>, webdav: {} as never });
+    const state = persistedConfigState({
+        config: { ...defaultConfig, apiKey: "secret", baseUrl: "https://secret", channelModelId: 22, modelCustomVideoConfigs: { "1::61::omni_custom_v1": validCustomVideoConfig } } as typeof defaultConfig & Record<string, unknown>,
+        webdav: {} as never,
+    });
     expect(state.config).not.toHaveProperty("apiKey");
     expect(state.config).not.toHaveProperty("baseUrl");
     expect(state.config).not.toHaveProperty("channelModelId");
     expect(state.config).not.toHaveProperty("models");
+    expect(state.config).not.toHaveProperty("modelCustomVideoConfigs");
 });
 
 test("authenticated stale identity fails closed and valid request includes both IDs", () => {

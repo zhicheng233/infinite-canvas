@@ -1,4 +1,5 @@
 import apiClient from "./client";
+import type { ChannelCatalogItem } from "./channel";
 import type { PricingItem } from "./pricing";
 
 export type ApiConfigInfo = {
@@ -28,7 +29,7 @@ export type ApiModelCatalog = {
     model_routes?: Record<string, string>;
     model_video_durations?: Record<string, number[]>;
     model_video_customizable?: Record<string, boolean>;
-    channels?: Array<{ channel_id: number; channel_name: string }>;
+    channels?: ChannelCatalogItem[];
 };
 
 export type ApiModelTestInput = {

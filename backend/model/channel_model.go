@@ -20,6 +20,7 @@ type ChannelModel struct {
 	VideoRoute         string `gorm:"size:30" json:"video_route"`
 	VideoDurations     string `gorm:"size:200" json:"video_durations"`
 	VideoCustomizable  bool   `gorm:"default:false" json:"video_customizable"`
+	VideoCustomConfig  string `gorm:"type:text" json:"video_custom_config"`
 	SortOrder          int    `gorm:"default:0" json:"sort_order"`
 }
 

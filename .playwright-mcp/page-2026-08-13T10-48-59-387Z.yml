@@ -1,0 +1,50 @@
+- generic [active] [ref=f3e1]:
+  - generic [ref=f3e80] [cursor=pointer]:
+    - button "Open Next.js Dev Tools" [ref=f3e81]
+    - generic [ref=f3e85]:
+      - button "Open issues overlay" [ref=f3e86]:
+        - generic [ref=f3e87]:
+          - generic [ref=f3e88]: "1"
+          - generic [ref=f3e89]: "2"
+        - generic [ref=f3e90]:
+          - text: Issue
+          - generic [ref=f3e91]: s
+      - button "Collapse issues badge" [ref=f3e92]
+  - main [ref=f3e210]:
+    - generic [ref=f3e211]:
+      - generic:
+        - generic [ref=f3e212]:
+          - button "打开画布菜单" [ref=f3e213]
+          - generic [ref=f3e215]:
+            - button "无限画布 1" [ref=f3e216]
+            - generic [ref=f3e217]: 保存中
+        - generic [ref=f3e218]:
+          - generic [ref=f3e219]:
+            - link "0" [ref=f3e220] [cursor=pointer]:
+              - /url: /credits
+            - button "配置" [ref=f3e224]
+            - button "切换到深色主题" [ref=f3e228]
+            - button "快捷键" [ref=f3e232]
+            - button "用户菜单" [ref=f3e235]:
+              - generic [ref=f3e236]: 系统管理员
+          - button "Agent" [ref=f3e240] [cursor=pointer]
+      - generic [ref=f3e247]:
+        - button "移动/选择" [ref=f3e248] [cursor=pointer]
+        - button "撤销" [disabled] [ref=f3e255]
+        - button "重做" [disabled] [ref=f3e256]
+        - button "文本" [ref=f3e258] [cursor=pointer]
+        - button "图片" [ref=f3e262] [cursor=pointer]
+        - button "视频" [ref=f3e268] [cursor=pointer]
+        - button "音频" [ref=f3e273] [cursor=pointer]
+        - button "生成配置" [ref=f3e278] [cursor=pointer]
+        - button "上传素材" [ref=f3e283] [cursor=pointer]
+        - button "我的素材" [ref=f3e289] [cursor=pointer]
+        - button "画布外观" [ref=f3e293] [cursor=pointer]
+        - button "清空画布" [ref=f3e302] [cursor=pointer]
+      - generic [ref=f3e308]:
+        - button "打开小地图" [ref=f3e309] [cursor=pointer]
+        - button "重置视图" [ref=f3e314] [cursor=pointer]
+        - slider "放大/缩小画布" [ref=f3e322]: "100"
+        - generic [ref=f3e323]: 100%
+        - button "快捷键" [ref=f3e324] [cursor=pointer]
+  - alert [ref=f3e209]

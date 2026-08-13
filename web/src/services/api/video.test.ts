@@ -1,6 +1,8 @@
 import axios from "axios";
 import { afterEach, beforeEach, describe, expect, it, jest } from "bun:test";
 
+import type { CustomVideoConfig } from "@/lib/custom-video-config";
+import { createEmptyCustomVideoMediaState, type CustomVideoRuntimeSnapshot } from "@/lib/custom-video-runtime";
 import { defaultConfig, useConfigStore } from "@/stores/use-config-store";
 import { createVideoGenerationTask, pollVideoGenerationTask } from "./video";
 
@@ -37,6 +39,32 @@ function videoConfig(route: string) {
     };
 }
 
+function customVideoConfig(overrides: Partial<CustomVideoConfig> = {}) {
+    const model = "0::0::video-model";
+    const customConfig: CustomVideoConfig = {
+        seconds: { enabled: true, key: "duration", mode: "range", min: 3, max: 10, step: 1, default: 6 },
+        dimensions: { enabled: true, mode: "size", key: "resolution", options: ["1280x720", "720x1280"], default: "1280x720" },
+        images: { enabled: true, key: "image", max_count: 1 },
+        input_reference: { enabled: true, key: "firstFrame", max_count: 1 },
+        style_references: { enabled: true, key: "styleReferences", max_count: 4 },
+        element_references: { enabled: true, key: "elementReferences", max_count: 3 },
+        reference_images: { enabled: true, key: "referenceImages", max_count: 4 },
+        reference_mode: { enabled: true, key: "referenceMode", options: ["frame", "style", "element"], default: "element" },
+        input_video: { enabled: true, key: "sourceVideo", max_count: 1 },
+        audio: { enabled: true, key: "generateAudio", mode: "user", value: false },
+        n: { enabled: true, key: "count", value: 1 },
+        ...overrides,
+    };
+    return {
+        ...videoConfig("custom"),
+        modelCustomVideoConfigs: { [model]: customConfig },
+    };
+}
+
+function customRuntime(values: CustomVideoRuntimeSnapshot["values"] = {}, media: Partial<CustomVideoRuntimeSnapshot["media"]> = {}): CustomVideoRuntimeSnapshot {
+    return { values, media: { ...createEmptyCustomVideoMediaState(), ...media } };
+}
+
 beforeEach(() => {
     const localStorage = memoryStorage();
     localStorage.setItem("infinite-canvas:auth_token", "token");
@@ -59,6 +87,125 @@ afterEach(() => {
         if (descriptor) Object.defineProperty(globalThis, key, descriptor);
         else Reflect.deleteProperty(globalThis, key);
     }
+});
+
+describe("custom OpenAI video serialization", () => {
+    it("sends only enabled aliases with single and multi-value media", async () => {
+        const post = jest.spyOn(axios, "post").mockResolvedValue({ data: { task_id: "task_custom" }, headers: {} });
+        const runtime = customRuntime(
+            { seconds: 8, dimension: "720x1280", reference_mode: "style", audio: true },
+            {
+                images: ["https://media.example.com/image.png"],
+                input_reference: ["https://media.example.com/first.png"],
+                style_references: ["https://media.example.com/style-1.png", "https://media.example.com/style-2.png"],
+                reference_images: ["https://media.example.com/reference.png"],
+                input_video: ["https://media.example.com/source.mp4"],
+            },
+        );
+
+        const task = await createVideoGenerationTask(customVideoConfig(), "test prompt", [], [], [], { customVideoRuntime: runtime });
+
+        const [requestUrl, body, requestConfig] = post.mock.calls[0];
+        const url = new URL(String(requestUrl));
+        expect(url.searchParams.get("path")).toBe("/videos");
+        expect(url.searchParams.get("routing_video_route")).toBe("custom");
+        expect(requestConfig?.headers).toEqual({ Authorization: "Bearer token", "Content-Type": "application/json" });
+        expect(body).toEqual({
+            model: "video-model",
+            prompt: "test prompt",
+            duration: 8,
+            resolution: "720x1280",
+            image: "https://media.example.com/image.png",
+            firstFrame: "https://media.example.com/first.png",
+            styleReferences: ["https://media.example.com/style-1.png", "https://media.example.com/style-2.png"],
+            referenceImages: "https://media.example.com/reference.png",
+            referenceMode: "style",
+            sourceVideo: "https://media.example.com/source.mp4",
+            generateAudio: true,
+            count: 1,
+        });
+        for (const canonical of ["seconds", "size", "aspect_ratio", "images", "input_reference", "style_references", "reference_images", "reference_mode", "input_video", "audio", "n"]) expect(body).not.toHaveProperty(canonical);
+        expect(task).toEqual({ id: "task_custom", provider: "openai", model: "0::0::video-model" });
+    });
+
+    it("omits disabled and empty values and emits only the configured dimension mode", async () => {
+        const post = jest.spyOn(axios, "post").mockResolvedValue({ data: { id: "task_ratio" }, headers: {} });
+        const config = customVideoConfig({
+            seconds: { enabled: false, key: "duration", mode: "range", min: 3, max: 10, step: 1, default: 6 },
+            dimensions: { enabled: true, mode: "aspect_ratio", key: "ratio", options: ["16:9", "9:16"], default: "16:9" },
+            images: { enabled: false, key: "image", max_count: 1 },
+            reference_mode: { enabled: false, key: "referenceMode", options: [], default: "" },
+            audio: { enabled: false, key: "generateAudio", mode: "fixed", value: true },
+            n: { enabled: false, key: "count", value: 1 },
+        });
+
+        await createVideoGenerationTask(config, "test prompt", [], [], [], {
+            customVideoRuntime: customRuntime({ dimension: "9:16" }, { style_references: [], element_references: [""], reference_images: [] }),
+        });
+
+        expect(post.mock.calls[0][1]).toEqual({ model: "video-model", prompt: "test prompt", ratio: "9:16" });
+        expect(post.mock.calls[0][1]).not.toHaveProperty("size");
+        expect(post.mock.calls[0][1]).not.toHaveProperty("aspect_ratio");
+    });
+
+    it("sends fixed audio and n values but omits reference mode without reference images", async () => {
+        const post = jest.spyOn(axios, "post").mockResolvedValue({ data: { id: "task_fixed" }, headers: {} });
+        const config = customVideoConfig({ audio: { enabled: true, key: "sound", mode: "fixed", value: true }, n: { enabled: true, key: "outputs", value: 2 } });
+
+        await createVideoGenerationTask(config, "test prompt", [], [], [], {
+            customVideoRuntime: customRuntime({ seconds: 6, dimension: "1280x720", reference_mode: "frame", audio: false }),
+        });
+
+        expect(post.mock.calls[0][1]).toMatchObject({ sound: true, outputs: 2 });
+        expect(post.mock.calls[0][1]).not.toHaveProperty("referenceMode");
+    });
+
+    it("rejects invalid config and runtime states before any network request", async () => {
+        const post = jest.spyOn(axios, "post").mockResolvedValue({ data: { id: "unexpected" }, headers: {} });
+        await expect(createVideoGenerationTask(videoConfig("custom"), "test prompt", [], [], [], { customVideoRuntime: customRuntime() })).rejects.toThrow("配置无效");
+        await expect(createVideoGenerationTask(customVideoConfig(), "test prompt")).rejects.toThrow("运行参数缺失");
+        const cases = [
+            {
+                config: customVideoConfig({ dimensions: { enabled: true, mode: "size", key: "duration", options: ["1280x720"], default: "1280x720" } }),
+                runtime: customRuntime({ seconds: 6, dimension: "1280x720" }),
+                error: "重复",
+            },
+            { config: customVideoConfig(), runtime: customRuntime({ seconds: 11, dimension: "1280x720" }), error: "seconds" },
+            { config: customVideoConfig(), runtime: customRuntime({ seconds: 6, dimension: "640x640" }), error: "dimensions" },
+            {
+                config: customVideoConfig(),
+                runtime: customRuntime(
+                    { seconds: 6, dimension: "1280x720" },
+                    { style_references: ["https://media.example.com/1.png", "https://media.example.com/2.png", "https://media.example.com/3.png", "https://media.example.com/4.png", "https://media.example.com/5.png"] },
+                ),
+                error: "style_references",
+            },
+            {
+                config: customVideoConfig(),
+                runtime: customRuntime({ seconds: 6, dimension: "1280x720" }, { images: ["not-a-media-url"] }),
+                error: "素材地址无效",
+            },
+        ];
+
+        for (const item of cases) {
+            await expect(createVideoGenerationTask(item.config, "test prompt", [], [], [], { customVideoRuntime: item.runtime })).rejects.toThrow(item.error);
+        }
+        expect(post).not.toHaveBeenCalled();
+    });
+
+    it("polls custom-created tasks through the OpenAI videos endpoint", async () => {
+        jest.spyOn(axios, "post").mockResolvedValue({ data: { task_id: "task_poll" }, headers: {} });
+        const get = jest.spyOn(axios, "get").mockResolvedValue({ data: { status: "processing" }, headers: {} });
+        const config = customVideoConfig();
+        const task = await createVideoGenerationTask(config, "test prompt", [], [], [], {
+            customVideoRuntime: customRuntime({ seconds: 6, dimension: "1280x720" }),
+        });
+
+        const state = await pollVideoGenerationTask(config, task);
+
+        expect(state).toEqual({ status: "pending" });
+        expect(new URL(String(get.mock.calls[0][0])).searchParams.get("path")).toBe("/videos/task_poll");
+    });
 });
 
 describe("video aspect ratio routing", () => {
@@ -198,7 +345,7 @@ describe("video aspect ratio routing", () => {
         expect(headers["Content-Type"]).toBe("application/json");
         expect(typeof (body as { get?: unknown }).get).toBe("undefined");
         expect(body).toEqual({ model: "omni_flash", prompt: "生成视频", input_reference: "", size: "720x1280" });
-        expect(body).not.toHaveProperty("input_reference[]");
+        expect(Object.hasOwn(body as object, "input_reference[]")).toBe(false);
         expect(body).not.toHaveProperty("resolution_name");
         expect(body).not.toHaveProperty("preset");
     });
