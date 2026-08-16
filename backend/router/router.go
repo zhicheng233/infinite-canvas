@@ -77,6 +77,7 @@ func Setup(r *gin.Engine, authService *service.AuthService, authHandler *handler
 			admin.POST("/credits/pricing", creditHandler.SavePricing)
 			admin.DELETE("/credits/pricing/:id", creditHandler.DeletePricing)
 			admin.POST("/credits/recharge", creditHandler.Recharge)
+			admin.POST("/credits/adjust", adminHandler.AdjustTenantCredits)
 			admin.GET("/recharges", adminHandler.ListRecharges)
 			admin.GET("/stats", adminHandler.GetStats)
 			admin.GET("/users-with-balance", adminHandler.GetUsersWithBalance)

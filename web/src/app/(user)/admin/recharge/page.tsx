@@ -3,11 +3,12 @@
 import { useEffect, useState, useCallback } from "react";
 import { Table, Button, Modal, Form, InputNumber, Input, Typography, App, Tag } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import { CreditCard, Zap } from "lucide-react";
+import { Minus, Plus, Zap } from "lucide-react";
 import { listUsersWithBalance, type UserWithBalance } from "@/services/api/admin";
-import { rechargeCredits } from "@/services/api/pricing";
+import { adjustCredits } from "@/services/api/pricing";
 
 const { Title } = Typography;
+type AdjustMode = "add" | "deduct";
 
 export default function AdminRechargePage() {
     const { message } = App.useApp();
@@ -15,6 +16,7 @@ export default function AdminRechargePage() {
     const [loading, setLoading] = useState(false);
     const [modalOpen, setModalOpen] = useState(false);
     const [selectedUser, setSelectedUser] = useState<UserWithBalance | null>(null);
+    const [adjustMode, setAdjustMode] = useState<AdjustMode>("add");
     const [saving, setSaving] = useState(false);
     const [pagination, setPagination] = useState({ current: 1, pageSize: 20, total: 0 });
     const [form] = Form.useForm();
@@ -39,22 +41,24 @@ export default function AdminRechargePage() {
         fetchUsers();
     }, [fetchUsers]);
 
-    const openRecharge = (user: UserWithBalance) => {
+    const openAdjust = (user: UserWithBalance, mode: AdjustMode) => {
         setSelectedUser(user);
+        setAdjustMode(mode);
         form.resetFields();
         setModalOpen(true);
     };
 
-    const handleRecharge = async () => {
+    const handleAdjust = async () => {
         try {
             const values = await form.validateFields();
             setSaving(true);
-            const result = await rechargeCredits({
+            const amount = Number(values.amount) || 0;
+            const result = await adjustCredits({
                 user_id: selectedUser!.id,
-                amount: values.amount,
+                amount: adjustMode === "deduct" ? -amount : amount,
                 note: values.note,
             });
-            message.success(`充值成功！用户 ${selectedUser!.username} 当前余额：${result.balance} 积分`);
+            message.success(`${adjustMode === "deduct" ? "扣减" : "增加"}成功！用户 ${selectedUser!.username} 当前余额：${result.balance} 积分`);
             setModalOpen(false);
             fetchUsers(pagination.current, pagination.pageSize);
         } catch (err: any) {
@@ -90,19 +94,27 @@ export default function AdminRechargePage() {
         {
             title: "操作",
             key: "actions",
-            width: 100,
+            width: 160,
             render: (_, record) => (
-                <Button type="primary" size="small" icon={<CreditCard className="size-3" />} onClick={() => openRecharge(record)}>
-                    充值
-                </Button>
+                <div className="flex items-center gap-2">
+                    <Button type="primary" size="small" icon={<Plus className="size-3" />} onClick={() => openAdjust(record, "add")}>
+                        增加
+                    </Button>
+                    <Button danger size="small" icon={<Minus className="size-3" />} onClick={() => openAdjust(record, "deduct")} disabled={record.balance <= 0}>
+                        扣减
+                    </Button>
+                </div>
             ),
         },
     ];
 
+    const modalActionText = adjustMode === "deduct" ? "扣减" : "增加";
+    const currentBalance = selectedUser?.balance ?? 0;
+
     return (
         <div>
             <Title level={4} className="!mb-4">
-                积分充值
+                积分管理
             </Title>
             <Table
                 rowKey="id"
@@ -117,13 +129,13 @@ export default function AdminRechargePage() {
                 }}
             />
 
-            <Modal title={`为 ${selectedUser?.username} 充值积分（当前余额：${selectedUser?.balance ?? 0}）`} open={modalOpen} onCancel={() => setModalOpen(false)} onOk={handleRecharge} confirmLoading={saving} destroyOnClose>
+            <Modal title={`为 ${selectedUser?.username} ${modalActionText}积分（当前余额：${currentBalance}）`} open={modalOpen} onCancel={() => setModalOpen(false)} onOk={handleAdjust} confirmLoading={saving} destroyOnClose okText={modalActionText}>
                 <Form form={form} layout="vertical" className="mt-4">
-                    <Form.Item name="amount" label="充值积分" rules={[{ required: true, message: "请输入充值积分" }]}>
-                        <InputNumber min={1} className="w-full" placeholder="例如: 1000" />
+                    <Form.Item name="amount" label={`${modalActionText}积分`} rules={[{ required: true, message: `请输入${modalActionText}积分` }]}>
+                        <InputNumber min={1} max={adjustMode === "deduct" ? currentBalance : undefined} className="w-full" placeholder={adjustMode === "deduct" ? `最多可扣减 ${currentBalance}` : "例如: 1000"} />
                     </Form.Item>
                     <Form.Item name="note" label="备注">
-                        <Input.TextArea rows={2} placeholder="充值说明（可选）" />
+                        <Input.TextArea rows={2} placeholder={`${modalActionText}说明（可选）`} />
                     </Form.Item>
                 </Form>
             </Modal>

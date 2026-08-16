@@ -52,6 +52,14 @@ type AdjustCreditsInput struct {
 }
 
 func (h *AdminHandler) AdjustCredits(c *gin.Context) {
+	h.adjustCredits(c, false)
+}
+
+func (h *AdminHandler) AdjustTenantCredits(c *gin.Context) {
+	h.adjustCredits(c, true)
+}
+
+func (h *AdminHandler) adjustCredits(c *gin.Context, requireSameTenant bool) {
 	claims := c.MustGet("claims").(*service.Claims)
 	var input AdjustCreditsInput
 	if err := c.ShouldBindJSON(&input); err != nil {
@@ -60,6 +68,15 @@ func (h *AdminHandler) AdjustCredits(c *gin.Context) {
 	}
 	if input.Amount == 0 {
 		model.Fail(c, 400, "金额不能为零")
+		return
+	}
+	targetUser, err := h.userRepo.FindByID(input.UserID)
+	if err != nil {
+		model.Fail(c, 404, "用户不存在")
+		return
+	}
+	if requireSameTenant && targetUser.TenantID != claims.TenantID {
+		model.Fail(c, 403, "不能调整其它租户用户积分")
 		return
 	}
 	note := input.Note
@@ -72,6 +89,10 @@ func (h *AdminHandler) AdjustCredits(c *gin.Context) {
 		"target_user_id":   input.UserID,
 		"adjustment":       input.Amount,
 	})
+	if _, err := h.creditService.GetOrCreateAccount(targetUser.TenantID, input.UserID); err != nil {
+		model.Fail(c, 500, err.Error())
+		return
+	}
 	if input.Amount > 0 {
 		if err := h.creditService.EarnWithMetadata(input.UserID, input.Amount, "adjust", "", note, metadata); err != nil {
 			model.Fail(c, 500, err.Error())
@@ -83,7 +104,23 @@ func (h *AdminHandler) AdjustCredits(c *gin.Context) {
 			return
 		}
 	}
-	model.OK(c, gin.H{"adjusted": true})
+	account, _ := h.creditService.GetOrCreateAccount(targetUser.TenantID, input.UserID)
+	balance := 0
+	if account != nil {
+		balance = account.Balance
+	}
+	message := "积分调整成功"
+	if input.Amount > 0 {
+		message = "积分增加成功"
+	} else {
+		message = "积分扣减成功"
+	}
+	model.OK(c, gin.H{
+		"user_id": input.UserID,
+		"amount":  input.Amount,
+		"balance": balance,
+		"message": message,
+	})
 }
 
 type RechargeInput struct {

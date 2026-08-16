@@ -59,6 +59,11 @@ export async function rechargeCredits(input: { user_id: number; amount: number; 
     return res.data.data as RechargeResult;
 }
 
+export async function adjustCredits(input: { user_id: number; amount: number; note?: string }) {
+    const res = await apiClient.post("/credits/adjust", input);
+    return res.data.data as RechargeResult;
+}
+
 export type UserItem = {
     id: number;
     username: string;
