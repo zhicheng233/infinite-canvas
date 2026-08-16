@@ -24,7 +24,7 @@ export type CustomVideoSecondsConfig =
     | { readonly enabled: boolean; readonly key: string; readonly mode: "range"; readonly min: number; readonly max: number; readonly step: number; readonly default: number }
     | { readonly enabled: boolean; readonly key: string; readonly mode: "options"; readonly options: readonly number[]; readonly default: number };
 export type CustomVideoDimensionsConfig = { readonly enabled: boolean; readonly mode: "size" | "aspect_ratio"; readonly key: string; readonly options: readonly string[]; readonly default: string };
-export type CustomVideoMediaConfig = { readonly enabled: boolean; readonly key: string; readonly max_count: number };
+export type CustomVideoMediaConfig = { readonly enabled: boolean; readonly required: boolean; readonly key: string; readonly max_count: number };
 export type CustomVideoReferenceModeConfig = { readonly enabled: boolean; readonly key: string; readonly options: readonly CustomVideoReferenceMode[]; readonly default: CustomVideoReferenceMode | "" };
 export type CustomVideoAudioConfig = { readonly enabled: boolean; readonly key: string; readonly mode: "fixed" | "user"; readonly value: boolean };
 export type CustomVideoNConfig = { readonly enabled: boolean; readonly key: string; readonly value: number };
@@ -48,6 +48,7 @@ export type CustomVideoConfigSummary = {
     readonly seconds: CustomVideoSecondsConfig | null;
     readonly dimensions: CustomVideoDimensionsConfig | null;
     readonly media_limits: Readonly<Partial<Record<CustomVideoMediaFeature, number>>>;
+    readonly media_required: Readonly<Partial<Record<CustomVideoMediaFeature, boolean>>>;
     readonly reference_mode: CustomVideoReferenceModeConfig | null;
     readonly audio: CustomVideoAudioConfig | null;
     readonly n: number | null;
@@ -151,7 +152,9 @@ function validateSemantics(config: CustomVideoConfig, errors: string[]) {
 
 function normalizeMediaConfig(value: unknown, field: CustomVideoMediaFeature, errors: string[]): CustomVideoMediaConfig {
     const item = recordValue(value, field, errors);
-    return { enabled: booleanValue(item.enabled, `${field}.enabled`, errors), key: textValue(item.key, `${field}.key`, errors).trim(), max_count: integerValue(item.max_count, `${field}.max_count`, errors) };
+    const enabled = booleanValue(item.enabled, `${field}.enabled`, errors);
+    const required = booleanValue(item.required, `${field}.required`, errors);
+    return { enabled, required: enabled && required, key: textValue(item.key, `${field}.key`, errors).trim(), max_count: integerValue(item.max_count, `${field}.max_count`, errors) };
 }
 
 function recordValue(value: unknown, field: string, errors: string[]): Record<string, unknown> {

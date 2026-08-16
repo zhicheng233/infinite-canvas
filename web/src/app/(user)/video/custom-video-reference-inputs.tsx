@@ -55,6 +55,7 @@ export function CustomVideoReferenceInputs({ config, media, referenceMode, onCha
                     key={role}
                     role={role}
                     label={roleLabels[role]}
+                    required={config[role].required}
                     sources={media[role]}
                     maxCount={config[role].max_count}
                     onAdd={(sources) => updateMedia(role, appendCustomVideoMedia(media, role, sources, config[role].max_count))}
@@ -72,6 +73,7 @@ export function CustomVideoReferenceInputs({ config, media, referenceMode, onCha
 function RoleMediaSection({
     role,
     label,
+    required,
     sources,
     maxCount,
     onAdd,
@@ -83,6 +85,7 @@ function RoleMediaSection({
 }: {
     readonly role: CustomVideoMediaFeature;
     readonly label: string;
+    readonly required: boolean;
     readonly sources: readonly string[];
     readonly maxCount: number;
     readonly onAdd: (sources: readonly string[]) => void;
@@ -114,7 +117,9 @@ function RoleMediaSection({
         <div id={`custom-video-role-${role}`} className="rounded-lg border border-stone-200 p-3 dark:border-stone-800">
             <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
                 <div className="flex items-center gap-2">
-                    <span className="text-sm font-semibold">{label}</span>
+                    <span className="text-sm font-semibold">
+                        {label}（{required ? "必填" : "可选"}）
+                    </span>
                     {referenceModeOptions ? (
                         <Select
                             className="min-w-28"

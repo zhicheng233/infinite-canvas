@@ -1,6 +1,7 @@
 package model
 
 import (
+	"encoding/json"
 	"reflect"
 	"strings"
 	"testing"
@@ -19,6 +20,81 @@ func validCustomVideoConfig() CustomVideoConfig {
 		InputVideo:        CustomVideoMediaConfig{Enabled: true, Key: "input_video", MaxCount: 1},
 		Audio:             CustomVideoAudioConfig{Enabled: false, Key: "audio", Mode: "fixed", Value: false},
 		N:                 CustomVideoNConfig{Enabled: true, Key: "n", Value: 1},
+	}
+}
+
+func TestNormalizeAndValidateCustomVideoConfigCanonicalizesMediaRequired(t *testing.T) {
+	tests := []struct {
+		name       string
+		selectRole func(*CustomVideoConfig) *CustomVideoMediaConfig
+	}{
+		{"images", func(config *CustomVideoConfig) *CustomVideoMediaConfig { return &config.Images }},
+		{"input_reference", func(config *CustomVideoConfig) *CustomVideoMediaConfig { return &config.InputReference }},
+		{"style_references", func(config *CustomVideoConfig) *CustomVideoMediaConfig { return &config.StyleReferences }},
+		{"element_references", func(config *CustomVideoConfig) *CustomVideoMediaConfig { return &config.ElementReferences }},
+		{"reference_images", func(config *CustomVideoConfig) *CustomVideoMediaConfig { return &config.ReferenceImages }},
+		{"input_video", func(config *CustomVideoConfig) *CustomVideoMediaConfig { return &config.InputVideo }},
+	}
+	semantics := []struct {
+		name         string
+		enabled      bool
+		required     bool
+		wantRequired bool
+	}{
+		{"disabled", false, true, false},
+		{"optional", true, false, false},
+		{"required", true, true, true},
+	}
+	for _, test := range tests {
+		for _, semantic := range semantics {
+			t.Run(test.name+"/"+semantic.name, func(t *testing.T) {
+				config := validCustomVideoConfig()
+				role := test.selectRole(&config)
+				role.Enabled = semantic.enabled
+				role.Required = semantic.required
+				if test.name == "reference_images" && !semantic.enabled {
+					config.ReferenceMode.Enabled = false
+				}
+
+				if err := NormalizeAndValidateCustomVideoConfig(&config); err != nil {
+					t.Fatalf("normalize %s %s: %v", test.name, semantic.name, err)
+				}
+				if role.Required != semantic.wantRequired {
+					t.Fatalf("required=%t, want %t", role.Required, semantic.wantRequired)
+				}
+			})
+		}
+	}
+}
+
+func TestCustomVideoConfigJSONRoundTripPreservesMediaRequired(t *testing.T) {
+	config := validCustomVideoConfig()
+	config.Images.Required = false
+	config.InputReference.Enabled = true
+	config.InputReference.Required = true
+	config.StyleReferences.Required = false
+	config.ElementReferences.Required = true
+	config.ReferenceImages.Required = false
+	config.InputVideo.Required = true
+	if err := NormalizeAndValidateCustomVideoConfig(&config); err != nil {
+		t.Fatalf("normalize fixture: %v", err)
+	}
+
+	payload, err := json.Marshal(config)
+	if err != nil {
+		t.Fatalf("marshal config: %v", err)
+	}
+	var decoded CustomVideoConfig
+	if err := json.Unmarshal(payload, &decoded); err != nil {
+		t.Fatalf("unmarshal config: %v", err)
+	}
+	if err := NormalizeAndValidateCustomVideoConfig(&decoded); err != nil {
+		t.Fatalf("normalize decoded config: %v", err)
+	}
+	want := []bool{false, true, false, true, false, true}
+	got := []bool{decoded.Images.Required, decoded.InputReference.Required, decoded.StyleReferences.Required, decoded.ElementReferences.Required, decoded.ReferenceImages.Required, decoded.InputVideo.Required}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("required values=%v, want %v; JSON=%s", got, want, payload)
 	}
 }
 

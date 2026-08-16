@@ -12,13 +12,13 @@ import { useConfigStore } from "@/stores/use-config-store";
 const rangeConfig: CustomVideoConfig = {
     seconds: { enabled: true, key: "seconds", mode: "range", min: 3, max: 10, step: 1, default: 6 },
     dimensions: { enabled: true, mode: "size", key: "size", options: ["1280x720", "720x1280"], default: "1280x720" },
-    images: { enabled: false, key: "images", max_count: 1 },
-    input_reference: { enabled: false, key: "input_reference", max_count: 1 },
-    style_references: { enabled: false, key: "style_references", max_count: 4 },
-    element_references: { enabled: false, key: "element_references", max_count: 3 },
-    reference_images: { enabled: false, key: "reference_images", max_count: 4 },
+    images: { enabled: false, required: false, key: "images", max_count: 1 },
+    input_reference: { enabled: false, required: false, key: "input_reference", max_count: 1 },
+    style_references: { enabled: false, required: false, key: "style_references", max_count: 4 },
+    element_references: { enabled: false, required: false, key: "element_references", max_count: 3 },
+    reference_images: { enabled: false, required: false, key: "reference_images", max_count: 4 },
     reference_mode: { enabled: false, key: "reference_mode", options: [], default: "" },
-    input_video: { enabled: false, key: "input_video", max_count: 1 },
+    input_video: { enabled: false, required: false, key: "input_video", max_count: 1 },
     audio: { enabled: true, key: "audio", mode: "user", value: true },
     n: { enabled: true, key: "n", value: 1 },
 };
@@ -41,7 +41,7 @@ describe("custom video settings panel state", () => {
         });
     });
 
-    test("uses discrete seconds and aspect-ratio defaults for invalid runtime values", () => {
+    test("preserves invalid runtime values for serializer rejection", () => {
         const config: CustomVideoConfig = {
             ...rangeConfig,
             seconds: { enabled: true, key: "seconds", mode: "options", options: [5, 8], default: 5 },
@@ -56,7 +56,7 @@ describe("custom video settings panel state", () => {
         expect(state).toEqual({
             kind: "ready",
             config,
-            runtime: { values: { seconds: 5, dimension: "16:9", audio: true }, media: createEmptyCustomVideoMediaState() },
+            runtime: { values: { seconds: 6, dimension: "1:1", audio: true }, media: createEmptyCustomVideoMediaState() },
         });
     });
 
@@ -76,7 +76,7 @@ describe("custom video settings panel state", () => {
             ...rangeConfig,
             seconds: { enabled: true, key: "seconds", mode: "options", options: [5, 8], default: 5 },
             dimensions: { enabled: true, mode: "aspect_ratio", key: "aspect_ratio", options: ["16:9", "9:16"], default: "16:9" },
-            reference_images: { enabled: true, key: "reference_images", max_count: 1 },
+            reference_images: { enabled: true, required: false, key: "reference_images", max_count: 1 },
             reference_mode: { enabled: true, key: "reference_mode", options: ["frame", "style"], default: "style" },
         };
         const markup = renderToStaticMarkup(createElement(CustomVideoSettingsPanel, { config, theme: canvasThemes.dark, showTitle: false }));

@@ -89,6 +89,8 @@ func serviceTestCustomVideoConfig() *model.CustomVideoConfig {
 	return &model.CustomVideoConfig{
 		Seconds:    model.CustomVideoSecondsConfig{Enabled: true, Key: "seconds", Mode: "range", Min: 3, Max: 10, Step: 1, Default: 6},
 		Dimensions: model.CustomVideoDimensionsConfig{Enabled: true, Mode: "size", Key: "size", Options: []string{"1280x720", "720x1280"}, Default: "1280x720"},
+		Images:     model.CustomVideoMediaConfig{Enabled: true, Required: false, Key: "images", MaxCount: 1},
+		InputVideo: model.CustomVideoMediaConfig{Enabled: true, Required: true, Key: "input_video", MaxCount: 1},
 		N:          model.CustomVideoNConfig{Enabled: true, Key: "n", Value: 1},
 	}
 }
@@ -257,6 +259,16 @@ func TestUpdateChannelModelSavesAndReturnsCustomConfig(t *testing.T) {
 	}
 	if info.VideoCustomConfig == nil || info.VideoCustomConfig.Dimensions.Mode != "size" || info.VideoCustomConfig.Dimensions.Default != "1280x720" {
 		t.Fatalf("unexpected returned config: %#v", info.VideoCustomConfig)
+	}
+	if info.VideoCustomConfig.Images.Required || !info.VideoCustomConfig.InputVideo.Required {
+		t.Fatalf("returned media required values changed: %#v", info.VideoCustomConfig)
+	}
+	var stored model.CustomVideoConfig
+	if err := json.Unmarshal([]byte(repo.item.VideoCustomConfig), &stored); err != nil {
+		t.Fatalf("unmarshal stored config: %v", err)
+	}
+	if stored.Images.Required || !stored.InputVideo.Required {
+		t.Fatalf("stored media required values changed: %#v", stored)
 	}
 }
 

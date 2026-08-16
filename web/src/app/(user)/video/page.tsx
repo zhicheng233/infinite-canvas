@@ -13,8 +13,9 @@ import { creditEstimateButtonText, CreditCostHint, CreditHelpActions, isInsuffic
 import { formatVideoGenerationError } from "@/lib/error-helper";
 import { VideoSettingsPanel, normalizeVideoResolutionValue, normalizeVideoSizeValue, videoSizeLabel } from "@/components/video-settings-panel";
 import { CustomVideoReferenceInputs } from "./custom-video-reference-inputs";
+import { videoCustomVideoGenerationState } from "./custom-video-runtime";
 import { canvasThemes } from "@/lib/canvas-theme";
-import { customVideoMediaFeatureNames, type CustomVideoMediaFeature } from "@/lib/custom-video-config";
+import { type CustomVideoMediaFeature } from "@/lib/custom-video-config";
 import { normalizeCustomVideoRuntimeState, type CustomVideoRuntimeContainer, type CustomVideoRuntimeSnapshot } from "@/lib/custom-video-runtime";
 import { formatBytes, formatDuration } from "@/lib/image-utils";
 import { boolConfig, isSeedanceVideoConfig, normalizeSeedanceRatio, seedanceReferenceLabel, seedanceVideoReferenceError, seedanceVideoReferenceHint, SEEDANCE_REFERENCE_LIMITS } from "@/lib/seedance-video";
@@ -105,8 +106,9 @@ export default function VideoPage() {
     const route = videoRouteForModel(effectiveConfig, model);
     const customVideoConfig = customVideoConfigForModel(effectiveConfig, model);
     const isCustomVideoModel = route === "custom";
-    const normalizedCustomVideoRuntime = customVideoConfig ? normalizeCustomVideoRuntimeState(customVideoConfig, customVideoRuntime?.values, customVideoRuntime?.media) : undefined;
-    const customRuntimeError = isCustomVideoModel ? customRuntimeGenerationError(customVideoConfig, customVideoRuntime) : "";
+    const customVideoState = isCustomVideoModel ? videoCustomVideoGenerationState(customVideoConfig, customVideoRuntime) : undefined;
+    const normalizedCustomVideoRuntime = customVideoState?.runtime;
+    const customRuntimeError = customVideoState?.error || "";
     const imageReferenceMode = route === "binghuo" ? normalizeBinghuoReferenceMode(effectiveConfig.videoReferenceMode) : "reference";
     const canGenerate = Boolean(prompt.trim()) && !customRuntimeError;
     const creditEstimate = useEstimatedCreditCost(model, 1, { type: "video", seconds: effectiveConfig.videoSeconds, resolution: effectiveConfig.vquality, size: effectiveConfig.size });
@@ -123,7 +125,7 @@ export default function VideoPage() {
     }, []);
 
     useEffect(() => {
-        setCustomVideoRuntime((current) => (customVideoConfig ? normalizeCustomVideoRuntimeState(customVideoConfig, current?.values, current?.media) : undefined));
+        setCustomVideoRuntime((current) => (customVideoConfig ? videoCustomVideoGenerationState(customVideoConfig, current).runtime : undefined));
     }, [customVideoConfig, model]);
 
     const addReferences = async (files?: FileList | null) => {
@@ -205,7 +207,7 @@ export default function VideoPage() {
         const batchStartedAt = performance.now();
         setStartedAt(batchStartedAt);
         try {
-            const task = await createVideoGenerationTask(snapshot.config, snapshot.text, snapshot.references, snapshot.videoReferences, snapshot.audioReferences);
+            const task = await createVideoGenerationTask(snapshot.config, snapshot.text, snapshot.references, snapshot.videoReferences, snapshot.audioReferences, { customVideoRuntime: snapshot.customVideoRuntime });
             const log = buildLog({
                 prompt: snapshot.text,
                 model,
@@ -463,6 +465,11 @@ export default function VideoPage() {
                                         setCustomVideoRuntime((current) => normalizeCustomVideoRuntimeState(customVideoConfig, { ...current?.values, ...(referenceMode ? { reference_mode: referenceMode } : {}) }, media))
                                     }
                                 />
+                            ) : null}
+                            {customRuntimeError ? (
+                                <div role="alert" className="rounded-lg border border-stone-300 bg-stone-50 px-3 py-2 text-sm text-stone-700 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-200">
+                                    {customRuntimeError}
+                                </div>
                             ) : null}
 
                             {!isCustomVideoModel ? (
@@ -1027,16 +1034,6 @@ function buildLog({
         video,
         error,
     };
-}
-
-function customRuntimeGenerationError(config: ReturnType<typeof customVideoConfigForModel>, runtime?: CustomVideoRuntimeSnapshot) {
-    if (!config) return "该模型的自定义视频配置无效，请联系管理员";
-    if (customVideoMediaFeatureNames.some((role) => (runtime?.media[role].length || 0) > config[role].max_count)) return "参考素材数量超过当前模型限制";
-    const normalized = normalizeCustomVideoRuntimeState(config, runtime?.values, runtime?.media);
-    if (config.seconds.enabled && normalized.values.seconds === undefined) return "缺少有效的视频秒数";
-    if (config.dimensions.enabled && !normalized.values.dimension) return "缺少有效的视频尺寸";
-    if (config.reference_images.enabled && config.reference_mode.enabled && !normalized.values.reference_mode) return "缺少有效的参考图模式";
-    return "";
 }
 
 function readDataUrl(file: Blob) {

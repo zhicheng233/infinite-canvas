@@ -42,6 +42,7 @@ type CustomVideoDimensionsConfig struct {
 
 type CustomVideoMediaConfig struct {
 	Enabled  bool   `json:"enabled"`
+	Required bool   `json:"required"`
 	Key      string `json:"key"`
 	MaxCount int    `json:"max_count"`
 }
@@ -90,6 +91,9 @@ func NormalizeAndValidateCustomVideoConfig(config *CustomVideoConfig) error {
 	}
 	for _, item := range media {
 		item.value.Key = strings.TrimSpace(item.value.Key)
+		if !item.value.Enabled {
+			item.value.Required = false
+		}
 		if item.value.Enabled && (item.value.MaxCount < 1 || item.value.MaxCount > item.cap) {
 			return fmt.Errorf("%s.max_count 必须在 1-%d 之间", item.name, item.cap)
 		}

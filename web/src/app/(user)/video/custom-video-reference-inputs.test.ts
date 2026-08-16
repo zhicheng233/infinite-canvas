@@ -9,13 +9,13 @@ import { createEmptyCustomVideoMediaState } from "@/lib/custom-video-runtime";
 const config: CustomVideoConfig = {
     seconds: { enabled: false, key: "seconds", mode: "range", min: 1, max: 1, step: 1, default: 1 },
     dimensions: { enabled: false, mode: "size", key: "size", options: [], default: "" },
-    images: { enabled: true, key: "images", max_count: 1 },
-    input_reference: { enabled: false, key: "input_reference", max_count: 1 },
-    style_references: { enabled: true, key: "style_references", max_count: 4 },
-    element_references: { enabled: true, key: "element_references", max_count: 3 },
-    reference_images: { enabled: true, key: "reference_images", max_count: 2 },
+    images: { enabled: true, required: false, key: "images", max_count: 1 },
+    input_reference: { enabled: false, required: false, key: "input_reference", max_count: 1 },
+    style_references: { enabled: true, required: true, key: "style_references", max_count: 4 },
+    element_references: { enabled: true, required: false, key: "element_references", max_count: 3 },
+    reference_images: { enabled: true, required: false, key: "reference_images", max_count: 2 },
     reference_mode: { enabled: true, key: "reference_mode", options: ["frame", "style"], default: "style" },
-    input_video: { enabled: true, key: "input_video", max_count: 1 },
+    input_video: { enabled: true, required: false, key: "input_video", max_count: 1 },
     audio: { enabled: false, key: "audio", mode: "fixed", value: false },
     n: { enabled: false, key: "n", value: 1 },
 };
@@ -46,6 +46,8 @@ describe("custom video reference inputs", () => {
         expect(markup).toContain("元素参考图");
         expect(markup).toContain("兼容参考图");
         expect(markup).toContain("源视频");
+        expect(markup).toContain("风格参考图（必填）");
+        expect(markup).toContain("普通参考图（可选）");
         expect(markup).not.toContain("首帧参考图");
         expect(markup).toContain("参考图模式");
 

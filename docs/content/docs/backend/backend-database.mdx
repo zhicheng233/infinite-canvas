@@ -102,9 +102,26 @@ API Key 仅用于后端代理调用，按 `API_KEY_ENCRYPTION_KEY` 配置加密�
 | video_route | string(30) | 视频路由：auto/openai/veo_json/waninter/yijia/xai/newapi/seedance；渠道使用炳火标准时保留但暂不生效 |
 | video_durations | string(200) | 视频时长 JSON 数组，例如 `[5,10]` |
 | video_customizable | bool | 视频参数是否支持用户自定义，默认 false |
+| video_custom_config | text | `video_route=custom` 时保存规范化的固定参数目录 JSON |
 | sort_order | int | 前台展示排序，默认 0 |
 
 `channel_id` 与 `model_name` 组成唯一约束 `idx_channel_model`，避免同一渠道重复记录同名模型。
+
+`video_custom_config` 中只有 `images`、`input_reference`、`style_references`、`element_references`、`reference_images` 和 `input_video` 六个媒体角色可以设置 `required`。禁用的媒体角色统一规范化为 `required=false`；启用且 `required=true` 的角色必须在运行时提供至少一个有效素材，启用但 `required=false` 的空角色不会写入上游请求。时长、尺寸、参考图模式、音频和生成数量等标量或固定字段没有 `required` 语义。
+
+## video_config_presets 表
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | uint | 主键 |
+| tenant_id | uint | 租户 ID，与规范化名称组成唯一约束 |
+| name | string(200) | 预设显示名称 |
+| normalized_name | string(200) | 去除首尾空白并转为小写的唯一名称 |
+| config | text | 完整、规范化的 `video_custom_config` JSON 快照 |
+| created_at | datetime | 创建时间 |
+| updated_at | datetime | 更新时间 |
+
+预设只保存配置快照，不保存渠道模型 ID 或预设引用。媒体角色的 `required` 值随快照创建、读取和应用完整保留，并遵循与 `channel_models.video_custom_config` 相同的媒体专属规范化规则。
 
 ## metrics_configs 表
 

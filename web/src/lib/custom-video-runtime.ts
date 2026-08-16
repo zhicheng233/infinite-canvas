@@ -1,4 +1,4 @@
-import { customVideoReferenceModes } from "./custom-video-config";
+import { customVideoMediaFeatureNames, customVideoReferenceModes } from "./custom-video-config";
 import type { CustomVideoConfig, CustomVideoMediaFeature, CustomVideoReferenceMode, CustomVideoRuntimeValues } from "./custom-video-config";
 
 export type CustomVideoMediaState = Readonly<Record<CustomVideoMediaFeature, readonly string[]>>;
@@ -8,9 +8,28 @@ export type CustomVideoRuntimeSnapshot = {
     readonly media: CustomVideoMediaState;
 };
 
+export type CustomVideoRuntimeInput = {
+    readonly values?: CustomVideoRuntimeValues;
+    readonly media?: Readonly<Partial<Record<CustomVideoMediaFeature, unknown>>>;
+};
+
 export type CustomVideoRuntimeContainer = {
     readonly customVideoRuntime?: CustomVideoRuntimeSnapshot;
 };
+
+export type CustomVideoRequiredMediaError = {
+    readonly role: CustomVideoMediaFeature;
+    readonly message: string;
+};
+
+const customVideoRequiredMediaLabels = {
+    images: "普通参考图",
+    input_reference: "首帧参考图",
+    style_references: "风格参考图",
+    element_references: "元素参考图",
+    reference_images: "兼容参考图",
+    input_video: "源视频",
+} as const satisfies Readonly<Record<CustomVideoMediaFeature, string>>;
 
 export function createEmptyCustomVideoMediaState(): CustomVideoMediaState {
     return {
@@ -24,29 +43,56 @@ export function createEmptyCustomVideoMediaState(): CustomVideoMediaState {
 }
 
 export function normalizeCustomVideoRuntimeState(config: CustomVideoConfig, values: unknown = undefined, media: unknown = undefined): CustomVideoRuntimeSnapshot {
-    const valueRecord = isRecord(values) ? values : {};
-    const normalizedSeconds = normalizeSeconds(config, valueRecord.seconds);
-    const normalizedDimension = normalizeDimension(config, valueRecord.dimension);
-    const normalizedReferenceMode = normalizeReferenceMode(config, valueRecord.reference_mode);
-    const normalizedAudio = normalizeAudio(config, valueRecord.audio);
-
     return {
-        values: {
-            ...(normalizedSeconds === undefined ? {} : { seconds: normalizedSeconds }),
-            ...(normalizedDimension === undefined ? {} : { dimension: normalizedDimension }),
-            ...(normalizedReferenceMode === undefined ? {} : { reference_mode: normalizedReferenceMode }),
-            ...(normalizedAudio === undefined ? {} : { audio: normalizedAudio }),
-        },
+        values: normalizeRuntimeValues(config, isRecord(values) ? values : {}),
         media: normalizeMedia(config, media),
     };
+}
+
+export function normalizeCustomVideoRuntimeStateForModelSwitch(config: CustomVideoConfig, values: unknown = undefined, media: unknown = undefined): CustomVideoRuntimeSnapshot {
+    return {
+        values: normalizeRuntimeValuesForModelSwitch(config, isRecord(values) ? values : {}),
+        media: normalizeMedia(config, media),
+    };
+}
+
+export function customVideoRequiredMediaErrors(config: CustomVideoConfig, media: unknown = undefined): readonly CustomVideoRequiredMediaError[] {
+    const normalized = normalizeMedia(config, media);
+    return customVideoMediaFeatureNames.flatMap((role) => (config[role].enabled && config[role].required && normalized[role].length === 0 ? [{ role, message: `缺少必填素材：${customVideoRequiredMediaLabels[role]}` }] : []));
 }
 
 export function normalizeCustomVideoRuntimeContainer<T extends CustomVideoRuntimeContainer>(config: CustomVideoConfig | null | undefined, container: T): T {
     if (!config) return container;
     return {
         ...container,
-        customVideoRuntime: normalizeCustomVideoRuntimeState(config, container.customVideoRuntime?.values, container.customVideoRuntime?.media),
+        customVideoRuntime: normalizeCustomVideoRuntimeStateForModelSwitch(config, container.customVideoRuntime?.values, container.customVideoRuntime?.media),
     };
+}
+
+function normalizeRuntimeValues(config: CustomVideoConfig, values: Readonly<Record<string, unknown>>): CustomVideoRuntimeValues {
+    const normalized: CustomVideoRuntimeValues = {};
+    if (config.seconds.enabled) defineRuntimeValue(normalized, "seconds", values.seconds === undefined ? config.seconds.default : values.seconds);
+    if (config.dimensions.enabled) defineRuntimeValue(normalized, "dimension", values.dimension === undefined ? config.dimensions.default : values.dimension);
+    if (config.reference_images.enabled && config.reference_mode.enabled) defineRuntimeValue(normalized, "reference_mode", values.reference_mode === undefined ? config.reference_mode.default || undefined : values.reference_mode);
+    if (config.audio.enabled && config.audio.mode === "user") defineRuntimeValue(normalized, "audio", values.audio === undefined ? config.audio.value : values.audio);
+    return normalized;
+}
+
+function normalizeRuntimeValuesForModelSwitch(config: CustomVideoConfig, values: Readonly<Record<string, unknown>>): CustomVideoRuntimeValues {
+    const seconds = normalizeSeconds(config, values.seconds);
+    const dimension = normalizeDimension(config, values.dimension);
+    const referenceMode = normalizeReferenceMode(config, values.reference_mode);
+    const audio = normalizeAudio(config, values.audio);
+    return {
+        ...(seconds === undefined ? {} : { seconds }),
+        ...(dimension === undefined ? {} : { dimension }),
+        ...(referenceMode === undefined ? {} : { reference_mode: referenceMode }),
+        ...(audio === undefined ? {} : { audio }),
+    };
+}
+
+function defineRuntimeValue(values: CustomVideoRuntimeValues, key: keyof CustomVideoRuntimeValues, value: unknown) {
+    if (value !== undefined) Object.defineProperty(values, key, { value, enumerable: true });
 }
 
 function normalizeSeconds(config: CustomVideoConfig, value: unknown) {

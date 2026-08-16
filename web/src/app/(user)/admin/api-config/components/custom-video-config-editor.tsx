@@ -266,10 +266,13 @@ function MediaConfigSection({ form, name, label, disabled }: { form: FormInstanc
             <Form.Item noStyle shouldUpdate={(previous, current) => previous.video_custom_config?.[name]?.enabled !== current.video_custom_config?.[name]?.enabled}>
                 {() =>
                     form.getFieldValue(["video_custom_config", name, "enabled"]) ? (
-                        <div className="mt-3 grid gap-3 md:grid-cols-2">
+                        <div className="mt-3 grid gap-3 md:grid-cols-3">
                             <KeyField form={form} feature={name} disabled={disabled} />
                             <Form.Item name={["video_custom_config", name, "max_count"]} label="最大数量" rules={[{ required: true, message: "请输入最大数量" }]}>
                                 <InputNumber min={1} max={customVideoMediaHardLimits[name]} className="w-full" disabled={disabled} />
+                            </Form.Item>
+                            <Form.Item name={["video_custom_config", name, "required"]} valuePropName="checked" label="必填">
+                                <Switch disabled={disabled} />
                             </Form.Item>
                         </div>
                     ) : null

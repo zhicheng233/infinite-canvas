@@ -26,7 +26,7 @@ import { NODE_DEFAULT_SIZE, getNodeSpec } from "../constants";
 import { ActiveConnectionPath, ConnectionPath } from "../components/canvas-connections";
 import { CanvasConfigComposer } from "../components/canvas-config-composer";
 import { CanvasConfigNodePanel } from "../components/canvas-config-node-panel";
-import { canvasCustomVideoRuntimeForModel, canvasVideoGenerationOptions } from "../components/canvas-custom-video-runtime";
+import { canvasCustomVideoGenerationState, canvasVideoGenerationOptions } from "../components/canvas-custom-video-runtime";
 import { CANVAS_AGENT_PANEL_MOTION_MS, CanvasAssistantPanel } from "../components/canvas-assistant-panel";
 import { CanvasNodeContextMenu } from "../components/canvas-context-menu";
 import { CanvasNodeAngleDialog, type CanvasImageAngleParams } from "../components/canvas-node-angle-dialog";
@@ -424,7 +424,7 @@ function InfiniteCanvasPage() {
                 router.replace("/canvas");
                 return;
             }
-            const restoredNodes = await hydrateCanvasImages(resetInterruptedGeneration(project.nodes));
+            const restoredNodes = await hydrateCanvasImages(resetInterruptedGeneration(project.nodes), effectiveConfig);
             const restoredSessions = await hydrateAssistantImages(project.chatSessions || []);
             setNodes(restoredNodes);
             setConnections(project.connections);
@@ -450,7 +450,7 @@ function InfiniteCanvasPage() {
             setProjectLoaded(true);
         };
         void restore();
-    }, [hydrated, openProject, projectId, router]);
+    }, [effectiveConfig, hydrated, openProject, projectId, router]);
 
     useEffect(() => {
         if (!projectLoaded || applyingHistoryRef.current || historyPausedRef.current) return;
@@ -2041,6 +2041,11 @@ function InfiniteCanvasPage() {
                 openConfigDialog(true);
                 return;
             }
+            const customVideo = mode === "video" ? canvasCustomVideoGenerationState(generationConfig, generationConfig.model, sourceNode?.metadata?.customVideoRuntime) : undefined;
+            if (customVideo?.error) {
+                message.error(customVideo.error);
+                return;
+            }
 
             setRunningNodeId(nodeId);
             const runController = startGenerationRequest(nodeId, nodeId, nodeId);
@@ -2240,7 +2245,7 @@ function InfiniteCanvasPage() {
                 if (mode === "video") {
                     const spec = nodeSizeFromRatio(generationConfig.size, NODE_DEFAULT_SIZE[CanvasNodeType.Video].width, NODE_DEFAULT_SIZE[CanvasNodeType.Video].height) || NODE_DEFAULT_SIZE[CanvasNodeType.Video];
                     const isCustomVideo = videoRouteForModel(generationConfig, generationConfig.model) === "custom";
-                    const customVideoRuntime = canvasCustomVideoRuntimeForModel(generationConfig, generationConfig.model, sourceNode?.metadata?.customVideoRuntime);
+                    const customVideoRuntime = customVideo?.runtime;
                     const isEmptyVideoNode = sourceNode?.type === CanvasNodeType.Video && !sourceNode.metadata?.content;
                     const videoId = isEmptyVideoNode ? nodeId : nanoid();
                     const parent = sourceNode?.position || { x: 0, y: 0 };
@@ -2482,6 +2487,12 @@ function InfiniteCanvasPage() {
                 return;
             }
             const retryImages = retryReferenceImages || [];
+            const customVideo = isCustomVideoRetry ? canvasCustomVideoGenerationState(generationConfig, generationConfig.model, node.metadata?.customVideoRuntime) : undefined;
+            if (customVideo?.error) {
+                message.error(customVideo.error);
+                setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_ERROR, errorDetails: customVideo.error } } : item)));
+                return;
+            }
 
             setRunningNodeId(node.id);
             setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_LOADING, errorDetails: undefined } } : item)));
@@ -2504,7 +2515,7 @@ function InfiniteCanvasPage() {
                     return;
                 }
                 if (node.type === CanvasNodeType.Video) {
-                    const customVideoRuntime = canvasCustomVideoRuntimeForModel(generationConfig, generationConfig.model, node.metadata?.customVideoRuntime);
+                    const customVideoRuntime = customVideo?.runtime;
                     const video = await storeGeneratedVideo(
                         await requestVideoGeneration(
                             generationConfig,
@@ -3310,15 +3321,18 @@ async function resolveMetadataReferences(metadata: CanvasNodeMetadata) {
     return references.every(Boolean) ? (references as ReferenceImage[]) : null;
 }
 
-async function hydrateCanvasImages(nodes: CanvasNodeData[]) {
+async function hydrateCanvasImages(nodes: CanvasNodeData[], config: AiConfig) {
     return Promise.all(
         nodes.map(async (node) => {
             const content = node.metadata?.content;
-            if ((node.type === CanvasNodeType.Video || node.type === CanvasNodeType.Audio) && node.metadata?.storageKey) return { ...node, metadata: { ...node.metadata, content: await resolveMediaUrl(node.metadata.storageKey, content) } };
-            if (node.type !== CanvasNodeType.Image || !content) return node;
-            if (node.metadata?.storageKey) return { ...node, metadata: { ...node.metadata, content: await resolveImageUrl(node.metadata.storageKey, content) } };
+            const model = node.metadata?.model || config.videoModel || config.model;
+            const customVideoRuntime = node.type === CanvasNodeType.Video && videoRouteForModel(config, model) === "custom" ? canvasCustomVideoGenerationState(config, model, node.metadata?.customVideoRuntime).runtime : undefined;
+            const metadata = customVideoRuntime ? { ...node.metadata, customVideoRuntime } : node.metadata;
+            if ((node.type === CanvasNodeType.Video || node.type === CanvasNodeType.Audio) && metadata?.storageKey) return { ...node, metadata: { ...metadata, content: await resolveMediaUrl(metadata.storageKey, content) } };
+            if (node.type !== CanvasNodeType.Image || !content) return { ...node, metadata };
+            if (metadata?.storageKey) return { ...node, metadata: { ...metadata, content: await resolveImageUrl(metadata.storageKey, content) } };
             if (!content.startsWith("data:image/")) return node;
-            return { ...node, metadata: { ...node.metadata, ...imageMetadata(await uploadImage(content)) } };
+            return { ...node, metadata: { ...metadata, ...imageMetadata(await uploadImage(content)) } };
         }),
     );
 }

@@ -59,7 +59,8 @@ func presetTestConfig() *model.CustomVideoConfig {
 	return &model.CustomVideoConfig{
 		Seconds:    model.CustomVideoSecondsConfig{Enabled: true, Key: " seconds ", Mode: "range", Min: 3, Max: 10, Step: 1, Default: 6},
 		Dimensions: model.CustomVideoDimensionsConfig{Enabled: true, Mode: "size", Key: "size", Options: []string{"720x1280", "1280x720"}, Default: "1280x720"},
-		Images:     model.CustomVideoMediaConfig{Enabled: true, Key: "images", MaxCount: 1},
+		Images:     model.CustomVideoMediaConfig{Enabled: true, Required: false, Key: "images", MaxCount: 1},
+		InputVideo: model.CustomVideoMediaConfig{Enabled: true, Required: true, Key: "input_video", MaxCount: 1},
 		N:          model.CustomVideoNConfig{Enabled: true, Key: "n", Value: 1},
 	}
 }
@@ -158,6 +159,16 @@ func TestVideoConfigPresetServiceSnapshotStability(t *testing.T) {
 	}
 	if items[0].Config.Seconds.Default != created.Config.Seconds.Default || items[0].Config.Dimensions.Options[0] != "1280x720" {
 		t.Fatalf("snapshot changed after input mutation: %#v", items[0].Config)
+	}
+	if items[0].Config.Images.Required || !items[0].Config.InputVideo.Required {
+		t.Fatalf("preset media required values changed: %#v", items[0].Config)
+	}
+	var stored model.CustomVideoConfig
+	if err := json.Unmarshal([]byte(repo.items[0].Config), &stored); err != nil {
+		t.Fatalf("unmarshal stored preset: %v", err)
+	}
+	if stored.Images.Required || !stored.InputVideo.Required {
+		t.Fatalf("stored preset media required values changed: %#v", stored)
 	}
 
 	channelModel := model.ChannelModel{VideoCustomConfig: repo.items[0].Config}

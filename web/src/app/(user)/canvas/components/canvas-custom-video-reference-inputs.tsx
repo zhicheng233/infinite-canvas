@@ -55,6 +55,7 @@ export function CanvasCustomVideoReferenceInputs({ config, runtime, theme, onCha
 
     if (!roles.length) return null;
     const selected = roles.reduce((total, role) => total + runtime.media[role].length, 0);
+    const requiredRoles = roles.filter((role) => config[role].required);
 
     return (
         <section className="border-t pt-3" style={{ borderColor: theme.node.stroke }} aria-label="自定义视频素材">
@@ -67,6 +68,11 @@ export function CanvasCustomVideoReferenceInputs({ config, runtime, theme, onCha
                     已选 {selected} 项
                 </span>
             </button>
+            {requiredRoles.length ? (
+                <div className="mt-1.5 text-xs" style={{ color: theme.node.muted }}>
+                    必填：{requiredRoles.map((role) => roleLabels[role]).join("、")}
+                </div>
+            ) : null}
             {expanded ? (
                 <div className="mt-3 space-y-2.5">
                     {roles.map((role) => (
@@ -114,7 +120,9 @@ function CanvasCustomVideoRoleInput({
         <div className="rounded-md border px-2.5 py-2" style={{ borderColor: theme.node.stroke, background: theme.node.fill }}>
             <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex min-w-0 items-center gap-2">
-                    <span className="truncate text-xs font-medium">{roleLabels[role]}</span>
+                    <span className="truncate text-xs font-medium">
+                        {roleLabels[role]}（{config[role].required ? "必填" : "可选"}）
+                    </span>
                     {showReferenceMode ? (
                         <Select
                             className="canvas-control-select min-w-24"

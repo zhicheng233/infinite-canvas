@@ -1,7 +1,7 @@
 import axios from "axios";
 import { afterEach, beforeEach, describe, expect, it, jest } from "bun:test";
 
-import type { CustomVideoConfig } from "@/lib/custom-video-config";
+import type { CustomVideoConfig, CustomVideoMediaFeature } from "@/lib/custom-video-config";
 import { createEmptyCustomVideoMediaState, type CustomVideoRuntimeSnapshot } from "@/lib/custom-video-runtime";
 import { defaultConfig, useConfigStore } from "@/stores/use-config-store";
 import { createVideoGenerationTask, pollVideoGenerationTask } from "./video";
@@ -39,18 +39,18 @@ function videoConfig(route: string) {
     };
 }
 
-function customVideoConfig(overrides: Partial<CustomVideoConfig> = {}) {
+function customVideoConfig(overrides: Partial<CustomVideoConfig> = {}, requiredRole?: CustomVideoMediaFeature) {
     const model = "0::0::video-model";
     const customConfig: CustomVideoConfig = {
         seconds: { enabled: true, key: "duration", mode: "range", min: 3, max: 10, step: 1, default: 6 },
         dimensions: { enabled: true, mode: "size", key: "resolution", options: ["1280x720", "720x1280"], default: "1280x720" },
-        images: { enabled: true, key: "image", max_count: 1 },
-        input_reference: { enabled: true, key: "firstFrame", max_count: 1 },
-        style_references: { enabled: true, key: "styleReferences", max_count: 4 },
-        element_references: { enabled: true, key: "elementReferences", max_count: 3 },
-        reference_images: { enabled: true, key: "referenceImages", max_count: 4 },
+        images: { enabled: true, required: requiredRole === "images", key: "image", max_count: 1 },
+        input_reference: { enabled: true, required: requiredRole === "input_reference", key: "firstFrame", max_count: 1 },
+        style_references: { enabled: true, required: requiredRole === "style_references", key: "styleReferences", max_count: 4 },
+        element_references: { enabled: true, required: requiredRole === "element_references", key: "elementReferences", max_count: 3 },
+        reference_images: { enabled: true, required: requiredRole === "reference_images", key: "referenceImages", max_count: 4 },
         reference_mode: { enabled: true, key: "referenceMode", options: ["frame", "style", "element"], default: "element" },
-        input_video: { enabled: true, key: "sourceVideo", max_count: 1 },
+        input_video: { enabled: true, required: requiredRole === "input_video", key: "sourceVideo", max_count: 1 },
         audio: { enabled: true, key: "generateAudio", mode: "user", value: false },
         n: { enabled: true, key: "count", value: 1 },
         ...overrides,
@@ -64,6 +64,15 @@ function customVideoConfig(overrides: Partial<CustomVideoConfig> = {}) {
 function customRuntime(values: CustomVideoRuntimeSnapshot["values"] = {}, media: Partial<CustomVideoRuntimeSnapshot["media"]> = {}): CustomVideoRuntimeSnapshot {
     return { values, media: { ...createEmptyCustomVideoMediaState(), ...media } };
 }
+
+const requiredMediaCases = [
+    { role: "images", label: "普通参考图", alias: "image" },
+    { role: "input_reference", label: "首帧参考图", alias: "firstFrame" },
+    { role: "style_references", label: "风格参考图", alias: "styleReferences" },
+    { role: "element_references", label: "元素参考图", alias: "elementReferences" },
+    { role: "reference_images", label: "兼容参考图", alias: "referenceImages" },
+    { role: "input_video", label: "源视频", alias: "sourceVideo" },
+] as const satisfies readonly { readonly role: CustomVideoMediaFeature; readonly label: string; readonly alias: string }[];
 
 beforeEach(() => {
     const localStorage = memoryStorage();
@@ -90,6 +99,81 @@ afterEach(() => {
 });
 
 describe("custom OpenAI video serialization", () => {
+    it("normalizes a prompt-only request from configured defaults", async () => {
+        const post = jest.spyOn(axios, "post").mockResolvedValue({ data: { id: "task_prompt_only" }, headers: {} });
+
+        await createVideoGenerationTask(customVideoConfig(), "prompt only");
+
+        expect(post.mock.calls[0][1]).toEqual({
+            model: "video-model",
+            prompt: "prompt only",
+            duration: 6,
+            resolution: "1280x720",
+            generateAudio: false,
+            count: 1,
+        });
+    });
+
+    it("rejects every missing required media role before the network request", async () => {
+        const post = jest.spyOn(axios, "post").mockResolvedValue({ data: { id: "unexpected" }, headers: {} });
+
+        for (const { role, label } of requiredMediaCases) {
+            await expect(createVideoGenerationTask(customVideoConfig({}, role), "required media")).rejects.toThrow(label);
+            await expect(
+                createVideoGenerationTask(customVideoConfig({}, role), "required media", [], [], [], {
+                    customVideoRuntime: customRuntime({}, { [role]: ["not-a-media-url"] }),
+                }),
+            ).rejects.toThrow(label);
+        }
+
+        expect(post).not.toHaveBeenCalled();
+    });
+
+    it("serializes every satisfied required media role through its configured alias", async () => {
+        const post = jest.spyOn(axios, "post").mockResolvedValue({ data: { id: "task_required" }, headers: {} });
+
+        for (const { role, alias } of requiredMediaCases) {
+            post.mockClear();
+            const source = role === "input_video" ? "https://media.example.com/source.mp4" : `https://media.example.com/${role}.png`;
+            const runtime = customRuntime({}, { [role]: [source] });
+
+            await createVideoGenerationTask(customVideoConfig({}, role), "required media", [], [], [], { customVideoRuntime: runtime });
+
+            const body = post.mock.calls[0][1];
+            expect(body[alias]).toEqual(source);
+            expect(body).not.toHaveProperty(role);
+            if (role !== "reference_images") expect(body).not.toHaveProperty("referenceMode");
+        }
+    });
+
+    it("accepts a partial runtime media object at the serializer boundary", async () => {
+        const post = jest.spyOn(axios, "post").mockResolvedValue({ data: { id: "task_partial" }, headers: {} });
+
+        await createVideoGenerationTask(customVideoConfig({}, "input_reference"), "partial runtime", [], [], [], {
+            customVideoRuntime: { values: { seconds: 8 }, media: { input_reference: ["https://media.example.com/first.png"] } },
+        });
+
+        expect(post.mock.calls[0][1]).toEqual({
+            model: "video-model",
+            prompt: "partial runtime",
+            duration: 8,
+            resolution: "1280x720",
+            firstFrame: "https://media.example.com/first.png",
+            generateAudio: false,
+            count: 1,
+        });
+    });
+
+    it("uses valid required media after invalid entries without consuming the role cap", async () => {
+        const post = jest.spyOn(axios, "post").mockResolvedValue({ data: { id: "task_mixed" }, headers: {} });
+
+        await createVideoGenerationTask(customVideoConfig({}, "input_reference"), "mixed media", [], [], [], {
+            customVideoRuntime: { values: {}, media: { input_reference: ["not-a-media-url", "https://media.example.com/first.png"] } },
+        });
+
+        expect(post.mock.calls[0][1]).toMatchObject({ firstFrame: "https://media.example.com/first.png" });
+    });
+
     it("sends only enabled aliases with single and multi-value media", async () => {
         const post = jest.spyOn(axios, "post").mockResolvedValue({ data: { task_id: "task_custom" }, headers: {} });
         const runtime = customRuntime(
@@ -133,7 +217,7 @@ describe("custom OpenAI video serialization", () => {
         const config = customVideoConfig({
             seconds: { enabled: false, key: "duration", mode: "range", min: 3, max: 10, step: 1, default: 6 },
             dimensions: { enabled: true, mode: "aspect_ratio", key: "ratio", options: ["16:9", "9:16"], default: "16:9" },
-            images: { enabled: false, key: "image", max_count: 1 },
+            images: { enabled: false, required: false, key: "image", max_count: 1 },
             reference_mode: { enabled: false, key: "referenceMode", options: [], default: "" },
             audio: { enabled: false, key: "generateAudio", mode: "fixed", value: true },
             n: { enabled: false, key: "count", value: 1 },
@@ -163,7 +247,10 @@ describe("custom OpenAI video serialization", () => {
     it("rejects invalid config and runtime states before any network request", async () => {
         const post = jest.spyOn(axios, "post").mockResolvedValue({ data: { id: "unexpected" }, headers: {} });
         await expect(createVideoGenerationTask(videoConfig("custom"), "test prompt", [], [], [], { customVideoRuntime: customRuntime() })).rejects.toThrow("配置无效");
-        await expect(createVideoGenerationTask(customVideoConfig(), "test prompt")).rejects.toThrow("运行参数缺失");
+        const invalidAudioRuntime = customRuntime();
+        Object.defineProperty(invalidAudioRuntime.values, "audio", { value: "yes" });
+        const invalidReferenceModeRuntime = customRuntime();
+        Object.defineProperty(invalidReferenceModeRuntime.values, "reference_mode", { value: "invalid" });
         const cases = [
             {
                 config: customVideoConfig({ dimensions: { enabled: true, mode: "size", key: "duration", options: ["1280x720"], default: "1280x720" } }),
@@ -172,6 +259,8 @@ describe("custom OpenAI video serialization", () => {
             },
             { config: customVideoConfig(), runtime: customRuntime({ seconds: 11, dimension: "1280x720" }), error: "seconds" },
             { config: customVideoConfig(), runtime: customRuntime({ seconds: 6, dimension: "640x640" }), error: "dimensions" },
+            { config: customVideoConfig(), runtime: invalidAudioRuntime, error: "audio" },
+            { config: customVideoConfig(), runtime: invalidReferenceModeRuntime, error: "reference_mode" },
             {
                 config: customVideoConfig(),
                 runtime: customRuntime(
@@ -217,7 +306,9 @@ describe("video aspect ratio routing", () => {
 
         for (const route of ["openai", "veo_json", "waninter", "yijia", "xai", "newapi", "seedance", "binghuo"] as const) {
             post.mockClear();
-            const task = await createVideoGenerationTask(videoConfig(route), "test prompt");
+            const task = await createVideoGenerationTask(videoConfig(route), "test prompt", [], [], [], {
+                customVideoRuntime: customRuntime({ seconds: 8, dimension: "720x1280" }, { images: ["https://media.example.com/ignored.png"] }),
+            });
             const [requestUrl, body] = post.mock.calls[0];
             const query = new URL(String(requestUrl)).searchParams;
             expect(query.get("routing_video_route")).toBe(route);

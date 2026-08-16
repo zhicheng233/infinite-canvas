@@ -192,7 +192,7 @@ export function CustomVideoConfigPresets({ form, disabled }: CustomVideoConfigPr
 function PresetSummary({ config }: { readonly config: CustomVideoConfig }) {
     const summary = summarizeCustomVideoConfig(config);
     const aliases = summary.enabled.map((feature) => `${featureLabels[feature]}: ${summary.aliases[feature]}`).join("；");
-    const media = customVideoMediaFeatureNames.flatMap((feature) => (summary.media_limits[feature] === undefined ? [] : [`${featureLabels[feature]} ${summary.media_limits[feature]}`])).join("；");
+    const media = summarizeMediaRequirements(summary);
 
     return (
         <div className="max-w-sm space-y-1 text-xs leading-5">
@@ -205,12 +205,22 @@ function PresetSummary({ config }: { readonly config: CustomVideoConfig }) {
             {summary.dimensions ? <SummaryLine label={summary.dimensions.mode === "size" ? "尺寸" : "宽高比"} value={`${summary.dimensions.options.join("、")}，默认 ${summary.dimensions.default}`} /> : null}
             <SummaryLine label="已启用参数" value={summary.enabled.map((feature) => featureLabels[feature]).join("、") || "无"} />
             {aliases ? <SummaryLine label="请求别名" value={aliases} /> : null}
-            {media ? <SummaryLine label="素材上限" value={media} /> : null}
+            {media ? <SummaryLine label="素材输入" value={media} /> : null}
             {summary.reference_mode ? <SummaryLine label="兼容参考图模式" value={`${summary.reference_mode.options.join("、")}，默认 ${summary.reference_mode.default}`} /> : null}
             {summary.audio ? <SummaryLine label="音频" value={`${summary.audio.mode === "user" ? "用户可选" : "固定值"}：${summary.audio.value ? "开启" : "关闭"}`} /> : null}
             {summary.n ? <SummaryLine label="生成数量" value={`固定 ${summary.n}`} /> : null}
         </div>
     );
+}
+
+export function summarizeMediaRequirements(summary: ReturnType<typeof summarizeCustomVideoConfig>): string {
+    return customVideoMediaFeatureNames
+        .flatMap((feature) => {
+            const limit = summary.media_limits[feature];
+            if (limit === undefined) return [];
+            return [`${featureLabels[feature]}上限 ${limit}，${summary.media_required[feature] ? "必填" : "可选"}`];
+        })
+        .join("；");
 }
 
 function SummaryLine({ label, value }: { readonly label: string; readonly value: string }) {
