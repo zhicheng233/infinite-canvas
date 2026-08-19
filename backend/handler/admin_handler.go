@@ -17,10 +17,11 @@ type AdminHandler struct {
 	rechargeRepo  *repository.RechargeRepo
 	modelLogRepo  *repository.ModelCallLogRepo
 	modelLogSvc   *service.ModelCallLogService
+	adminUserSvc  *service.AdminUserService
 }
 
 func NewAdminHandler(tenantRepo *repository.TenantRepo, userRepo *repository.UserRepo, creditService *service.CreditService, creditRepo *repository.CreditRepo, rechargeRepo *repository.RechargeRepo, modelLogRepo *repository.ModelCallLogRepo, modelLogSvc *service.ModelCallLogService) *AdminHandler {
-	return &AdminHandler{tenantRepo: tenantRepo, userRepo: userRepo, creditService: creditService, creditRepo: creditRepo, rechargeRepo: rechargeRepo, modelLogRepo: modelLogRepo, modelLogSvc: modelLogSvc}
+	return &AdminHandler{tenantRepo: tenantRepo, userRepo: userRepo, creditService: creditService, creditRepo: creditRepo, rechargeRepo: rechargeRepo, modelLogRepo: modelLogRepo, modelLogSvc: modelLogSvc, adminUserSvc: service.NewAdminUserService(userRepo, creditRepo)}
 }
 
 func (h *AdminHandler) ListTenants(c *gin.Context) {
@@ -43,134 +44,6 @@ func (h *AdminHandler) ListAllUsers(c *gin.Context) {
 		return
 	}
 	model.OKPage(c, users, total, page, pageSize)
-}
-
-type AdjustCreditsInput struct {
-	UserID uint   `json:"user_id"`
-	Amount int    `json:"amount"`
-	Note   string `json:"note"`
-}
-
-func (h *AdminHandler) AdjustCredits(c *gin.Context) {
-	h.adjustCredits(c, false)
-}
-
-func (h *AdminHandler) AdjustTenantCredits(c *gin.Context) {
-	h.adjustCredits(c, true)
-}
-
-func (h *AdminHandler) adjustCredits(c *gin.Context, requireSameTenant bool) {
-	claims := c.MustGet("claims").(*service.Claims)
-	var input AdjustCreditsInput
-	if err := c.ShouldBindJSON(&input); err != nil {
-		model.Fail(c, 400, "无效的请求参数")
-		return
-	}
-	if input.Amount == 0 {
-		model.Fail(c, 400, "金额不能为零")
-		return
-	}
-	targetUser, err := h.userRepo.FindByID(input.UserID)
-	if err != nil {
-		model.Fail(c, 404, "用户不存在")
-		return
-	}
-	if requireSameTenant && targetUser.TenantID != claims.TenantID {
-		model.Fail(c, 403, "不能调整其它租户用户积分")
-		return
-	}
-	note := input.Note
-	if note == "" {
-		note = "管理员调整积分"
-	}
-	metadata := service.BuildCreditMetadata(map[string]interface{}{
-		"scene":            "后台调整",
-		"operator_user_id": claims.UserID,
-		"target_user_id":   input.UserID,
-		"adjustment":       input.Amount,
-	})
-	if _, err := h.creditService.GetOrCreateAccount(targetUser.TenantID, input.UserID); err != nil {
-		model.Fail(c, 500, err.Error())
-		return
-	}
-	if input.Amount > 0 {
-		if err := h.creditService.EarnWithMetadata(input.UserID, input.Amount, "adjust", "", note, metadata); err != nil {
-			model.Fail(c, 500, err.Error())
-			return
-		}
-	} else {
-		if err := h.creditService.SpendWithMetadata(0, input.UserID, -input.Amount, "adjust", "", note, metadata); err != nil {
-			model.Fail(c, 500, err.Error())
-			return
-		}
-	}
-	account, _ := h.creditService.GetOrCreateAccount(targetUser.TenantID, input.UserID)
-	balance := 0
-	if account != nil {
-		balance = account.Balance
-	}
-	message := "积分调整成功"
-	if input.Amount > 0 {
-		message = "积分增加成功"
-	} else {
-		message = "积分扣减成功"
-	}
-	model.OK(c, gin.H{
-		"user_id": input.UserID,
-		"amount":  input.Amount,
-		"balance": balance,
-		"message": message,
-	})
-}
-
-type RechargeInput struct {
-	UserID  uint   `json:"user_id"`
-	Credits int    `json:"credits"`
-	Note    string `json:"note"`
-}
-
-func (h *AdminHandler) RechargeCredits(c *gin.Context) {
-	claims := c.MustGet("claims").(*service.Claims)
-	var input RechargeInput
-	if err := c.ShouldBindJSON(&input); err != nil {
-		model.Fail(c, 400, "无效的请求参数")
-		return
-	}
-	if input.Credits <= 0 {
-		model.Fail(c, 400, "积分必须为正数")
-		return
-	}
-
-	order := &model.RechargeOrder{
-		TenantID: claims.TenantID,
-		UserID:   input.UserID,
-		Amount:   0,
-		Credits:  input.Credits,
-		Status:   "completed",
-		Note:     input.Note,
-	}
-	if err := h.rechargeRepo.Create(order); err != nil {
-		model.Fail(c, 500, err.Error())
-		return
-	}
-
-	note := input.Note
-	if note == "" {
-		note = "管理员充值"
-	}
-	metadata := service.BuildCreditMetadata(map[string]interface{}{
-		"scene":             "后台充值",
-		"operator_user_id":  claims.UserID,
-		"target_user_id":    input.UserID,
-		"recharge_order_id": order.ID,
-		"credits":           input.Credits,
-	})
-	if err := h.creditService.EarnWithMetadata(input.UserID, input.Credits, "recharge", strconv.FormatUint(uint64(order.ID), 10), note, metadata); err != nil {
-		model.Fail(c, 500, err.Error())
-		return
-	}
-
-	model.OK(c, order)
 }
 
 func (h *AdminHandler) ListRecharges(c *gin.Context) {
@@ -199,7 +72,7 @@ func (h *AdminHandler) GetStats(c *gin.Context) {
 	claims := c.MustGet("claims").(*service.Claims)
 
 	// Total users in tenant
-	_, totalUsers, err := h.userRepo.List(claims.TenantID, 1, 1)
+	_, totalUsers, err := h.userRepo.List(repository.UserListQuery{TenantID: claims.TenantID, Page: 1, PageSize: 1})
 	if err != nil {
 		model.Fail(c, 500, err.Error())
 		return
@@ -233,48 +106,17 @@ func (h *AdminHandler) GetStats(c *gin.Context) {
 	})
 }
 
-type UserWithBalance struct {
-	ID          uint   `json:"id"`
-	Username    string `json:"username"`
-	DisplayName string `json:"display_name"`
-	Role        string `json:"role"`
-	Status      string `json:"status"`
-	Balance     int    `json:"balance"`
-}
-
 func (h *AdminHandler) GetUsersWithBalance(c *gin.Context) {
 	claims := c.MustGet("claims").(*service.Claims)
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
-	users, total, err := h.userRepo.List(claims.TenantID, page, pageSize)
+	query := (repository.UserListQuery{TenantID: claims.TenantID, Page: page, PageSize: pageSize, Keyword: c.Query("keyword")}).Normalize()
+	items, total, err := h.adminUserSvc.ListUsersWithBalance(query)
 	if err != nil {
 		model.Fail(c, 500, err.Error())
 		return
 	}
-
-	// Collect user IDs
-	userIDs := make([]uint, len(users))
-	for i, u := range users {
-		userIDs[i] = u.ID
-	}
-
-	// Fetch balances
-	balances, _ := h.creditRepo.GetBalancesByUserIDs(userIDs)
-
-	// Build response
-	items := make([]UserWithBalance, len(users))
-	for i, u := range users {
-		items[i] = UserWithBalance{
-			ID:          u.ID,
-			Username:    u.Username,
-			DisplayName: u.DisplayName,
-			Role:        string(u.Role),
-			Status:      string(u.Status),
-			Balance:     balances[u.ID],
-		}
-	}
-
-	model.OKPage(c, items, total, page, pageSize)
+	model.OKPage(c, items, total, query.Page, query.PageSize)
 }
 
 func (h *AdminHandler) ListTransactions(c *gin.Context) {

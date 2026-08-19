@@ -66,11 +66,21 @@ export type UserWithBalanceResult = {
     page_size: number;
 };
 
-export async function listUsersWithBalance(page = 1, pageSize = 20) {
+export async function listUsersWithBalance(page = 1, pageSize = 20, keyword = "") {
+    const normalizedKeyword = keyword.trim();
     const res = await apiClient.get("/users-with-balance", {
-        params: { page, page_size: pageSize },
+        params: { page, page_size: pageSize, ...(normalizedKeyword ? { keyword: normalizedKeyword } : {}) },
     });
     return res.data.data as UserWithBalanceResult;
+}
+
+export async function resetUserPassword(userID: number, newPassword: string): Promise<void> {
+    await apiClient.put(`/users/${userID}/password`, { new_password: newPassword });
+}
+
+export async function deleteUser(userID: number) {
+    const res = await apiClient.delete(`/users/${userID}`);
+    return res.data.data as { deleted: boolean };
 }
 
 export type TransactionItem = {

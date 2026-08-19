@@ -227,7 +227,8 @@ function serializeCustomVideoBody(config: CustomVideoConfig, model: string, prom
 }
 
 function normalizeCustomVideoRuntime(config: CustomVideoConfig, runtime: CustomVideoRuntimeInput | undefined) {
-    const seconds = runtime?.values.seconds;
+    const values = runtime?.values;
+    const seconds = values?.seconds;
     if (config.seconds.enabled && seconds !== undefined) {
         const valid =
             typeof seconds === "number" &&
@@ -235,11 +236,11 @@ function normalizeCustomVideoRuntime(config: CustomVideoConfig, runtime: CustomV
             (config.seconds.mode === "options" ? config.seconds.options.includes(seconds) : seconds >= config.seconds.min && seconds <= config.seconds.max && (seconds - config.seconds.min) % config.seconds.step === 0);
         if (!valid) throw new Error("自定义视频 seconds 参数无效");
     }
-    const dimension = runtime?.values.dimension;
+    const dimension = values?.dimension;
     if (config.dimensions.enabled && dimension !== undefined && (typeof dimension !== "string" || !config.dimensions.options.includes(dimension))) throw new Error(`自定义视频 dimensions (${config.dimensions.mode}) 参数无效`);
-    if (config.audio.enabled && config.audio.mode === "user" && runtime?.values.audio !== undefined && typeof runtime.values.audio !== "boolean") throw new Error("自定义视频 audio 参数无效");
-    if (config.reference_mode.enabled && runtime?.values.reference_mode !== undefined && !config.reference_mode.options.includes(runtime.values.reference_mode)) throw new Error("自定义视频 reference_mode 参数无效");
-    const normalized = normalizeCustomVideoRuntimeState(config, runtime?.values, runtime?.media);
+    if (config.audio.enabled && config.audio.mode === "user" && values?.audio !== undefined && typeof values.audio !== "boolean") throw new Error("自定义视频 audio 参数无效");
+    if (config.reference_mode.enabled && values?.reference_mode !== undefined && !config.reference_mode.options.includes(values.reference_mode)) throw new Error("自定义视频 reference_mode 参数无效");
+    const normalized = normalizeCustomVideoRuntimeState(config, values, runtime?.media);
     const requiredError = customVideoRequiredMediaErrors(config, normalized.media)[0];
     if (requiredError) throw new Error(`自定义视频${requiredError.message}`);
     return normalized;

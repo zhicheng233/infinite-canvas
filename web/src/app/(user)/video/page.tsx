@@ -13,7 +13,7 @@ import { creditEstimateButtonText, CreditCostHint, CreditHelpActions, isInsuffic
 import { formatVideoGenerationError } from "@/lib/error-helper";
 import { VideoSettingsPanel, normalizeVideoResolutionValue, normalizeVideoSizeValue, videoSizeLabel } from "@/components/video-settings-panel";
 import { CustomVideoReferenceInputs } from "./custom-video-reference-inputs";
-import { videoCustomVideoGenerationState } from "./custom-video-runtime";
+import { videoCustomVideoGenerationState, videoCustomVideoRuntimeForModelSwitch } from "./custom-video-runtime";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { type CustomVideoMediaFeature } from "@/lib/custom-video-config";
 import { normalizeCustomVideoRuntimeState, type CustomVideoRuntimeContainer, type CustomVideoRuntimeSnapshot } from "@/lib/custom-video-runtime";
@@ -125,7 +125,7 @@ export default function VideoPage() {
     }, []);
 
     useEffect(() => {
-        setCustomVideoRuntime((current) => (customVideoConfig ? videoCustomVideoGenerationState(customVideoConfig, current).runtime : undefined));
+        setCustomVideoRuntime((current) => (customVideoConfig ? videoCustomVideoRuntimeForModelSwitch(customVideoConfig, current) : undefined));
     }, [customVideoConfig, model]);
 
     const addReferences = async (files?: FileList | null) => {

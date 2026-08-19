@@ -9,6 +9,7 @@ import { ReloadOutlined } from "@ant-design/icons";
 import { register, fetchCaptcha } from "@/services/api/auth";
 import { setStoredToken } from "@/services/api/client";
 import { useUserStore } from "@/stores/use-user-store";
+import { getPasswordPolicyError, getUsernamePolicyError } from "@/lib/auth-policy";
 
 export default function RegisterPage() {
     const router = useRouter();
@@ -52,7 +53,7 @@ export default function RegisterPage() {
         setLoading(true);
         try {
             const result = await register({
-                username: values.username,
+                username: values.username.trim(),
                 password: values.password,
                 captcha_id: captchaId,
                 captcha_answer: values.captcha_answer.trim(),
@@ -77,10 +78,30 @@ export default function RegisterPage() {
                 </div>
                 <h1 className="mb-8 text-center text-2xl font-semibold text-stone-950 dark:text-stone-100">注册</h1>
                 <Form layout="vertical" onFinish={onFinish} autoComplete="off">
-                    <Form.Item name="username" rules={[{ required: true, message: "请输入用户名" }]}>
+                    <Form.Item
+                        name="username"
+                        rules={[
+                            {
+                                validator: (_, value?: string) => {
+                                    const error = getUsernamePolicyError(value ?? "");
+                                    return error ? Promise.reject(new Error(error)) : Promise.resolve();
+                                },
+                            },
+                        ]}
+                    >
                         <Input placeholder="用户名" size="large" />
                     </Form.Item>
-                    <Form.Item name="password" rules={[{ required: true, min: 8, message: "密码至少8位，需包含字母和数字" }]}>
+                    <Form.Item
+                        name="password"
+                        rules={[
+                            {
+                                validator: (_, value?: string) => {
+                                    const error = getPasswordPolicyError(value ?? "");
+                                    return error ? Promise.reject(new Error(error)) : Promise.resolve();
+                                },
+                            },
+                        ]}
+                    >
                         <Input.Password placeholder="密码" size="large" />
                     </Form.Item>
                     <Form.Item name="confirm" rules={[{ required: true, message: "请确认密码" }]}>

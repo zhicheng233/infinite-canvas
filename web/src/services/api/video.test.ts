@@ -146,7 +146,7 @@ describe("custom OpenAI video serialization", () => {
         }
     });
 
-    it("accepts a partial runtime media object at the serializer boundary", async () => {
+    it("normalizes missing media roles in a partial runtime snapshot", async () => {
         const post = jest.spyOn(axios, "post").mockResolvedValue({ data: { id: "task_partial" }, headers: {} });
 
         await createVideoGenerationTask(customVideoConfig({}, "input_reference"), "partial runtime", [], [], [], {
@@ -164,14 +164,34 @@ describe("custom OpenAI video serialization", () => {
         });
     });
 
-    it("uses valid required media after invalid entries without consuming the role cap", async () => {
+    it("normalizes mixed valid and invalid media consistently for optional and required roles", async () => {
         const post = jest.spyOn(axios, "post").mockResolvedValue({ data: { id: "task_mixed" }, headers: {} });
+        const media = { input_reference: ["not-a-media-url", "https://media.example.com/first.png"] };
 
-        await createVideoGenerationTask(customVideoConfig({}, "input_reference"), "mixed media", [], [], [], {
-            customVideoRuntime: { values: {}, media: { input_reference: ["not-a-media-url", "https://media.example.com/first.png"] } },
+        for (const required of [false, true]) {
+            post.mockClear();
+            await createVideoGenerationTask(customVideoConfig({}, required ? "input_reference" : undefined), "mixed media", [], [], [], { customVideoRuntime: { values: {}, media } });
+            expect(post.mock.calls[0][1]).toMatchObject({ firstFrame: "https://media.example.com/first.png" });
+        }
+    });
+
+    it("omits all-invalid optional media and clips normalized valid media to the configured cap", async () => {
+        const post = jest.spyOn(axios, "post").mockResolvedValue({ data: { id: "task_normalized" }, headers: {} });
+
+        await createVideoGenerationTask(customVideoConfig(), "normalized media", [], [], [], {
+            customVideoRuntime: {
+                values: {},
+                media: {
+                    images: ["not-a-media-url"],
+                    style_references: ["invalid", "https://media.example.com/1.png", "https://media.example.com/2.png", "https://media.example.com/3.png", "https://media.example.com/4.png", "https://media.example.com/clipped.png"],
+                },
+            },
         });
 
-        expect(post.mock.calls[0][1]).toMatchObject({ firstFrame: "https://media.example.com/first.png" });
+        expect(post.mock.calls[0][1]).not.toHaveProperty("image");
+        expect(post.mock.calls[0][1]).toMatchObject({
+            styleReferences: ["https://media.example.com/1.png", "https://media.example.com/2.png", "https://media.example.com/3.png", "https://media.example.com/4.png"],
+        });
     });
 
     it("sends only enabled aliases with single and multi-value media", async () => {
@@ -261,19 +281,6 @@ describe("custom OpenAI video serialization", () => {
             { config: customVideoConfig(), runtime: customRuntime({ seconds: 6, dimension: "640x640" }), error: "dimensions" },
             { config: customVideoConfig(), runtime: invalidAudioRuntime, error: "audio" },
             { config: customVideoConfig(), runtime: invalidReferenceModeRuntime, error: "reference_mode" },
-            {
-                config: customVideoConfig(),
-                runtime: customRuntime(
-                    { seconds: 6, dimension: "1280x720" },
-                    { style_references: ["https://media.example.com/1.png", "https://media.example.com/2.png", "https://media.example.com/3.png", "https://media.example.com/4.png", "https://media.example.com/5.png"] },
-                ),
-                error: "style_references",
-            },
-            {
-                config: customVideoConfig(),
-                runtime: customRuntime({ seconds: 6, dimension: "1280x720" }, { images: ["not-a-media-url"] }),
-                error: "素材地址无效",
-            },
         ];
 
         for (const item of cases) {

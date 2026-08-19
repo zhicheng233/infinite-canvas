@@ -54,12 +54,34 @@ export type RechargeResult = {
     message: string;
 };
 
+export type AdjustMode = "add" | "deduct" | "set";
+
 export async function rechargeCredits(input: { user_id: number; amount: number; note?: string }) {
     const res = await apiClient.post("/credits/recharge", input);
     return res.data.data as RechargeResult;
 }
 
-export async function adjustCredits(input: { user_id: number; amount: number; note?: string }) {
+export type AdjustCreditsInput = { user_id: number; mode: Exclude<AdjustMode, "set">; amount: number; note?: string } | { user_id: number; mode: "set"; amount: 0; target_balance: number; note?: string };
+
+export type AdjustmentPreview = {
+    readonly valid: boolean;
+    readonly text: string;
+};
+
+export function getCreditAdjustmentPreview(mode: AdjustMode, balance: number, value: number | null | undefined): AdjustmentPreview {
+    if (typeof value !== "number" || !Number.isInteger(value)) return { valid: false, text: "请输入整数积分" };
+
+    if (mode === "add") return { valid: value > 0, text: `原余额 ${balance} + 输入值 ${value} = 最终余额 ${balance + value}` };
+    if (mode === "deduct") return { valid: value > 0 && value <= balance, text: `原余额 ${balance} - 输入值 ${value} = 最终余额 ${balance - value}` };
+    return { valid: value >= 0 && value !== balance, text: `原余额 ${balance} 调整为目标值 ${value} = 最终余额 ${value}` };
+}
+
+export function buildCreditAdjustmentRequest(mode: AdjustMode, userId: number, value: number, note?: string): AdjustCreditsInput {
+    if (mode === "set") return { user_id: userId, mode, amount: 0, target_balance: value, note };
+    return { user_id: userId, mode, amount: value, note };
+}
+
+export async function adjustCredits(input: AdjustCreditsInput) {
     const res = await apiClient.post("/credits/adjust", input);
     return res.data.data as RechargeResult;
 }

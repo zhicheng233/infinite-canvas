@@ -1,6 +1,6 @@
 package model
 
-type UserRole   string
+type UserRole string
 type UserStatus string
 
 const (
@@ -15,13 +15,12 @@ const (
 type User struct {
 	BaseModel
 	TenantID     uint       `gorm:"index;not null" json:"tenant_id"`
-	Username     string     `gorm:"size:64;not null" json:"username"`
+	Username     string     `gorm:"size:64;uniqueIndex;not null" json:"username"`
 	PasswordHash string     `gorm:"size:256;not null" json:"-"`
 	DisplayName  string     `gorm:"size:64" json:"display_name"`
 	AvatarURL    string     `gorm:"size:512" json:"avatar_url"`
 	Role         UserRole   `gorm:"size:20;default:user" json:"role"`
 	Status       UserStatus `gorm:"size:20;default:active" json:"status"`
-
 }
 
 func (User) TableName() string { return "users" }

@@ -4,12 +4,10 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"regexp"
 	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
-	"golang.org/x/crypto/bcrypt"
 	"infinite-canvas-server/config"
 	"infinite-canvas-server/model"
 	"infinite-canvas-server/repository"
@@ -67,18 +65,6 @@ type UpdateProfileInput struct {
 	AvatarURL   string `json:"avatar_url"`
 }
 
-func validatePasswordStrength(password string) error {
-	if len(password) < 8 {
-		return errors.New("密码至少需要8个字符")
-	}
-	hasLetter := regexp.MustCompile(`[a-zA-Z]`).MatchString(password)
-	hasDigit := regexp.MustCompile(`[0-9]`).MatchString(password)
-	if !hasLetter || !hasDigit {
-		return errors.New("密码需包含字母和数字")
-	}
-	return nil
-}
-
 func shouldBootstrapInitialAdmin(userCount int64, username, password string) (bool, error) {
 	if userCount > 0 {
 		return false, nil
@@ -89,6 +75,9 @@ func shouldBootstrapInitialAdmin(userCount int64, username, password string) (bo
 	if username == "" || password == "" {
 		return false, errors.New("INIT_ADMIN_USERNAME 和 INIT_ADMIN_PASSWORD 需要同时配置")
 	}
+	if _, err := normalizeUsername(username); err != nil {
+		return false, err
+	}
 	if err := validatePasswordStrength(password); err != nil {
 		return false, err
 	}
@@ -96,7 +85,11 @@ func shouldBootstrapInitialAdmin(userCount int64, username, password string) (bo
 }
 
 func (s *AuthService) Register(input RegisterInput) (*RegisterResult, error) {
-	if input.Username == "" || input.Password == "" {
+	username, err := normalizeUsername(input.Username)
+	if err != nil {
+		return nil, err
+	}
+	if input.Password == "" {
 		return nil, errors.New("请输入用户名和密码")
 	}
 	if err := validatePasswordStrength(input.Password); err != nil {
@@ -107,7 +100,7 @@ func (s *AuthService) Register(input RegisterInput) (*RegisterResult, error) {
 		return nil, errors.New("验证码不正确")
 	}
 
-	result, err := s.createUserAndToken(0, input.Username, input.Password, model.RoleUser)
+	result, err := s.createUserAndToken(0, username, input.Password, model.RoleUser)
 	if err != nil {
 		return nil, err
 	}
@@ -173,6 +166,9 @@ func (s *AuthService) EnsureInitialAdmin() error {
 		Status:       model.UserActive,
 	}
 	if err := s.userRepo.Create(user); err != nil {
+		if isDuplicateKeyError(err) {
+			return errors.New("用户名已存在")
+		}
 		return fmt.Errorf("创建初始管理员失败: %w", err)
 	}
 
@@ -218,7 +214,10 @@ func (s *AuthService) createUserAndToken(tenantID uint, username, password strin
 		Status:       model.UserActive,
 	}
 	if err := s.userRepo.Create(user); err != nil {
-		return nil, errors.New("用户名已存在")
+		if isDuplicateKeyError(err) {
+			return nil, errors.New("用户名已存在")
+		}
+		return nil, err
 	}
 	token, err := s.generateToken(user)
 	if err != nil {
@@ -304,13 +303,4 @@ func (s *AuthService) ParseToken(tokenStr string) (*Claims, error) {
 		return nil, errors.New("无效的令牌声明")
 	}
 	return claims, nil
-}
-
-func HashPassword(password string) (string, error) {
-	bytes, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
-	return string(bytes), err
-}
-
-func CheckPassword(hash, password string) bool {
-	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) == nil
 }

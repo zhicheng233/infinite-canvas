@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import type { CustomVideoConfig } from "@/lib/custom-video-config";
-import { videoCustomVideoGenerationState } from "./custom-video-runtime";
+import { videoCustomVideoGenerationState, videoCustomVideoRuntimeForModelSwitch } from "./custom-video-runtime";
 
 const config: CustomVideoConfig = {
     seconds: { enabled: true, key: "seconds", mode: "options", options: [5, 8], default: 8 },
@@ -35,6 +35,37 @@ describe("standalone custom video runtime", () => {
             videoCustomVideoGenerationState(requiredConfig, { values: {}, media: { images: ["https://example.com/reference.png"], input_reference: [], style_references: [], element_references: [], reference_images: [], input_video: [] } }),
         ).toMatchObject({
             error: "缺少必填素材：风格参考图",
+        });
+    });
+
+    test("resets invalid destination scalars and preserves only valid same-role media on model switch", () => {
+        const targetConfig = {
+            ...config,
+            style_references: { ...config.style_references, max_count: 1 },
+        } satisfies CustomVideoConfig;
+
+        expect(
+            videoCustomVideoRuntimeForModelSwitch(targetConfig, {
+                values: { seconds: 6, dimension: "720x1280" },
+                media: {
+                    images: ["https://example.com/image.png"],
+                    input_reference: ["https://example.com/disabled.png"],
+                    style_references: ["not-a-url", "https://example.com/style.png"],
+                    element_references: [],
+                    reference_images: [],
+                    input_video: [],
+                },
+            }),
+        ).toEqual({
+            values: { seconds: 8, dimension: "1280x720" },
+            media: {
+                images: ["https://example.com/image.png"],
+                input_reference: [],
+                style_references: ["https://example.com/style.png"],
+                element_references: [],
+                reference_images: [],
+                input_video: [],
+            },
         });
     });
 });

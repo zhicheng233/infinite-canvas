@@ -1,0 +1,60 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - generic [ref=e5]:
+      - generic [ref=e6]:
+        - link [ref=e7] [cursor=pointer]:
+          - /url: /
+          - img "Logo" [ref=e8]
+        - navigation [ref=e9]:
+          - link "我的画布" [ref=e10] [cursor=pointer]:
+            - /url: /canvas
+          - link "生图工作台" [ref=e17] [cursor=pointer]:
+            - /url: /image
+          - link "视频创作台" [ref=e23] [cursor=pointer]:
+            - /url: /video
+          - link "提示词库" [ref=e28] [cursor=pointer]:
+            - /url: /prompts
+          - link "我的素材" [ref=e33] [cursor=pointer]:
+            - /url: /assets
+          - link "渠道状态" [ref=e40] [cursor=pointer]:
+            - /url: /channel-status
+          - button "积分充值" [ref=e44]
+      - generic [ref=e49]:
+        - button "切换到深色主题" [ref=e50]
+        - button "登录" [ref=e54]
+  - generic [ref=e59]:
+    - complementary [ref=e60]:
+      - generic [ref=e62]:
+        - strong [ref=e67]: 管理后台
+        - menu [ref=e68]:
+          - menuitem "管理概览" [ref=e69]
+          - menuitem "用户管理" [ref=e75]
+          - menuitem "API 与模型配置" [ref=e81]
+          - menuitem "模型调用日志" [ref=e85]
+          - menuitem "积分管理" [ref=e88]
+          - menuitem "积分流水" [ref=e91]
+        - button "返回画布" [ref=e95]
+    - main [ref=e98]:
+      - generic [ref=e99]:
+        - heading "积分管理" [level=4] [ref=e100]
+        - generic [ref=e101]:
+          - generic [ref=e102]:
+            - searchbox "输入用户 ID 或用户名" [ref=e103]
+            - button [ref=e105]:
+              - img "close-circle" [ref=e106]
+          - button "搜 索" [ref=e109]
+        - table [ref=e116]:
+          - rowgroup [ref=e124]:
+            - row [ref=e125]:
+              - columnheader "ID" [ref=e126]
+              - columnheader "用户名" [ref=e127]
+              - columnheader "显示名称" [ref=e128]
+              - columnheader "积分余额" [ref=e129]
+              - columnheader "状态" [ref=e130]
+              - columnheader "操作" [ref=e131]
+          - rowgroup [ref=e132]:
+            - row [ref=e133]:
+              - cell "暂无数据 暂无数据" [ref=e134]:
+                - generic [ref=e135]:
+                  - img "暂无数据" [ref=e137]
+                  - generic [ref=e143]: 暂无数据

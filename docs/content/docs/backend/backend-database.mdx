@@ -11,7 +11,7 @@ description: 当前后端数据库表结构说明
 |------|------|------|
 | id | uint | 主键 |
 | tenant_id | uint | 当前固定为默认租户 |
-| username | string(64) | 登录用户名 |
+| username | string(64) | 登录用户名，全局唯一；仅允许 1-64 位 ASCII 字母、数字、下划线和短横线，写入前去除首尾空白 |
 | password_hash | string(256) | bcrypt 密码哈希 |
 | display_name | string(64) | 显示名称 |
 | avatar_url | string(512) | 头像 |
@@ -29,6 +29,8 @@ description: 当前后端数据库表结构说明
 | total_earned | int | 累计收入 |
 | total_spent | int | 累计支出 |
 
+管理员增加、扣减或设定目标余额时，会在同一数据库事务内锁定目标账号，原子更新 `balance`、`total_earned`、`total_spent` 并写入一条 `adjust` 流水；任一步失败都会整体回滚。
+
 ## credit_transactions 表
 
 | 字段 | 类型 | 说明 |
@@ -44,6 +46,8 @@ description: 当前后端数据库表结构说明
 | idempotency_key | string(150) | 可为空的幂等键；异步视频任务扣费和失败退款用于防止重复入账 |
 | note | string(500) | 备注 |
 | metadata | longtext | 流水扩展详情 JSON，如模型、接口、计费单位、操作人 |
+
+后台积分调整的 `amount` 保存带符号的实际余额变化，`metadata` 同时保存变动前后余额、调整模式、目标余额、操作人和目标用户。
 
 ## credit_pricing 表
 
@@ -233,3 +237,7 @@ Webhook 自动告警采用上游错误事件驱动，不保存或轮询模型 Up
 | amount | decimal | 支付金额 |
 | status | enum(pending/paid/completed/failed) | 订单状态 |
 | note | string(255) | 套餐备注 |
+
+## 用户删除关系
+
+管理员确认删除账号后，系统会在一个数据库事务中执行不可恢复的硬删除。删除顺序固定为目标积分账户下的 `credit_transactions`、`credit_accounts`、`canvas_projects`、`generation_records`、`recharge_orders`、`model_call_logs`，最后删除 `users` 记录；任一步失败都会回滚此前删除。租户配置、渠道和其它用户数据不属于账号删除范围。

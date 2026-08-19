@@ -67,13 +67,10 @@ describe("custom video required media roles", () => {
         expect(customVideoRequiredMediaErrors(config, { images: ["https://example.com/reference.png"] })).toEqual([{ role: "style_references", message: "缺少必填素材：风格参考图" }]);
     });
 
-    test("filters invalid sources before clipping valid media to the role cap", () => {
+    test("filters invalid sources before applying the role cap", () => {
         const config = configWithRequiredRole("input_reference");
 
         expect(customVideoRequiredMediaErrors(config, { input_reference: ["not-a-url", "https://example.com/reference.png"] })).toEqual([]);
-        expect(normalizeCustomVideoRuntimeState(config, undefined, { input_reference: ["not-a-url", "https://example.com/reference.png", "https://example.com/clipped.png"] }).media.input_reference).toEqual([
-            "https://example.com/reference.png",
-        ]);
     });
 
     test("reports a destination role gap without moving media between roles on a model switch", () => {

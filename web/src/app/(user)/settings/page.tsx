@@ -5,6 +5,7 @@ import { App, Avatar, Button, Card, Form, Input, Tabs } from "antd";
 import { Key, User } from "lucide-react";
 
 import { changePassword, updateProfile } from "@/services/api/auth";
+import { getPasswordPolicyError } from "@/lib/auth-policy";
 import { useUserStore } from "@/stores/use-user-store";
 
 export default function SettingsPage() {
@@ -101,10 +102,6 @@ function PasswordTab() {
             message.error("两次输入的新密码不一致");
             return;
         }
-        if (values.new_password.length < 6) {
-            message.error("新密码至少需要6个字符");
-            return;
-        }
         setLoading(true);
         try {
             await changePassword({
@@ -126,7 +123,18 @@ function PasswordTab() {
                 <Form.Item name="old_password" label="当前密码" rules={[{ required: true, message: "请输入当前密码" }]}>
                     <Input.Password placeholder="当前密码" />
                 </Form.Item>
-                <Form.Item name="new_password" label="新密码" rules={[{ required: true, min: 6, message: "新密码至少需要6个字符" }]}>
+                <Form.Item
+                    name="new_password"
+                    label="新密码"
+                    rules={[
+                        {
+                            validator: (_, value?: string) => {
+                                const error = getPasswordPolicyError(value ?? "");
+                                return error ? Promise.reject(new Error(error)) : Promise.resolve();
+                            },
+                        },
+                    ]}
+                >
                     <Input.Password placeholder="新密码" />
                 </Form.Item>
                 <Form.Item name="confirm_password" label="确认新密码" rules={[{ required: true, message: "请再次输入新密码" }]}>

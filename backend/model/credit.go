@@ -5,12 +5,17 @@ import "encoding/json"
 type CreditTransactionType string
 type CreditPricingUnit string
 type CreditPricingMode string
+type CreditAdjustmentMode string
 
 const (
 	TxTypeEarn   CreditTransactionType = "earn"
 	TxTypeSpend  CreditTransactionType = "spend"
 	TxTypeRefund CreditTransactionType = "refund"
 	TxTypeAdjust CreditTransactionType = "adjust"
+
+	CreditAdjustmentAdd    CreditAdjustmentMode = "add"
+	CreditAdjustmentDeduct CreditAdjustmentMode = "deduct"
+	CreditAdjustmentSet    CreditAdjustmentMode = "set"
 
 	UnitPerImage       CreditPricingUnit = "per_image"
 	UnitPerVideo       CreditPricingUnit = "per_video"

@@ -140,56 +140,6 @@ func (h *CreditHandler) DeletePricing(c *gin.Context) {
 	model.OK(c, nil)
 }
 
-type CreditRechargeInput struct {
-	UserID uint   `json:"user_id"`
-	Amount int    `json:"amount"`
-	Note   string `json:"note"`
-}
-
-func (h *CreditHandler) Recharge(c *gin.Context) {
-	claims := c.MustGet("claims").(*service.Claims)
-	var input CreditRechargeInput
-	if err := c.ShouldBindJSON(&input); err != nil {
-		model.Fail(c, 400, "无效的请求参数")
-		return
-	}
-	if input.Amount <= 0 {
-		model.Fail(c, 400, "金额必须为正数")
-		return
-	}
-
-	// Verify the target user belongs to the same tenant
-	_, err := h.creditService.GetOrCreateAccount(claims.TenantID, input.UserID)
-	if err != nil {
-		model.Fail(c, 500, "未找到用户账户")
-		return
-	}
-
-	note := input.Note
-	if note == "" {
-		note = "管理员充值"
-	}
-	metadata := service.BuildCreditMetadata(map[string]interface{}{
-		"scene":            "后台充值",
-		"operator_user_id": claims.UserID,
-		"target_user_id":   input.UserID,
-		"credits":          input.Amount,
-	})
-	if err := h.creditService.EarnWithMetadata(input.UserID, input.Amount, "recharge", "", note, metadata); err != nil {
-		model.Fail(c, 500, err.Error())
-		return
-	}
-
-	// Get updated balance
-	account, _ := h.creditService.GetOrCreateAccount(claims.TenantID, input.UserID)
-	model.OK(c, gin.H{
-		"user_id": input.UserID,
-		"amount":  input.Amount,
-		"balance": account.Balance,
-		"message": "充值成功",
-	})
-}
-
 func (h *CreditHandler) EstimateCost(c *gin.Context) {
 	claims := c.MustGet("claims").(*service.Claims)
 	modelName := strings.TrimSpace(c.Query("model"))
