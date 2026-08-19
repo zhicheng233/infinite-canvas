@@ -217,13 +217,17 @@ async function createCustomVideoTask(config: AiConfig, model: string, prompt: st
 function serializeCustomVideoBody(config: CustomVideoConfig, model: string, prompt: string, runtime: CustomVideoRuntimeInput | undefined) {
     const normalized = normalizeCustomVideoRuntime(config, runtime);
     const body: Record<string, unknown> = { model: modelOptionName(model), prompt };
-    if (config.seconds.enabled) body[config.seconds.key] = normalized.values.seconds;
+    if (config.seconds.enabled) body[config.seconds.key] = serializeCustomVideoSeconds(config.seconds.key, normalized.values.seconds);
     if (config.dimensions.enabled) body[config.dimensions.key] = normalized.values.dimension;
     for (const role of customVideoMediaFeatureNames) addCustomVideoMedia(body, config, normalized, role);
     if (config.reference_mode.enabled && normalized.media.reference_images.length && normalized.values.reference_mode) body[config.reference_mode.key] = normalized.values.reference_mode;
     if (config.audio.enabled) body[config.audio.key] = config.audio.mode === "fixed" ? config.audio.value : normalized.values.audio;
     if (config.n.enabled) body[config.n.key] = config.n.value;
     return body;
+}
+
+function serializeCustomVideoSeconds(key: string, value: number | undefined) {
+    return key === "seconds" ? String(value) : value;
 }
 
 function normalizeCustomVideoRuntime(config: CustomVideoConfig, runtime: CustomVideoRuntimeInput | undefined) {

@@ -114,6 +114,31 @@ describe("custom OpenAI video serialization", () => {
         });
     });
 
+    it("serializes seconds as a string only when the configured alias is seconds", async () => {
+        const post = jest.spyOn(axios, "post").mockResolvedValue({ data: { id: "task_seconds" }, headers: {} });
+
+        await createVideoGenerationTask(
+            customVideoConfig({
+                seconds: { enabled: true, key: "seconds", mode: "range", min: 3, max: 10, step: 1, default: 6 },
+            }),
+            "seconds alias",
+            [],
+            [],
+            [],
+            { customVideoRuntime: customRuntime({ seconds: 6 }) },
+        );
+
+        expect(post.mock.calls[0][1]).toEqual({
+            model: "video-model",
+            prompt: "seconds alias",
+            seconds: "6",
+            resolution: "1280x720",
+            generateAudio: false,
+            count: 1,
+        });
+        expect(post.mock.calls[0][1]).not.toHaveProperty("duration");
+    });
+
     it("rejects every missing required media role before the network request", async () => {
         const post = jest.spyOn(axios, "post").mockResolvedValue({ data: { id: "unexpected" }, headers: {} });
 
@@ -210,7 +235,7 @@ describe("custom OpenAI video serialization", () => {
         const task = await createVideoGenerationTask(customVideoConfig(), "test prompt", [], [], [], { customVideoRuntime: runtime });
 
         const [requestUrl, body, requestConfig] = post.mock.calls[0];
-        const url = new URL(String(requestUrl));
+        const url = new URL(String(requestUrl), "https://app.test");
         expect(url.searchParams.get("path")).toBe("/videos");
         expect(url.searchParams.get("routing_video_route")).toBe("custom");
         expect(requestConfig?.headers).toEqual({ Authorization: "Bearer token", "Content-Type": "application/json" });
@@ -300,7 +325,7 @@ describe("custom OpenAI video serialization", () => {
         const state = await pollVideoGenerationTask(config, task);
 
         expect(state).toEqual({ status: "pending" });
-        expect(new URL(String(get.mock.calls[0][0])).searchParams.get("path")).toBe("/videos/task_poll");
+        expect(new URL(String(get.mock.calls[0][0]), "https://app.test").searchParams.get("path")).toBe("/videos/task_poll");
     });
 });
 
@@ -317,7 +342,7 @@ describe("video aspect ratio routing", () => {
                 customVideoRuntime: customRuntime({ seconds: 8, dimension: "720x1280" }, { images: ["https://media.example.com/ignored.png"] }),
             });
             const [requestUrl, body] = post.mock.calls[0];
-            const query = new URL(String(requestUrl)).searchParams;
+            const query = new URL(String(requestUrl), "https://app.test").searchParams;
             expect(query.get("routing_video_route")).toBe(route);
             expect(task).toMatchObject({ channelId: 2, channelModelId: 62 });
 
@@ -381,7 +406,7 @@ describe("video aspect ratio routing", () => {
         await createVideoGenerationTask(config, "生成视频");
 
         const [requestUrl, body, requestConfig] = post.mock.calls[0];
-        const query = new URL(String(requestUrl)).searchParams;
+        const query = new URL(String(requestUrl), "https://app.test").searchParams;
         const headers = (requestConfig?.headers || {}) as Record<string, string>;
         expect(query.get("channel_id")).toBe("7");
         expect(query.get("channel_model_id")).toBe("77");
@@ -430,7 +455,7 @@ describe("video aspect ratio routing", () => {
         await createVideoGenerationTask(useConfigStore.getState().config, "生成视频");
 
         const [requestUrl, body, requestConfig] = post.mock.calls[0];
-        const query = new URL(String(requestUrl)).searchParams;
+        const query = new URL(String(requestUrl), "https://app.test").searchParams;
         const headers = (requestConfig?.headers || {}) as Record<string, string>;
         expect(query.get("channel_id")).toBe("7");
         expect(query.get("fuzzy_group_name")).toBe("omni_flash");
@@ -482,7 +507,7 @@ describe("video aspect ratio routing", () => {
         });
 
         expect(state).toEqual({ status: "pending" });
-        const query = new URL(String(get.mock.calls[0][0])).searchParams;
+        const query = new URL(String(get.mock.calls[0][0]), "https://app.test").searchParams;
         expect(query.get("channel_id")).toBe("2");
         expect(query.get("channel_model_id")).toBe("62");
         expect(query.get("routing_model")).toBe("video-model");
@@ -556,7 +581,7 @@ describe("video aspect ratio routing", () => {
         });
 
         expect(state).toEqual({ status: "pending" });
-        const url = new URL(String(get.mock.calls[0][0]));
+        const url = new URL(String(get.mock.calls[0][0]), "https://app.test");
         expect(url.searchParams.get("path")).toBe("/video/generations/task_binghuo");
         expect(url.searchParams.get("channel_id")).toBe("2");
         expect(url.searchParams.get("channel_model_id")).toBe("62");
