@@ -585,7 +585,7 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
 
 export async function requestEdit(config: AiConfig, prompt: string, references: ReferenceImage[], mask?: ReferenceImage, options?: RequestOptions) {
     const requestConfig = resolveModelRequestConfig(config, config.model || config.imageModel);
-    const routeMode = imageEditRouteForModel(requestConfig, requestConfig.model);
+    const routeMode = imageEditRouteForModel(config, config.model || config.imageModel);
     if (routeMode === "banana" || (routeMode === "auto" && isBananaImageModel(requestConfig.model))) {
         if (mask) throw new Error("当前模型暂不支持蒙版编辑，请切换到支持编辑接口的模型");
         return requestBananaImage(requestConfig, prompt, references, options);
