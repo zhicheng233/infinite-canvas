@@ -52,6 +52,9 @@ func TestNormalizeAndValidateCustomVideoConfigCanonicalizesMediaRequired(t *test
 				role := test.selectRole(&config)
 				role.Enabled = semantic.enabled
 				role.Required = semantic.required
+				if !semantic.enabled {
+					role.MaxCount = 0
+				}
 				if test.name == "reference_images" && !semantic.enabled {
 					config.ReferenceMode.Enabled = false
 				}
@@ -95,6 +98,93 @@ func TestCustomVideoConfigJSONRoundTripPreservesMediaRequired(t *testing.T) {
 	got := []bool{decoded.Images.Required, decoded.InputReference.Required, decoded.StyleReferences.Required, decoded.ElementReferences.Required, decoded.ReferenceImages.Required, decoded.InputVideo.Required}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("required values=%v, want %v; JSON=%s", got, want, payload)
+	}
+}
+
+func TestCustomVideoConfigMediaMaxCountAcceptsFormerCapsPlusOne(t *testing.T) {
+	tests := []struct {
+		name       string
+		selectRole func(*CustomVideoConfig) *CustomVideoMediaConfig
+		maxCount   int64
+	}{
+		{"images", func(config *CustomVideoConfig) *CustomVideoMediaConfig { return &config.Images }, 2},
+		{"input_reference", func(config *CustomVideoConfig) *CustomVideoMediaConfig { return &config.InputReference }, 2},
+		{"style_references", func(config *CustomVideoConfig) *CustomVideoMediaConfig { return &config.StyleReferences }, 5},
+		{"element_references", func(config *CustomVideoConfig) *CustomVideoMediaConfig { return &config.ElementReferences }, 4},
+		{"reference_images", func(config *CustomVideoConfig) *CustomVideoMediaConfig { return &config.ReferenceImages }, 5},
+		{"input_video", func(config *CustomVideoConfig) *CustomVideoMediaConfig { return &config.InputVideo }, 2},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			config := validCustomVideoConfig()
+			role := test.selectRole(&config)
+			role.Enabled = true
+			role.MaxCount = test.maxCount
+
+			if err := NormalizeAndValidateCustomVideoConfig(&config); err != nil {
+				t.Fatalf("former cap plus one rejected: %v", err)
+			}
+			if got := role.MaxCount; got != test.maxCount {
+				t.Fatalf("max_count=%d, want %d", got, test.maxCount)
+			}
+
+			payload, err := json.Marshal(config)
+			if err != nil {
+				t.Fatalf("marshal config: %v", err)
+			}
+			var decoded CustomVideoConfig
+			if err := json.Unmarshal(payload, &decoded); err != nil {
+				t.Fatalf("unmarshal config: %v", err)
+			}
+			if err := NormalizeAndValidateCustomVideoConfig(&decoded); err != nil {
+				t.Fatalf("normalize decoded config: %v", err)
+			}
+			if got := test.selectRole(&decoded).MaxCount; got != test.maxCount {
+				t.Fatalf("decoded max_count=%d, want %d; JSON=%s", got, test.maxCount, payload)
+			}
+		})
+	}
+}
+
+func TestCustomVideoConfigMediaMaxCountAcceptsSafeJSONIntegerBoundary(t *testing.T) {
+	config := validCustomVideoConfig()
+	config.Images.MaxCount = maxSafeJSONInteger
+
+	if err := NormalizeAndValidateCustomVideoConfig(&config); err != nil {
+		t.Fatalf("safe JSON integer boundary rejected: %v", err)
+	}
+
+	payload, err := json.Marshal(config)
+	if err != nil {
+		t.Fatalf("marshal config: %v", err)
+	}
+	var decoded CustomVideoConfig
+	if err := json.Unmarshal(payload, &decoded); err != nil {
+		t.Fatalf("unmarshal config: %v", err)
+	}
+	if got := decoded.Images.MaxCount; got != maxSafeJSONInteger {
+		t.Fatalf("decoded images.max_count=%d, want %d; JSON=%s", got, maxSafeJSONInteger, payload)
+	}
+}
+
+func TestCustomVideoConfigRejectsInvalidEnabledMediaMaxCounts(t *testing.T) {
+	tests := []struct {
+		name     string
+		maxCount int64
+	}{
+		{"zero", 0},
+		{"negative", -1},
+		{"above safe JSON integer boundary", maxSafeJSONInteger + 1},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			config := validCustomVideoConfig()
+			config.Images.MaxCount = test.maxCount
+
+			if err := NormalizeAndValidateCustomVideoConfig(&config); err == nil {
+				t.Fatalf("max_count=%d accepted", test.maxCount)
+			}
+		})
 	}
 }
 
@@ -154,13 +244,6 @@ func TestNormalizeAndValidateCustomVideoConfigRejectsInvalidCatalog(t *testing.T
 				config.ReferenceImages.Enabled = false
 			},
 			message: "reference_images",
-		},
-		{
-			name: "media above hard cap",
-			mutate: func(config *CustomVideoConfig) {
-				config.StyleReferences.MaxCount = 5
-			},
-			message: "1-4",
 		},
 		{
 			name: "forbidden prompt alias",

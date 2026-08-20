@@ -14,7 +14,6 @@ export {
     customVideoDimensionDefaultKeys,
     customVideoFeatureNames,
     customVideoMediaFeatureNames,
-    customVideoMediaHardLimits,
     customVideoReferenceModes,
     normalizeAndValidateCustomVideoConfig,
 } from "./custom-video-config-normalizer";

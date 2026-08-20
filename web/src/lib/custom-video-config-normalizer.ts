@@ -1,7 +1,6 @@
 export const customVideoFeatureNames = ["seconds", "dimensions", "images", "input_reference", "style_references", "element_references", "reference_images", "reference_mode", "input_video", "audio", "n"] as const;
 export const customVideoMediaFeatureNames = ["images", "input_reference", "style_references", "element_references", "reference_images", "input_video"] as const;
 export const customVideoReferenceModes = ["frame", "style", "element"] as const;
-export const customVideoMediaHardLimits = { images: 1, input_reference: 1, style_references: 4, element_references: 3, reference_images: 4, input_video: 1 } as const;
 export const customVideoDefaultKeys = {
     seconds: "seconds",
     dimensions: "size",
@@ -133,7 +132,7 @@ function validateSemantics(config: CustomVideoConfig, errors: string[]) {
         if (config.dimensions.options.length < 1 || config.dimensions.options.length > 50) errors.push("dimensions.options 必须包含 1-50 项");
         if (!config.dimensions.options.includes(config.dimensions.default)) errors.push("dimensions.default 必须在 options 中");
     }
-    for (const name of customVideoMediaFeatureNames) if (config[name].enabled && (config[name].max_count < 1 || config[name].max_count > customVideoMediaHardLimits[name])) errors.push(`${name}.max_count 必须在 1-${customVideoMediaHardLimits[name]} 之间`);
+    for (const name of customVideoMediaFeatureNames) if (config[name].enabled && (!Number.isSafeInteger(config[name].max_count) || config[name].max_count < 1)) errors.push(`${name}.max_count 必须是正安全整数`);
     if (config.reference_mode.enabled) {
         if (!config.reference_images.enabled) errors.push("reference_mode 仅可在 reference_images 启用时启用");
         if (!config.reference_mode.options.length) errors.push("reference_mode.options 必须是 frame/style/element 的非空子集");

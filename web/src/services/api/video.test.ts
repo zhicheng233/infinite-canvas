@@ -65,6 +65,10 @@ function customRuntime(values: CustomVideoRuntimeSnapshot["values"] = {}, media:
     return { values, media: { ...createEmptyCustomVideoMediaState(), ...media } };
 }
 
+function mediaSources(name: string, count: number) {
+    return Array.from({ length: count }, (_, index) => `https://media.example.com/${name}-${index + 1}`);
+}
+
 const requiredMediaCases = [
     { role: "images", label: "普通参考图", alias: "image" },
     { role: "input_reference", label: "首帧参考图", alias: "firstFrame" },
@@ -200,39 +204,64 @@ describe("custom OpenAI video serialization", () => {
         }
     });
 
-    it("omits all-invalid optional media and clips normalized valid media to the configured cap", async () => {
+    it("omits invalid and disabled stale media while clipping only at the configured count", async () => {
         const post = jest.spyOn(axios, "post").mockResolvedValue({ data: { id: "task_normalized" }, headers: {} });
 
-        await createVideoGenerationTask(customVideoConfig(), "normalized media", [], [], [], {
-            customVideoRuntime: {
-                values: {},
-                media: {
-                    images: ["not-a-media-url"],
-                    style_references: ["invalid", "https://media.example.com/1.png", "https://media.example.com/2.png", "https://media.example.com/3.png", "https://media.example.com/4.png", "https://media.example.com/clipped.png"],
+        await createVideoGenerationTask(
+            customVideoConfig({
+                input_reference: { enabled: false, required: false, key: "firstFrame", max_count: 2 },
+                style_references: { enabled: true, required: false, key: "styleReferences", max_count: 5 },
+            }),
+            "normalized media",
+            [],
+            [],
+            [],
+            {
+                customVideoRuntime: {
+                    values: {},
+                    media: {
+                        images: ["not-a-media-url"],
+                        input_reference: ["https://media.example.com/stale-first-frame"],
+                        style_references: ["invalid", ...mediaSources("style", 6)],
+                    },
                 },
             },
-        });
+        );
 
         expect(post.mock.calls[0][1]).not.toHaveProperty("image");
-        expect(post.mock.calls[0][1]).toMatchObject({
-            styleReferences: ["https://media.example.com/1.png", "https://media.example.com/2.png", "https://media.example.com/3.png", "https://media.example.com/4.png"],
-        });
+        expect(post.mock.calls[0][1]).not.toHaveProperty("firstFrame");
+        expect(post.mock.calls[0][1]).toMatchObject({ styleReferences: mediaSources("style", 5) });
     });
 
-    it("sends only enabled aliases with single and multi-value media", async () => {
+    it("serializes one source as a scalar and configured multi-source limits as exact arrays", async () => {
         const post = jest.spyOn(axios, "post").mockResolvedValue({ data: { task_id: "task_custom" }, headers: {} });
         const runtime = customRuntime(
             { seconds: 8, dimension: "720x1280", reference_mode: "style", audio: true },
             {
                 images: ["https://media.example.com/image.png"],
-                input_reference: ["https://media.example.com/first.png"],
-                style_references: ["https://media.example.com/style-1.png", "https://media.example.com/style-2.png"],
-                reference_images: ["https://media.example.com/reference.png"],
+                input_reference: ["https://media.example.com/stale-first-frame"],
+                style_references: mediaSources("style", 6),
+                element_references: mediaSources("element", 7),
+                reference_images: mediaSources("reference", 6),
                 input_video: ["https://media.example.com/source.mp4"],
             },
         );
 
-        const task = await createVideoGenerationTask(customVideoConfig(), "test prompt", [], [], [], { customVideoRuntime: runtime });
+        const task = await createVideoGenerationTask(
+            customVideoConfig({
+                images: { enabled: true, required: false, key: "image", max_count: 2 },
+                input_reference: { enabled: false, required: false, key: "firstFrame", max_count: 2 },
+                style_references: { enabled: true, required: false, key: "styleReferences", max_count: 5 },
+                element_references: { enabled: true, required: false, key: "elementReferences", max_count: 6 },
+                reference_images: { enabled: true, required: false, key: "referenceImages", max_count: 5 },
+                input_video: { enabled: true, required: false, key: "sourceVideo", max_count: 2 },
+            }),
+            "test prompt",
+            [],
+            [],
+            [],
+            { customVideoRuntime: runtime },
+        );
 
         const [requestUrl, body, requestConfig] = post.mock.calls[0];
         const url = new URL(String(requestUrl), "https://app.test");
@@ -245,15 +274,16 @@ describe("custom OpenAI video serialization", () => {
             duration: 8,
             resolution: "720x1280",
             image: "https://media.example.com/image.png",
-            firstFrame: "https://media.example.com/first.png",
-            styleReferences: ["https://media.example.com/style-1.png", "https://media.example.com/style-2.png"],
-            referenceImages: "https://media.example.com/reference.png",
+            styleReferences: mediaSources("style", 5),
+            elementReferences: mediaSources("element", 6),
+            referenceImages: mediaSources("reference", 5),
             referenceMode: "style",
             sourceVideo: "https://media.example.com/source.mp4",
             generateAudio: true,
             count: 1,
         });
-        for (const canonical of ["seconds", "size", "aspect_ratio", "images", "input_reference", "style_references", "reference_images", "reference_mode", "input_video", "audio", "n"]) expect(body).not.toHaveProperty(canonical);
+        for (const canonical of ["seconds", "size", "aspect_ratio", "images", "input_reference", "style_references", "element_references", "reference_images", "reference_mode", "input_video", "audio", "n"]) expect(body).not.toHaveProperty(canonical);
+        expect(body).not.toHaveProperty("firstFrame");
         expect(task).toEqual({ id: "task_custom", provider: "openai", model: "0::0::video-model" });
     });
 

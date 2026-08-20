@@ -2,98 +2,12 @@ package service
 
 import (
 	"encoding/json"
-	"errors"
 	"reflect"
 	"strings"
 	"testing"
 
 	"infinite-canvas-server/model"
 )
-
-type channelModelRepoStub struct {
-	item      *model.ChannelModel
-	saveCalls int
-}
-
-func (repo *channelModelRepoStub) FindByID(uint) (*model.ChannelModel, error) {
-	if repo.item == nil {
-		return nil, errors.New("not found")
-	}
-	return repo.item, nil
-}
-
-func (*channelModelRepoStub) FindByChannelAndName(uint, string) (*model.ChannelModel, error) {
-	return nil, errors.New("not implemented")
-}
-
-func (repo *channelModelRepoStub) ListByChannel(channelID uint, enabledOnly bool) ([]model.ChannelModel, error) {
-	if repo.item == nil || repo.item.ChannelID != channelID || (enabledOnly && !repo.item.Enabled) {
-		return []model.ChannelModel{}, nil
-	}
-	return []model.ChannelModel{*repo.item}, nil
-}
-
-func (repo *channelModelRepoStub) Save(*model.ChannelModel) error {
-	repo.saveCalls++
-	return nil
-}
-
-func (*channelModelRepoStub) Upsert(*model.ChannelModel) error { return errors.New("not implemented") }
-
-func (*channelModelRepoStub) DeleteStaleModels(uint, []string) error {
-	return errors.New("not implemented")
-}
-
-type channelModelCatalogChannelServiceStub struct {
-	channels []model.ChannelInfo
-}
-
-func (stub channelModelCatalogChannelServiceStub) ListEnabled() ([]model.ChannelInfo, error) {
-	return stub.channels, nil
-}
-
-func (channelModelCatalogChannelServiceStub) DecryptedApiKey(uint) (string, error) {
-	return "", errors.New("not implemented")
-}
-
-type channelModelCatalogChannelRepoStub struct {
-	channel *model.Channel
-}
-
-func (stub channelModelCatalogChannelRepoStub) FindByID(uint) (*model.Channel, error) {
-	return stub.channel, nil
-}
-
-func (channelModelCatalogChannelRepoStub) Save(*model.Channel) error { return nil }
-
-type channelModelCatalogPricingStub struct {
-	items map[string]map[uint]model.CreditPricing
-}
-
-func (stub channelModelCatalogPricingStub) FindPricingMap(uint) (map[string]map[uint]model.CreditPricing, error) {
-	return stub.items, nil
-}
-
-func newChannelModelCatalogTestService(item *model.ChannelModel) *ChannelModelService {
-	return NewChannelModelService(
-		channelModelCatalogChannelServiceStub{channels: []model.ChannelInfo{{ID: item.ChannelID, Name: "A", Enabled: true}}},
-		channelModelCatalogChannelRepoStub{channel: &model.Channel{BaseModel: model.BaseModel{ID: item.ChannelID}, Name: "A", Enabled: true}},
-		&channelModelRepoStub{item: item},
-		channelModelCatalogPricingStub{items: map[string]map[uint]model.CreditPricing{
-			item.ModelName: {item.ChannelID: {ChannelID: item.ChannelID, Model: item.ModelName, CreditsPerUnit: 1, UnitType: model.UnitPerVideo}},
-		}},
-	)
-}
-
-func serviceTestCustomVideoConfig() *model.CustomVideoConfig {
-	return &model.CustomVideoConfig{
-		Seconds:    model.CustomVideoSecondsConfig{Enabled: true, Key: "seconds", Mode: "range", Min: 3, Max: 10, Step: 1, Default: 6},
-		Dimensions: model.CustomVideoDimensionsConfig{Enabled: true, Mode: "size", Key: "size", Options: []string{"1280x720", "720x1280"}, Default: "1280x720"},
-		Images:     model.CustomVideoMediaConfig{Enabled: true, Required: false, Key: "images", MaxCount: 1},
-		InputVideo: model.CustomVideoMediaConfig{Enabled: true, Required: true, Key: "input_video", MaxCount: 1},
-		N:          model.CustomVideoNConfig{Enabled: true, Key: "n", Value: 1},
-	}
-}
 
 func TestUniqueDiscoveredModelNames(t *testing.T) {
 	items := []discoveredModel{
@@ -248,7 +162,7 @@ func TestUpdateChannelModelSavesAndReturnsCustomConfig(t *testing.T) {
 	repo := &channelModelRepoStub{item: &model.ChannelModel{Capabilities: "[]", VideoDurations: "[]", VideoRoute: "auto"}}
 	service := NewChannelModelService(nil, nil, repo, nil)
 	route := "custom"
-	config := serviceTestCustomVideoConfig()
+	config := serviceTestFormerCapCustomVideoConfig()
 
 	info, err := service.Update(1, model.UpdateChannelModelInput{VideoRoute: &route, VideoCustomConfig: config})
 	if err != nil {
@@ -260,12 +174,18 @@ func TestUpdateChannelModelSavesAndReturnsCustomConfig(t *testing.T) {
 	if info.VideoCustomConfig == nil || info.VideoCustomConfig.Dimensions.Mode != "size" || info.VideoCustomConfig.Dimensions.Default != "1280x720" {
 		t.Fatalf("unexpected returned config: %#v", info.VideoCustomConfig)
 	}
+	if got := serviceTestMediaMaxCounts(info.VideoCustomConfig); !reflect.DeepEqual(got, serviceTestExpectedFormerCapMediaCounts()) {
+		t.Fatalf("returned old media counts=%v, want old values", got)
+	}
 	if info.VideoCustomConfig.Images.Required || !info.VideoCustomConfig.InputVideo.Required {
 		t.Fatalf("returned media required values changed: %#v", info.VideoCustomConfig)
 	}
 	var stored model.CustomVideoConfig
 	if err := json.Unmarshal([]byte(repo.item.VideoCustomConfig), &stored); err != nil {
 		t.Fatalf("unmarshal stored config: %v", err)
+	}
+	if got := serviceTestMediaMaxCounts(&stored); !reflect.DeepEqual(got, serviceTestExpectedFormerCapMediaCounts()) {
+		t.Fatalf("stored old media counts=%v, want old values", got)
 	}
 	if stored.Images.Required || !stored.InputVideo.Required {
 		t.Fatalf("stored media required values changed: %#v", stored)

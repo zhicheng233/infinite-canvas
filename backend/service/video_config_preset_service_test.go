@@ -3,6 +3,7 @@ package service
 import (
 	"encoding/json"
 	"errors"
+	"reflect"
 	"sync"
 	"testing"
 
@@ -12,9 +13,10 @@ import (
 )
 
 type videoConfigPresetRepoStub struct {
-	mu     sync.Mutex
-	nextID uint
-	items  []model.VideoConfigPreset
+	mu          sync.Mutex
+	nextID      uint
+	createCalls int
+	items       []model.VideoConfigPreset
 }
 
 func (repo *videoConfigPresetRepoStub) ListByTenant(tenantID uint) ([]model.VideoConfigPreset, error) {
@@ -39,6 +41,7 @@ func (repo *videoConfigPresetRepoStub) Create(item *model.VideoConfigPreset) err
 	}
 	repo.nextID++
 	item.ID = repo.nextID
+	repo.createCalls++
 	repo.items = append(repo.items, *item)
 	return nil
 }
@@ -68,17 +71,23 @@ func presetTestConfig() *model.CustomVideoConfig {
 func TestVideoConfigPresetServiceTenantIsolationAndDelete(t *testing.T) {
 	repo := &videoConfigPresetRepoStub{}
 	svc := NewVideoConfigPresetService(repo)
-	created, err := svc.Create(11, model.CreateVideoConfigPresetInput{Name: " Omni 默认 ", Config: presetTestConfig()})
+	created, err := svc.Create(11, model.CreateVideoConfigPresetInput{Name: " Omni 默认 ", Config: serviceTestFormerCapCustomVideoConfig()})
 	if err != nil {
 		t.Fatalf("create failed: %v", err)
 	}
 	if created.Name != "Omni 默认" {
 		t.Fatalf("name=%q, want trimmed display name", created.Name)
 	}
+	if got := serviceTestMediaMaxCounts(&created.Config); !reflect.DeepEqual(got, serviceTestExpectedFormerCapMediaCounts()) {
+		t.Fatalf("created old media counts=%v, want old values", got)
+	}
 
 	tenantA, err := svc.List(11)
 	if err != nil || len(tenantA) != 1 {
 		t.Fatalf("tenant A list=%#v err=%v", tenantA, err)
+	}
+	if got := serviceTestMediaMaxCounts(&tenantA[0].Config); !reflect.DeepEqual(got, serviceTestExpectedFormerCapMediaCounts()) {
+		t.Fatalf("listed old media counts=%v, want old values", got)
 	}
 	tenantB, err := svc.List(22)
 	if err != nil || len(tenantB) != 0 {

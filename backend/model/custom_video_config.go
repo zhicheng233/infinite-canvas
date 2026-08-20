@@ -7,6 +7,8 @@ import (
 	"strings"
 )
 
+const maxSafeJSONInteger int64 = 9_007_199_254_740_991
+
 type CustomVideoConfig struct {
 	Seconds           CustomVideoSecondsConfig       `json:"seconds"`
 	Dimensions        CustomVideoDimensionsConfig    `json:"dimensions"`
@@ -44,7 +46,7 @@ type CustomVideoMediaConfig struct {
 	Enabled  bool   `json:"enabled"`
 	Required bool   `json:"required"`
 	Key      string `json:"key"`
-	MaxCount int    `json:"max_count"`
+	MaxCount int64  `json:"max_count"`
 }
 
 type CustomVideoReferenceModeConfig struct {
@@ -80,22 +82,21 @@ func NormalizeAndValidateCustomVideoConfig(config *CustomVideoConfig) error {
 	media := []struct {
 		name  string
 		value *CustomVideoMediaConfig
-		cap   int
 	}{
-		{"images", &config.Images, 1},
-		{"input_reference", &config.InputReference, 1},
-		{"style_references", &config.StyleReferences, 4},
-		{"element_references", &config.ElementReferences, 3},
-		{"reference_images", &config.ReferenceImages, 4},
-		{"input_video", &config.InputVideo, 1},
+		{"images", &config.Images},
+		{"input_reference", &config.InputReference},
+		{"style_references", &config.StyleReferences},
+		{"element_references", &config.ElementReferences},
+		{"reference_images", &config.ReferenceImages},
+		{"input_video", &config.InputVideo},
 	}
 	for _, item := range media {
 		item.value.Key = strings.TrimSpace(item.value.Key)
 		if !item.value.Enabled {
 			item.value.Required = false
 		}
-		if item.value.Enabled && (item.value.MaxCount < 1 || item.value.MaxCount > item.cap) {
-			return fmt.Errorf("%s.max_count 必须在 1-%d 之间", item.name, item.cap)
+		if item.value.Enabled && (item.value.MaxCount < 1 || item.value.MaxCount > maxSafeJSONInteger) {
+			return fmt.Errorf("%s.max_count 必须在 1-%d 之间", item.name, maxSafeJSONInteger)
 		}
 	}
 	if err := normalizeReferenceMode(&config.ReferenceMode, config.ReferenceImages.Enabled); err != nil {
