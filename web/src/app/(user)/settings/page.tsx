@@ -7,6 +7,7 @@ import { Key, User } from "lucide-react";
 import { changePassword, updateProfile } from "@/services/api/auth";
 import { getPasswordPolicyError } from "@/lib/auth-policy";
 import { useUserStore } from "@/stores/use-user-store";
+import { buildVersionLabel } from "@/lib/build-version";
 
 export default function SettingsPage() {
     const user = useUserStore((state) => state.user);
@@ -19,6 +20,7 @@ export default function SettingsPage() {
     return (
         <main className="mx-auto max-w-3xl overflow-y-auto px-6 py-8">
             <h1 className="mb-6 text-2xl font-semibold text-stone-950 dark:text-stone-100">个人中心</h1>
+            <div className="mb-4 text-xs text-stone-400">{buildVersionLabel}</div>
             <Tabs
                 items={tabItems.map((tab) => ({
                     key: tab.key,

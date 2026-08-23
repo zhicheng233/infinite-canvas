@@ -5,6 +5,7 @@ services:
       dockerfile: Dockerfile
       args:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-/backend-api}
+        BUILD_VERSION: ${BUILD_VERSION:-dev-000000000000Z}
     container_name: infinite-canvas-next
     environment:
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-/backend-api}
@@ -36,6 +37,8 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+      args:
+        BUILD_VERSION: ${BUILD_VERSION:-dev-000000000000Z}
     container_name: ic-backend-next
     ports:
       - "28080:18080"

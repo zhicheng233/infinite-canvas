@@ -8,6 +8,7 @@ import Image from "next/image";
 import { login } from "@/services/api/auth";
 import { setStoredToken } from "@/services/api/client";
 import { useUserStore } from "@/stores/use-user-store";
+import { buildVersionLabel } from "@/lib/build-version";
 
 export default function LoginPage() {
     const router = useRouter();
@@ -56,6 +57,7 @@ export default function LoginPage() {
                         注册
                     </Link>
                 </p>
+                <p className="mt-6 text-center text-xs text-stone-400">{buildVersionLabel}</p>
             </div>
         </main>
     );

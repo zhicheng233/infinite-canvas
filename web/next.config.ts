@@ -6,7 +6,8 @@ import { dirname, resolve } from "node:path";
 import { parseChangelog } from "@/lib/release";
 
 const webDir = dirname(fileURLToPath(import.meta.url));
-const localVersion = readFileSync(resolve(webDir, "../VERSION"), "utf8").trim() || "dev";
+const localReleaseVersion = readFileSync(resolve(webDir, "../VERSION"), "utf8").trim() || "dev";
+const buildVersion = process.env.BUILD_VERSION?.trim() || process.env.NEXT_PUBLIC_BUILD_VERSION?.trim() || "dev-000000000000Z";
 const localChangelog = readFileSync(resolve(webDir, "../CHANGELOG.md"), "utf8");
 const defaultBackendApiUrl = "http://127.0.0.1:18080/backend-api";
 
@@ -36,7 +37,8 @@ export default function nextConfig(phase: string): NextConfig {
             ignoreBuildErrors: true,
         },
         env: {
-            NEXT_PUBLIC_APP_VERSION: localVersion,
+            NEXT_PUBLIC_APP_VERSION: localReleaseVersion,
+            NEXT_PUBLIC_BUILD_VERSION: buildVersion,
             NEXT_PUBLIC_APP_RELEASES: JSON.stringify(releases),
         },
     };

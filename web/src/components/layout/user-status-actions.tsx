@@ -2,7 +2,7 @@
 
 import type { CSSProperties } from "react";
 import { Keyboard, Settings2, LogIn, LogOut, Shield, User, ChevronDown } from "lucide-react";
-import { Dropdown } from "antd";
+import { Dropdown, type MenuProps } from "antd";
 
 import { AnimatedThemeToggler } from "@/components/ui/animated-theme-toggler";
 import { UserCreditDisplay } from "@/components/layout/user-credit-display";
@@ -12,6 +12,7 @@ import { useConfigStore } from "@/stores/use-config-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { getStoredToken } from "@/services/api/client";
 import { useRouter } from "next/navigation";
+import { buildVersionLabel } from "@/lib/build-version";
 
 type UserStatusActionsProps = {
     showConfig?: boolean;
@@ -36,7 +37,7 @@ export function UserStatusActions({ showConfig = true, variant = "default", onOp
     };
 
     const isAdmin = user?.role === "super_admin" || user?.role === "tenant_admin";
-    const userMenuItems = [
+    const userMenuItems: MenuProps["items"] = [
         {
             key: "profile",
             icon: <User className="size-4" />,
@@ -60,6 +61,8 @@ export function UserStatusActions({ showConfig = true, variant = "default", onOp
             onClick: handleLogout,
             danger: true,
         },
+        { type: "divider" },
+        { key: "version", label: buildVersionLabel, disabled: true },
     ];
 
     return (

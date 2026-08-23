@@ -51,11 +51,17 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Resolve build version
+        id: version
+        shell: bash
+        run: echo "value=$(git rev-parse HEAD | cut -c1-7)-$(date -u +%y%m%d%H%MZ)" >> "$GITHUB_OUTPUT"
+
       - id: build
         uses: docker/build-push-action@v6
         with:
           context: .
           platforms: ${{ matrix.platform }}
+          build-args: BUILD_VERSION=${{ steps.version.outputs.value }}
           labels: ${{ needs.meta.outputs.labels }}
           outputs: type=image,name=${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
           cache-from: type=gha,scope=app-${{ matrix.arch }}

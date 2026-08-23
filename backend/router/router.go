@@ -1,6 +1,7 @@
 package router
 
 import (
+	"infinite-canvas-server/config"
 	"infinite-canvas-server/handler"
 	"infinite-canvas-server/middleware"
 	"infinite-canvas-server/service"
@@ -10,11 +11,13 @@ import (
 
 func Setup(r *gin.Engine, authService *service.AuthService, authHandler *handler.AuthHandler, adminHandler *handler.AdminHandler, userHandler *handler.UserHandler, creditHandler *handler.CreditHandler, generateHandler *handler.GenerateHandler, apiConfigHandler *handler.ApiConfigHandler, videoConfigPresetHandler *handler.VideoConfigPresetHandler, proxyHandler *handler.ProxyHandler, canvasHandler *handler.CanvasHandler, generationRecordHandler *handler.GenerationRecordHandler, rechargeHandler *handler.RechargeHandler, captchaHandler *handler.CaptchaHandler, tempMediaHandler *handler.TempMediaHandler, channelStatusHandler *handler.ChannelStatusHandler, channelHandler *handler.ChannelHandler, channelModelHandler *handler.ChannelModelHandler, metricsHandler *handler.MetricsHandler, webhookHandler *handler.WebhookHandler, mergeGroupHandler *handler.MergeGroupHandler, siteAnnouncementHandler *handler.SiteAnnouncementHandler) {
 	r.Use(middleware.Cors())
+	healthHandler := handler.NewHealthHandler(config.BuildVersion)
 
 	api := r.Group("/backend-api")
 	api.GET("/media/tmp/:filename", tempMediaHandler.Serve)
 	api.GET("/channel-status", channelStatusHandler.GetChannelStatus)
 	api.GET("/announcement", siteAnnouncementHandler.Public)
+	api.GET("/health", healthHandler.Get)
 
 	api.GET("/auth/captcha", captchaHandler.Generate)
 	api.POST("/auth/register", authHandler.Register)

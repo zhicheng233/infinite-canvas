@@ -6,6 +6,7 @@ import { Layout, Menu, Typography } from "antd";
 import { Users, CreditCard, ReceiptText, ArrowLeft, Shield, LayoutDashboard, Settings, AlertTriangle } from "lucide-react";
 import { useUserStore } from "@/stores/use-user-store";
 import { useEffect } from "react";
+import { buildVersionLabel } from "@/lib/build-version";
 
 const { Sider, Content } = Layout;
 const { Text } = Typography;
@@ -58,6 +59,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
                         className="flex-1 border-r-0 pt-2"
                     />
                     <div className="border-t border-stone-200 dark:border-stone-800 p-3">
+                        <div className="mb-2 px-3 text-[11px] text-stone-400">{buildVersionLabel}</div>
                         <button onClick={() => router.push("/")} className="flex items-center gap-2 text-xs text-stone-500 hover:text-stone-800 dark:hover:text-stone-200 w-full px-3 py-2 rounded transition-colors">
                             <ArrowLeft className="size-3" />
                             返回画布

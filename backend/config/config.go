@@ -6,6 +6,8 @@ import (
 	"strings"
 )
 
+var BuildVersion = "dev-000000000000Z"
+
 type Config struct {
 	Port                         string
 	DBDsn                        string

@@ -1,7 +1,9 @@
 # Build Next.js frontend
 FROM oven/bun:1.3.13 AS web-build
 ARG NEXT_PUBLIC_API_URL=http://localhost:18080/api
+ARG BUILD_VERSION=dev-000000000000Z
 ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+ENV NEXT_PUBLIC_BUILD_VERSION=${BUILD_VERSION}
 WORKDIR /app/web
 COPY web/package.json web/bun.lock ./
 RUN --mount=type=cache,target=/root/.bun/install/cache bun install --frozen-lockfile --cache-dir=/root/.bun/install/cache
@@ -13,7 +15,9 @@ RUN bun run build
 FROM node:22-bookworm-slim
 WORKDIR /app
 ARG NEXT_PUBLIC_API_URL=http://localhost:18080/api
+ARG BUILD_VERSION=dev-000000000000Z
 ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+ENV NEXT_PUBLIC_BUILD_VERSION=${BUILD_VERSION}
 COPY VERSION /app/VERSION
 COPY CHANGELOG.md /app/CHANGELOG.md
 COPY --from=web-build /app/web/public /app/web/public
