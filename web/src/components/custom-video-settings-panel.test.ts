@@ -92,6 +92,20 @@ describe("custom video settings panel state", () => {
         expect(markup).toContain("生成声音");
     });
 
+    test("includes connected role media in the top material summary", () => {
+        const config: CustomVideoConfig = { ...rangeConfig, input_reference: { enabled: true, required: false, key: "input_reference", max_count: 2 } };
+        const markup = renderToStaticMarkup(
+            createElement(CustomVideoSettingsPanel, {
+                config,
+                theme: canvasThemes.light,
+                showTitle: false,
+                connectedMedia: { input_reference: [{ nodeId: "image-1", title: "首帧.png", source: "https://example.com/first.png" }] },
+            }),
+        );
+
+        expect(markup).toContain("已选 1 / 2");
+    });
+
     test("renders a blocking message instead of generic controls for a missing custom config", () => {
         const markup = renderToStaticMarkup(createElement(CustomVideoSettingsPanel, { config: null, theme: canvasThemes.light, showTitle: false }));
 

@@ -73,6 +73,10 @@ export function customVideoRequiredMediaErrors(config: CustomVideoConfig, media:
     return customVideoMediaFeatureNames.flatMap((role) => (config[role].enabled && config[role].required && normalized[role].length === 0 ? [{ role, message: `缺少必填素材：${customVideoRequiredMediaLabels[role]}` }] : []));
 }
 
+export function customVideoMediaCount(role: CustomVideoMediaFeature, manualCount: number, connectedCount: number) {
+    return manualCount + (role === "input_video" ? 0 : connectedCount);
+}
+
 export function normalizeCustomVideoRuntimeContainer<T extends CustomVideoRuntimeContainer>(config: CustomVideoConfig | null | undefined, container: T): T {
     if (!config) return container;
     return {

@@ -151,6 +151,7 @@ function VideoSettingsPortal({
                 customVideoRuntime={normalizedRuntime}
                 onCustomVideoRuntimeChange={onCustomVideoRuntimeChange}
                 onCustomVideoMediaRoleOpen={setFocusRole}
+                connectedMedia={connectedMedia}
             />
             {customConfig && normalizedRuntime && onCustomVideoRuntimeChange ? (
                 <CanvasCustomVideoReferenceInputs config={customConfig} runtime={normalizedRuntime} theme={theme} focusRole={focusRole} onChange={onCustomVideoRuntimeChange} connectedMedia={connectedMedia} />

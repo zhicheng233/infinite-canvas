@@ -5,7 +5,7 @@ import { Button, Input, Select } from "antd";
 import { ChevronDown, ChevronRight, Link, Plus, Trash2, Upload } from "lucide-react";
 
 import { customVideoMediaFeatureNames, customVideoReferenceModes, type CustomVideoConfig, type CustomVideoMediaFeature, type CustomVideoReferenceMode } from "@/lib/custom-video-config";
-import { normalizeCustomVideoRuntimeState, type CustomVideoRuntimeSnapshot } from "@/lib/custom-video-runtime";
+import { customVideoMediaCount, normalizeCustomVideoRuntimeState, type CustomVideoRuntimeSnapshot } from "@/lib/custom-video-runtime";
 import type { CanvasTheme } from "@/lib/canvas-theme";
 import { uploadImage } from "@/services/image-storage";
 import { uploadMediaFile } from "@/services/file-storage";
@@ -56,7 +56,7 @@ export function CanvasCustomVideoReferenceInputs({ config, runtime, theme, onCha
     }, [focusRole, roleKey]);
 
     if (!roles.length) return null;
-    const selected = roles.reduce((total, role) => total + runtime.media[role].length + (role === "input_video" ? 0 : connectedMedia[role]?.length || 0), 0);
+    const selected = roles.reduce((total, role) => total + customVideoMediaCount(role, runtime.media[role].length, connectedMediaCount(connectedMedia, role)), 0);
     const requiredRoles = roles.filter((role) => config[role].required);
 
     return (
@@ -104,7 +104,7 @@ function CanvasCustomVideoRoleInput({
     const inputRef = useRef<HTMLInputElement>(null);
     const [url, setUrl] = useState("");
     const sources = runtime.media[role];
-    const combinedCount = sources.length + connectedMedia.length;
+    const combinedCount = customVideoMediaCount(role, sources.length, connectedMedia.length);
     const atLimit = combinedCount >= config[role].max_count;
     const isVideo = role === "input_video";
     const showReferenceMode = role === "reference_images" && config.reference_mode.enabled;
@@ -195,6 +195,11 @@ function CanvasCustomVideoRoleInput({
             />
         </div>
     );
+}
+
+function connectedMediaCount(connectedMedia: CanvasConnectedVideoMediaByRole, role: CustomVideoMediaFeature) {
+    if (role === "input_video") return 0;
+    return connectedMedia[role]?.length || 0;
 }
 
 async function uploadCanvasCustomMediaFiles(files: FileList, isVideo: boolean, limit: number) {

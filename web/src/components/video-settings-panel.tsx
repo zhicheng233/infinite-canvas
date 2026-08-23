@@ -22,6 +22,7 @@ import { type CustomVideoMediaFeature } from "@/lib/custom-video-config";
 import { type CustomVideoRuntimeSnapshot } from "@/lib/custom-video-runtime";
 import { binghuoRatioOptions, binghuoResolutionOptions, normalizeBinghuoRatio, normalizeBinghuoReferenceMode, normalizeBinghuoResolution } from "@/lib/binghuo-video";
 import { customVideoConfigForModel, fixedConfiguredVideoDurationForModel, isVideoDurationCustomizable, modelOptionName, normalizeVideoDurationForModel, videoDurationOptionsForModel, videoRouteForModel, type AiConfig } from "@/stores/use-config-store";
+import type { CanvasConnectedVideoMediaByRole } from "@/app/(user)/canvas/components/canvas-connected-video-media";
 
 const resolutionOptions = [
     { value: "720", label: "720p" },
@@ -49,6 +50,7 @@ export type VideoSettingsPanelProps = {
     customVideoRuntime?: CustomVideoRuntimeSnapshot;
     onCustomVideoRuntimeChange?: (runtime: CustomVideoRuntimeSnapshot) => void;
     onCustomVideoMediaRoleOpen?: (role: CustomVideoMediaFeature) => void;
+    connectedMedia?: CanvasConnectedVideoMediaByRole;
 };
 
 export function VideoSettingsPanel({
@@ -61,6 +63,7 @@ export function VideoSettingsPanel({
     customVideoRuntime,
     onCustomVideoRuntimeChange,
     onCustomVideoMediaRoleOpen,
+    connectedMedia,
 }: VideoSettingsPanelProps) {
     const model = selectedModel || config.videoModel || config.model;
     const resolvedConfig = { ...config, videoModel: model, model };
@@ -74,6 +77,7 @@ export function VideoSettingsPanel({
                 runtime={customVideoRuntime}
                 onRuntimeChange={onCustomVideoRuntimeChange}
                 onMediaRoleOpen={onCustomVideoMediaRoleOpen}
+                connectedMedia={connectedMedia}
                 theme={theme}
                 showTitle={showTitle}
                 className={className}

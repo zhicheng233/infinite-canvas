@@ -6,6 +6,7 @@ import { CanvasCustomVideoReferenceInputs, appendCanvasCustomVideoMedia, canvasC
 import { canvasThemes } from "@/lib/canvas-theme";
 import type { CustomVideoConfig } from "@/lib/custom-video-config";
 import { createEmptyCustomVideoMediaState, normalizeCustomVideoRuntimeState } from "@/lib/custom-video-runtime";
+import { customVideoMediaCount } from "@/lib/custom-video-runtime";
 
 const config: CustomVideoConfig = {
     seconds: { enabled: false, key: "seconds", mode: "range", min: 1, max: 1, step: 1, default: 1 },
@@ -57,5 +58,9 @@ describe("canvas custom video reference inputs", () => {
         expect(markup).toContain("已选 1 项");
         expect(markup).toContain("必填：风格参考图");
         expect(markup).not.toContain("普通参考图");
+    });
+
+    test("projects connected media into the same role count used by the top summary", () => {
+        expect(customVideoMediaCount("input_reference", 0, 2)).toBe(2);
     });
 });

@@ -1,10 +1,11 @@
 import { describe, expect, test } from "bun:test";
 
-import { canvasCustomVideoGenerationState, canvasCustomVideoRuntimeForModel, canvasVideoGenerationOptions } from "./canvas-custom-video-runtime";
+import { canvasCustomVideoGenerationState, canvasCustomVideoRuntimeForModel, canvasVideoGenerationOptions, resolveCanvasCustomVideoGenerationState } from "./canvas-custom-video-runtime";
 import type { CanvasNodeMetadata } from "../types";
 import { defaultConfig, type AiConfig } from "@/stores/use-config-store";
 import type { CustomVideoConfig } from "@/lib/custom-video-config";
 import { customVideoRequiredMediaErrors, type CustomVideoRuntimeSnapshot } from "@/lib/custom-video-runtime";
+import { resolveNodeGenerationImageSources } from "./canvas-node-generation";
 
 const model = "canvas-custom-video";
 const customConfig = {
@@ -96,5 +97,22 @@ describe("canvas custom video runtime", () => {
         expect(customVideoRequiredMediaErrors(requiredConfig, normalized?.media)).toEqual([{ role: "style_references", message: "缺少必填素材：风格参考图" }]);
         expect(initial).toMatchObject({ runtime: normalized, error: "缺少必填素材：风格参考图" });
         expect(retry).toEqual(initial);
+    });
+
+    test("keeps a reachable canvas image source for custom video generation", async () => {
+        const sources = await resolveNodeGenerationImageSources([
+            {
+                image: {
+                    id: "image-node",
+                    name: "角色.png",
+                    type: "image/png",
+                    dataUrl: "blob:http://127.0.0.1/local-image",
+                    url: "https://cdn.example.com/role.png",
+                },
+                targetImageRole: "style_references",
+            },
+        ]);
+
+        expect(sources[0]?.source).toBe("https://cdn.example.com/role.png");
     });
 });

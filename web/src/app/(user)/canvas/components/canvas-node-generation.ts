@@ -4,6 +4,8 @@ import { seedanceReferenceLabel } from "@/lib/seedance-video";
 import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
 import type { AiConfig } from "@/stores/use-config-store";
+import { dataUrlToFile } from "@/lib/image-utils";
+import { uploadTempImage } from "@/services/api/temp-media";
 import { CanvasNodeType, type CanvasConnection, type CanvasImageRole, type CanvasNodeData } from "../types";
 import { getGenerationResourceNodes } from "../utils/canvas-resource-references";
 
@@ -173,15 +175,38 @@ export function referenceUrl(image: ReferenceImage) {
 }
 
 export async function resolveNodeGenerationImageSources(inputs: readonly NodeGenerationImageInput[]): Promise<readonly NodeGenerationImageSource[]> {
-    return inputs.map(({ image, targetImageRole }) => {
-        const source = [image.storageKey, image.url, image.dataUrl].find(isReachableCustomVideoSource);
-        return {
-            nodeId: image.id,
-            title: image.name,
-            ...(source ? { source } : {}),
-            ...(targetImageRole ? { targetImageRole } : {}),
-        };
-    });
+    return Promise.all(
+        inputs.map(async ({ image, targetImageRole }) => {
+            const source = await resolveCustomVideoImageSource(image);
+            return {
+                nodeId: image.id,
+                title: image.name,
+                ...(source ? { source } : {}),
+                ...(targetImageRole ? { targetImageRole } : {}),
+            };
+        }),
+    );
+}
+
+async function resolveCustomVideoImageSource(image: ReferenceImage) {
+    const direct = [image.url].find(isReachableCustomVideoSource);
+    if (direct) return direct;
+    if (!image.storageKey && !image.dataUrl.startsWith("blob:") && !image.dataUrl.startsWith("data:")) return undefined;
+    const { imageToDataUrl, resolveImageUrl } = await import("@/services/image-storage");
+    const localUrl = image.storageKey ? await resolveImageUrl(image.storageKey) : undefined;
+    if (image.storageKey && !localUrl) return undefined;
+    const dataUrl = await imageToDataUrl(image.storageKey ? { dataUrl: localUrl || "" } : image);
+    if (!dataUrl || dataUrl.startsWith("data:") || dataUrl.startsWith("blob:")) {
+        if (!dataUrl) return undefined;
+        try {
+            const uploaded = await uploadTempImage(dataUrlToFile({ ...image, dataUrl }));
+            return isReachableCustomVideoSource(uploaded.url) ? uploaded.url : undefined;
+        } catch (error) {
+            if (error instanceof Error) return undefined;
+            throw error;
+        }
+    }
+    return isReachableCustomVideoSource(dataUrl) ? dataUrl : undefined;
 }
 
 export function findRetryGenerationSourceNode(nodeId: string, nodes: CanvasNodeData[], connections: CanvasConnection[]) {
@@ -231,12 +256,15 @@ function generationLabel(type: NodeGenerationInput["type"], index: number) {
 
 function readReferenceImage(node: CanvasNodeData): ReferenceImage | null {
     if (node.type !== CanvasNodeType.Image || !node.metadata?.content) return null;
+    const content = node.metadata.content;
+    const storageKey = node.metadata.storageKey || (content.startsWith("image:") ? content : undefined);
     return {
         id: node.id,
         name: `${node.title || node.id}.png`,
         type: node.metadata.mimeType || "image/png",
-        dataUrl: node.metadata.content,
-        storageKey: node.metadata.storageKey,
+        dataUrl: storageKey ? "" : content,
+        url: storageKey ? undefined : content,
+        storageKey,
     };
 }
 

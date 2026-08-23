@@ -6,7 +6,8 @@ import { Slider, Switch } from "antd";
 import { ImageSettingsTheme } from "@/components/image-settings-panel";
 import { type CanvasTheme } from "@/lib/canvas-theme";
 import { customVideoMediaFeatureNames, type CustomVideoConfig, type CustomVideoMediaFeature } from "@/lib/custom-video-config";
-import { normalizeCustomVideoRuntimeState, type CustomVideoRuntimeSnapshot } from "@/lib/custom-video-runtime";
+import { customVideoMediaCount, normalizeCustomVideoRuntimeState, type CustomVideoRuntimeSnapshot } from "@/lib/custom-video-runtime";
+import type { CanvasConnectedVideoMediaByRole } from "@/app/(user)/canvas/components/canvas-connected-video-media";
 
 export type CustomVideoSettingsState = { readonly kind: "invalid" } | { readonly kind: "ready"; readonly config: CustomVideoConfig; readonly runtime: CustomVideoRuntimeSnapshot };
 
@@ -18,6 +19,7 @@ type CustomVideoSettingsPanelProps = {
     theme: CanvasTheme;
     showTitle?: boolean;
     className?: string;
+    connectedMedia?: CanvasConnectedVideoMediaByRole;
 };
 
 export function resolveCustomVideoSettingsState(config: CustomVideoConfig | null, runtime?: CustomVideoRuntimeSnapshot): CustomVideoSettingsState {
@@ -25,7 +27,7 @@ export function resolveCustomVideoSettingsState(config: CustomVideoConfig | null
     return { kind: "ready", config, runtime: normalizeCustomVideoRuntimeState(config, runtime?.values, runtime?.media) };
 }
 
-export function CustomVideoSettingsPanel({ config, runtime: providedRuntime, onRuntimeChange, onMediaRoleOpen, theme, showTitle = true, className = "w-[320px] space-y-4 rounded-2xl px-1 py-0.5" }: CustomVideoSettingsPanelProps) {
+export function CustomVideoSettingsPanel({ config, runtime: providedRuntime, onRuntimeChange, onMediaRoleOpen, theme, showTitle = true, className = "w-[320px] space-y-4 rounded-2xl px-1 py-0.5", connectedMedia = {} }: CustomVideoSettingsPanelProps) {
     const [localRuntime, setLocalRuntime] = useState<CustomVideoRuntimeSnapshot>();
     const state = resolveCustomVideoSettingsState(config, providedRuntime || localRuntime);
 
@@ -114,7 +116,7 @@ export function CustomVideoSettingsPanel({ config, runtime: providedRuntime, onR
                         </div>
                     </SettingGroup>
                 ) : null}
-                <MediaSummary config={state.config} runtime={state.runtime} theme={theme} onMediaRoleOpen={onMediaRoleOpen} />
+                <MediaSummary config={state.config} runtime={state.runtime} theme={theme} onMediaRoleOpen={onMediaRoleOpen} connectedMedia={connectedMedia} />
             </div>
         </ImageSettingsTheme>
     );
@@ -161,7 +163,19 @@ function DimensionOption({ option, selected, theme, onClick }: { option: string;
     );
 }
 
-function MediaSummary({ config, runtime, theme, onMediaRoleOpen }: { config: CustomVideoConfig; runtime: CustomVideoRuntimeSnapshot; theme: CanvasTheme; onMediaRoleOpen?: (role: CustomVideoMediaFeature) => void }) {
+function MediaSummary({
+    config,
+    runtime,
+    theme,
+    onMediaRoleOpen,
+    connectedMedia,
+}: {
+    config: CustomVideoConfig;
+    runtime: CustomVideoRuntimeSnapshot;
+    theme: CanvasTheme;
+    onMediaRoleOpen?: (role: CustomVideoMediaFeature) => void;
+    connectedMedia: CanvasConnectedVideoMediaByRole;
+}) {
     const media = customVideoMediaFeatureNames.filter((role) => config[role].enabled);
     if (!media.length) return null;
     return (
@@ -172,7 +186,7 @@ function MediaSummary({ config, runtime, theme, onMediaRoleOpen }: { config: Cus
                         <span className="min-w-0">
                             <span className="block truncate">{mediaLabels[role]}</span>
                             <span className="block text-xs" style={{ color: theme.node.muted }}>
-                                已选 {runtime.media[role].length} / {config[role].max_count}
+                                已选 {customVideoMediaCount(role, runtime.media[role].length, connectedMediaCount(connectedMedia, role))} / {config[role].max_count}
                             </span>
                         </span>
                         <button type="button" disabled={!onMediaRoleOpen} className="shrink-0 text-xs disabled:opacity-55" style={{ color: theme.node.muted }} onMouseDown={(event) => event.stopPropagation()} onClick={() => onMediaRoleOpen?.(role)}>
@@ -183,6 +197,11 @@ function MediaSummary({ config, runtime, theme, onMediaRoleOpen }: { config: Cus
             </div>
         </SettingGroup>
     );
+}
+
+function connectedMediaCount(connectedMedia: CanvasConnectedVideoMediaByRole, role: CustomVideoMediaFeature) {
+    if (role === "input_video") return 0;
+    return connectedMedia[role]?.length || 0;
 }
 
 function SwitchRow({ label, checked, theme, onChange }: { label: string; checked: boolean; theme: CanvasTheme; onChange: (checked: boolean) => void }) {
