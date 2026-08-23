@@ -1,4 +1,5 @@
 import type { CustomVideoRuntimeContainer } from "@/lib/custom-video-runtime";
+import type { CustomVideoMediaFeature } from "@/lib/custom-video-config";
 
 export type Position = {
     x: number;
@@ -22,6 +23,7 @@ export enum CanvasNodeType {
 export type CanvasNodeStatus = "idle" | "success" | "loading" | "error";
 export type CanvasGenerationMode = "text" | "image" | "video" | "audio";
 export type CanvasImageGenerationType = "generation" | "edit";
+export type CanvasImageRole = Exclude<CustomVideoMediaFeature, "input_video">;
 
 export type CanvasNodeMetadata = CustomVideoRuntimeContainer & {
     content?: string;
@@ -75,6 +77,7 @@ export type CanvasConnection = {
     id: string;
     fromNodeId: string;
     toNodeId: string;
+    targetImageRole?: CanvasImageRole;
 };
 
 export type CanvasAssistantReference = {
@@ -114,6 +117,7 @@ export type CanvasAssistantSession = {
 export type ConnectionHandle = {
     nodeId: string;
     handleType: "source" | "target";
+    targetImageRole?: CanvasImageRole;
 };
 
 export type SelectionBox = {

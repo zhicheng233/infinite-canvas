@@ -1,9 +1,9 @@
 import crypto from "node:crypto";
 import type { ServerResponse } from "node:http";
 
-import { type ToolName } from "./schemas.js";
+import { canvasSnapshotSchema, type ToolName } from "./schemas.js";
 import { compactCanvasState, compactNode, isToolName, nextCanvasX, parseToolInput } from "./tools.js";
-import type { CanvasNode, CanvasNodeType, CanvasSnapshot } from "./types.js";
+import type { CanvasConnection, CanvasNode, CanvasNodeType, CanvasSnapshot } from "./types.js";
 
 type PendingRequest = { resolve: (value: unknown) => void; reject: (error: Error) => void };
 
@@ -30,7 +30,8 @@ export class CanvasSession {
     }
 
     updateState(body: unknown, clientId?: string) {
-        this.canvasState = { ...((body && typeof body === "object" && !Array.isArray(body) ? body : {}) as Record<string, unknown>), clientId } as CanvasSnapshot;
+        const state = canvasSnapshotSchema.parse(body);
+        this.canvasState = { ...state, ...(clientId ? { clientId } : {}) };
     }
 
     resolveResult(body: { requestId?: string; error?: string; result?: unknown }) {
@@ -127,7 +128,7 @@ export class CanvasSession {
             tool = "canvas_apply_ops";
         }
         if (tool === "canvas_connect_nodes") {
-            const data = input as { connections: Array<{ fromNodeId: string; toNodeId: string }> };
+            const data = input as { connections: Array<Omit<CanvasConnection, "id">> };
             input = { ops: data.connections.map((connection) => ({ type: "connect_nodes", ...connection })) };
             tool = "canvas_apply_ops";
         }

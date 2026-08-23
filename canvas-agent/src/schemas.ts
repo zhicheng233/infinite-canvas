@@ -5,6 +5,15 @@ const positionSchema = z.object({ x: z.number(), y: z.number() });
 const viewportSchema = z.object({ x: z.number(), y: z.number(), k: z.number() });
 const nodeTypeSchema = z.enum(["image", "text", "config", "video", "audio"]);
 const generationModeSchema = z.enum(["text", "image", "video", "audio"]);
+export const canvasImageRoleSchema = z.enum(["images", "input_reference", "style_references", "element_references", "reference_images"]);
+const canvasConnectInputSchema = z.object({ fromNodeId: z.string().min(1), toNodeId: z.string().min(1), targetImageRole: canvasImageRoleSchema.optional() }).strict();
+const connectionIdSchema = z.string().refine((value) => value.trim().length > 0, "id must contain a non-whitespace character");
+export const canvasConnectionSchema = canvasConnectInputSchema.extend({ id: connectionIdSchema }).strict();
+const canvasNodeSchema = z.object({ id: z.string().min(1), type: nodeTypeSchema, title: z.string().optional(), position: positionSchema, width: z.number(), height: z.number(), metadata: recordSchema.optional() }).strict();
+export const canvasSnapshotSchema = z.object({ projectId: z.string().optional(), title: z.string().optional(), nodes: z.array(canvasNodeSchema).optional(), connections: z.array(canvasConnectionSchema).optional(), selectedNodeIds: z.array(z.string()).optional(), viewport: viewportSchema.optional(), clientId: z.string().optional() }).strict();
+export type CanvasImageRole = z.infer<typeof canvasImageRoleSchema>;
+export type CanvasConnectionWire = z.infer<typeof canvasConnectionSchema>;
+export type CanvasSnapshotWire = z.infer<typeof canvasSnapshotSchema>;
 
 export const toolNames = [
     "canvas_get_state",
@@ -38,7 +47,7 @@ export const canvasOpSchema = z.discriminatedUnion("type", [
     z.object({ type: z.literal("update_node"), id: z.string(), patch: recordSchema.optional(), metadata: recordSchema.optional() }).passthrough(),
     z.object({ type: z.literal("delete_node"), id: z.string().optional(), ids: z.array(z.string()).optional() }).passthrough(),
     z.object({ type: z.literal("delete_connections"), id: z.string().optional(), ids: z.array(z.string()).optional(), all: z.boolean().optional() }).passthrough(),
-    z.object({ type: z.literal("connect_nodes"), id: z.string().optional(), fromNodeId: z.string(), toNodeId: z.string() }).passthrough(),
+    canvasConnectInputSchema.extend({ type: z.literal("connect_nodes"), id: connectionIdSchema.optional() }).strict(),
     z.object({ type: z.literal("set_viewport"), viewport: viewportSchema }).passthrough(),
     z.object({ type: z.literal("select_nodes"), ids: z.array(z.string()) }).passthrough(),
     z.object({ type: z.literal("run_generation"), nodeId: z.string(), mode: generationModeSchema.optional(), prompt: z.string().optional() }).passthrough(),
@@ -96,7 +105,7 @@ export const toolInputSchemas = {
     canvas_move_nodes: z.object({ items: z.array(z.object({ id: z.string(), x: z.number().optional(), y: z.number().optional(), dx: z.number().optional(), dy: z.number().optional() })).min(1) }),
     canvas_resize_node: z.object({ id: z.string(), width: z.number(), height: z.number(), freeResize: z.boolean().optional() }),
     canvas_delete_nodes: z.object({ ids: z.array(z.string()).min(1) }),
-    canvas_connect_nodes: z.object({ connections: z.array(z.object({ fromNodeId: z.string(), toNodeId: z.string() })).min(1) }),
+    canvas_connect_nodes: z.object({ connections: z.array(canvasConnectInputSchema).min(1) }),
     canvas_select_nodes: z.object({ ids: z.array(z.string()) }),
     canvas_set_viewport: z.object({ viewport: viewportSchema }),
     canvas_run_generation: z.object({ nodeId: z.string(), mode: generationModeSchema.optional(), prompt: z.string().optional() }),

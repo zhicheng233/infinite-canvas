@@ -13,6 +13,7 @@ import type { CustomVideoRuntimeSnapshot } from "@/lib/custom-video-runtime";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { CanvasCustomVideoReferenceInputs } from "./canvas-custom-video-reference-inputs";
 import { canvasCustomVideoRuntimeForModel } from "./canvas-custom-video-runtime";
+import type { CanvasConnectedVideoMediaByRole } from "./canvas-connected-video-media";
 
 type CanvasVideoSettingsPopoverProps = {
     config: AiConfig;
@@ -22,9 +23,10 @@ type CanvasVideoSettingsPopoverProps = {
     onCustomVideoRuntimeChange?: (runtime: CustomVideoRuntimeSnapshot) => void;
     buttonClassName?: string;
     placement?: "topLeft" | "top" | "topRight" | "bottomLeft" | "bottom" | "bottomRight";
+    connectedMedia?: CanvasConnectedVideoMediaByRole;
 };
 
-export function CanvasVideoSettingsPopover({ config, model, onConfigChange, customVideoRuntime, onCustomVideoRuntimeChange, buttonClassName, placement = "topLeft" }: CanvasVideoSettingsPopoverProps) {
+export function CanvasVideoSettingsPopover({ config, model, onConfigChange, customVideoRuntime, onCustomVideoRuntimeChange, buttonClassName, placement = "topLeft", connectedMedia }: CanvasVideoSettingsPopoverProps) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const displaySeconds = normalizeVideoDurationForModel(config, model || config.model || config.videoModel, config.videoSeconds);
     const buttonRef = useRef<HTMLSpanElement>(null);
@@ -65,6 +67,7 @@ export function CanvasVideoSettingsPopover({ config, model, onConfigChange, cust
                 onConfigChange={onConfigChange}
                 customVideoRuntime={customVideoRuntime}
                 onCustomVideoRuntimeChange={onCustomVideoRuntimeChange}
+                connectedMedia={connectedMedia}
             />
         ) : null;
 
@@ -99,6 +102,7 @@ function VideoSettingsPortal({
     onConfigChange,
     customVideoRuntime,
     onCustomVideoRuntimeChange,
+    connectedMedia,
 }: {
     buttonRect: DOMRect;
     panelRef: RefObject<HTMLDivElement | null>;
@@ -109,6 +113,7 @@ function VideoSettingsPortal({
     onConfigChange: (key: keyof AiConfig, value: string) => void;
     customVideoRuntime?: CustomVideoRuntimeSnapshot;
     onCustomVideoRuntimeChange?: (runtime: CustomVideoRuntimeSnapshot) => void;
+    connectedMedia?: CanvasConnectedVideoMediaByRole;
 }) {
     const selectedModel = model || config.videoModel || config.model;
     const customConfig = customVideoConfigForModel(config, selectedModel);
@@ -147,7 +152,9 @@ function VideoSettingsPortal({
                 onCustomVideoRuntimeChange={onCustomVideoRuntimeChange}
                 onCustomVideoMediaRoleOpen={setFocusRole}
             />
-            {customConfig && normalizedRuntime && onCustomVideoRuntimeChange ? <CanvasCustomVideoReferenceInputs config={customConfig} runtime={normalizedRuntime} theme={theme} focusRole={focusRole} onChange={onCustomVideoRuntimeChange} /> : null}
+            {customConfig && normalizedRuntime && onCustomVideoRuntimeChange ? (
+                <CanvasCustomVideoReferenceInputs config={customConfig} runtime={normalizedRuntime} theme={theme} focusRole={focusRole} onChange={onCustomVideoRuntimeChange} connectedMedia={connectedMedia} />
+            ) : null}
         </div>,
         document.body,
     );

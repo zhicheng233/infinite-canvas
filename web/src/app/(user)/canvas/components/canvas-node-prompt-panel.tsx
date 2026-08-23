@@ -15,6 +15,7 @@ import { CanvasAudioSettingsPopover, type CanvasAudioSettingKey } from "./canvas
 import { CanvasResourceMentionTextarea } from "./canvas-resource-mention-textarea";
 import { CanvasVideoSettingsPopover } from "./canvas-video-settings-popover";
 import { canvasCustomVideoRuntimeForModel } from "./canvas-custom-video-runtime";
+import type { CanvasConnectedVideoMediaByRole } from "./canvas-connected-video-media";
 import { CanvasNodeType, type CanvasGenerationMode, type CanvasNodeData } from "../types";
 import type { CanvasResourceReference } from "../utils/canvas-resource-references";
 
@@ -29,9 +30,10 @@ type CanvasNodePromptPanelProps = {
     onStop: (nodeId: string) => void;
     mentionReferences?: CanvasResourceReference[];
     onImageSettingsOpenChange?: (open: boolean) => void;
+    connectedVideoMedia?: CanvasConnectedVideoMediaByRole;
 };
 
-export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfigChange, onGenerate, onStop, mentionReferences = [], onImageSettingsOpenChange }: CanvasNodePromptPanelProps) {
+export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfigChange, onGenerate, onStop, mentionReferences = [], onImageSettingsOpenChange, connectedVideoMedia }: CanvasNodePromptPanelProps) {
     const globalConfig = useEffectiveConfig();
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
@@ -108,6 +110,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                                 onConfigChange={(key, value) => onConfigChange(node.id, videoConfigPatch(key, value))}
                                 customVideoRuntime={node.metadata?.customVideoRuntime}
                                 onCustomVideoRuntimeChange={(customVideoRuntime) => onConfigChange(node.id, { customVideoRuntime })}
+                                connectedMedia={connectedVideoMedia}
                             />
                         </>
                     ) : mode === "audio" ? (

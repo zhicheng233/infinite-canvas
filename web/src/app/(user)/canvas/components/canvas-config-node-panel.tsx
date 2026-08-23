@@ -13,6 +13,7 @@ import { CanvasImageSettingsPopover } from "./canvas-image-settings-popover";
 import { CanvasAudioSettingsPopover, type CanvasAudioSettingKey } from "./canvas-audio-settings-popover";
 import { CanvasVideoSettingsPopover } from "./canvas-video-settings-popover";
 import { canvasCustomVideoRuntimeForModel } from "./canvas-custom-video-runtime";
+import type { CanvasConnectedVideoMediaByRole } from "./canvas-connected-video-media";
 import type { CanvasGenerationMode, CanvasNodeData, CanvasNodeMetadata } from "../types";
 
 type CanvasConfigNodePanelProps = {
@@ -23,9 +24,10 @@ type CanvasConfigNodePanelProps = {
     onGenerate: (nodeId: string) => void;
     onStop: (nodeId: string) => void;
     onComposerToggle: () => void;
+    connectedVideoMedia?: CanvasConnectedVideoMediaByRole;
 };
 
-export function CanvasConfigNodePanel({ node, isRunning, inputSummary, onConfigChange, onGenerate, onStop, onComposerToggle }: CanvasConfigNodePanelProps) {
+export function CanvasConfigNodePanel({ node, isRunning, inputSummary, onConfigChange, onGenerate, onStop, onComposerToggle, connectedVideoMedia }: CanvasConfigNodePanelProps) {
     const globalConfig = useEffectiveConfig();
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
@@ -128,6 +130,7 @@ export function CanvasConfigNodePanel({ node, isRunning, inputSummary, onConfigC
                         onConfigChange={(key, value) => onConfigChange(node.id, videoConfigPatch(key, value))}
                         customVideoRuntime={node.metadata?.customVideoRuntime}
                         onCustomVideoRuntimeChange={(customVideoRuntime) => onConfigChange(node.id, { customVideoRuntime })}
+                        connectedMedia={connectedVideoMedia}
                     />
                 ) : mode === "image" ? (
                     <CanvasImageSettingsPopover

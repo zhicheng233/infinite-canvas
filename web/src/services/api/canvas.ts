@@ -1,5 +1,6 @@
 import apiClient from "./client";
 import type { CanvasProject } from "@/app/(user)/canvas/stores/use-canvas-store";
+import { normalizeCanvasConnections } from "@/app/(user)/canvas/utils/canvas-connections";
 
 type CanvasProjectDTO = {
     project_id: string;
@@ -41,7 +42,7 @@ function dtoToProject(dto: CanvasProjectDTO): CanvasProject {
         createdAt: dto.created_at,
         updatedAt: dto.updated_at,
         nodes: safeParse(dto.nodes, []),
-        connections: safeParse(dto.connections, []),
+        connections: normalizeCanvasConnections(safeParse(dto.connections, [])),
         chatSessions: safeParse(dto.chat_sessions, []),
         activeChatId: dto.active_chat_id || null,
         backgroundMode: (dto.background_mode as CanvasProject["backgroundMode"]) || "lines",
@@ -59,7 +60,7 @@ function projectToSavePayload(project: CanvasProject) {
         id: project.id,
         title: project.title,
         nodes: project.nodes,
-        connections: project.connections,
+        connections: normalizeCanvasConnections(project.connections),
         chat_sessions: project.chatSessions,
         active_chat_id: project.activeChatId || "",
         background_mode: project.backgroundMode,

@@ -6,6 +6,7 @@ import { localForageStorage } from "@/lib/localforage-storage";
 import type { CanvasBackgroundMode } from "@/lib/canvas-theme";
 import type { CanvasAssistantSession, CanvasConnection, CanvasNodeData, ViewportTransform } from "../types";
 import { saveCanvas, deleteBatchCanvas, listCanvases } from "@/services/api/canvas";
+import { normalizeCanvasConnections } from "../utils/canvas-connections";
 
 export type CanvasProject = {
     id: string;
@@ -53,6 +54,10 @@ const queuedPersistStates = new Map<string, PersistedCanvasState>();
 
 // Cloud save debounce: 2 seconds after last update per project
 const cloudSaveTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+function normalizeProjectConnections(project: CanvasProject): CanvasProject {
+    return { ...project, connections: normalizeCanvasConnections(project.connections) };
+}
 
 function setProjectSaveState(projectId: string, patch: Partial<CanvasProjectSaveState>) {
     useCanvasStore.setState((state) => ({
@@ -111,8 +116,9 @@ const canvasStorage: PersistStorage<CanvasStore> = {
         const value = await localForageStorage.getItem(name);
         if (!value) return null;
         const parsed = JSON.parse(value) as StorageValue<CanvasStore>;
-        queuedPersistStates.set(name, parsed.state as PersistedCanvasState);
-        return parsed;
+        const normalized = { ...parsed, state: { ...parsed.state, projects: Array.isArray(parsed.state.projects) ? parsed.state.projects.map(normalizeProjectConnections) : [] } };
+        queuedPersistStates.set(name, normalized.state as PersistedCanvasState);
+        return normalized;
     },
     setItem: (name, value) => {
         const nextState = value.state as PersistedCanvasState;
@@ -175,7 +181,7 @@ export const useCanvasStore = create<CanvasStore>()(
                     createdAt: source.createdAt || now,
                     updatedAt: now,
                     nodes: source.nodes || [],
-                    connections: source.connections || [],
+                    connections: normalizeCanvasConnections(source.connections),
                     chatSessions: source.chatSessions || [],
                     activeChatId: source.activeChatId || null,
                     backgroundMode: source.backgroundMode || "lines",
@@ -204,10 +210,11 @@ export const useCanvasStore = create<CanvasStore>()(
                 removeProjectSaveStates(ids);
                 deleteBatchCanvas(ids).catch((err) => console.error("[CanvasStore] Cloud delete failed:", err));
             },
-            replaceProjects: (projects) => set({ projects }),
+            replaceProjects: (projects) => set({ projects: projects.map(normalizeProjectConnections) }),
             updateProject: (id, patch) => {
+                const normalizedPatch = patch.connections ? { ...patch, connections: normalizeCanvasConnections(patch.connections) } : patch;
                 set((state) => ({
-                    projects: state.projects.map((project) => (project.id === id ? { ...project, ...patch, updatedAt: new Date().toISOString() } : project)),
+                    projects: state.projects.map((project) => (project.id === id ? { ...project, ...normalizedPatch, updatedAt: new Date().toISOString() } : project)),
                 }));
                 const project = get().projects.find((p) => p.id === id);
                 if (project) scheduleCloudSave(project);
@@ -219,7 +226,7 @@ export const useCanvasStore = create<CanvasStore>()(
                     const localProjects = get().projects;
                     const merged = new Map(localProjects.map((p) => [p.id, p]));
                     for (const cp of cloudProjects) {
-                        merged.set(cp.id, cp);
+                        merged.set(cp.id, normalizeProjectConnections(cp));
                     }
                     set({ projects: Array.from(merged.values()) });
                 } catch (err) {

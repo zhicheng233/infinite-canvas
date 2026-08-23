@@ -1,14 +1,17 @@
 import { nanoid } from "nanoid";
 
+import type { AiConfig } from "@/stores/use-config-store";
 import { getNodeSpec } from "../constants";
-import { CanvasNodeType, type CanvasConnection, type CanvasNodeData, type CanvasNodeMetadata, type ViewportTransform } from "../types";
+import { CanvasNodeType, type CanvasConnection, type CanvasImageRole, type CanvasNodeData, type CanvasNodeMetadata, type ViewportTransform } from "../types";
+import { canvasConnectionValidationError } from "./canvas-connection-targets";
+import { normalizeCanvasConnection, normalizeCanvasConnections, sameCanvasConnectionIdentity } from "./canvas-connections";
 
 export type CanvasAgentOp =
     | { type: "add_node"; id?: string; nodeType?: CanvasNodeType; title?: string; position?: { x: number; y: number }; x?: number; y?: number; width?: number; height?: number; metadata?: CanvasNodeMetadata }
     | { type: "update_node"; id: string; patch?: Partial<CanvasNodeData>; metadata?: CanvasNodeMetadata }
     | { type: "delete_node"; id?: string; ids?: string[]; nodeType?: CanvasNodeType }
     | { type: "delete_connections"; id?: string; ids?: string[]; all?: boolean }
-    | { type: "connect_nodes"; id?: string; fromNodeId: string; toNodeId: string }
+    | { type: "connect_nodes"; id?: string; fromNodeId: string; toNodeId: string; targetImageRole?: CanvasImageRole }
     | { type: "set_viewport"; viewport: ViewportTransform }
     | { type: "select_nodes"; ids: string[] }
     | { type: "run_generation"; nodeId: string; mode?: "text" | "image" | "video" | "audio"; prompt?: string };
@@ -33,9 +36,9 @@ export function summarizeCanvasAgentOps(ops?: CanvasAgentOp[]) {
         .join("，");
 }
 
-export function applyCanvasAgentOps(snapshot: CanvasAgentSnapshot, ops?: CanvasAgentOp[]) {
+export function applyCanvasAgentOps(snapshot: CanvasAgentSnapshot, config: AiConfig, ops?: CanvasAgentOp[]) {
     let nodes = snapshot.nodes;
-    let connections = snapshot.connections;
+    let connections = normalizeCanvasConnections(snapshot.connections);
     let selectedNodeIds = snapshot.selectedNodeIds;
     let viewport = snapshot.viewport;
 
@@ -72,9 +75,15 @@ export function applyCanvasAgentOps(snapshot: CanvasAgentSnapshot, ops?: CanvasA
         }
         if (op.type === "connect_nodes") {
             if (!op.fromNodeId || !op.toNodeId) return;
-            const exists = connections.some((conn) => conn.fromNodeId === op.fromNodeId && conn.toNodeId === op.toNodeId);
+            const connection = normalizeCanvasConnection({ id: op.id || nanoid(), fromNodeId: op.fromNodeId, toNodeId: op.toNodeId, ...(op.targetImageRole === undefined ? {} : { targetImageRole: op.targetImageRole }) });
+            if (!connection) return;
+            if (connection.targetImageRole) {
+                if (!canvasConnectionValidationError(connection, config, nodes, connections)) connections = [...connections, connection];
+                return;
+            }
+            const exists = connections.some((existing) => sameCanvasConnectionIdentity(existing, connection));
             const hasNodes = nodes.some((node) => node.id === op.fromNodeId) && nodes.some((node) => node.id === op.toNodeId);
-            if (!exists && hasNodes) connections = [...connections, { id: op.id || nanoid(), fromNodeId: op.fromNodeId, toNodeId: op.toNodeId }];
+            if (!exists && hasNodes) connections = [...connections, connection];
         }
         if (op.type === "set_viewport" && op.viewport) viewport = op.viewport;
         if (op.type === "select_nodes") selectedNodeIds = (op.ids || []).filter((id) => nodes.some((node) => node.id === id));

@@ -24,6 +24,7 @@ import { NODE_DEFAULT_SIZE } from "../constants";
 import { CanvasNodeType, type CanvasAssistantMessage, type CanvasAssistantReference, type CanvasAssistantSession, type CanvasNodeData } from "../types";
 import { useCanvasAgentStore } from "../stores/use-canvas-agent-store";
 import { summarizeCanvasAgentOps, type CanvasAgentOp, type CanvasAgentSnapshot } from "../utils/canvas-agent-ops";
+import { canvasImageRoles, normalizeCanvasImageRole } from "../utils/canvas-connections";
 
 export const CANVAS_AGENT_PANEL_MOTION_MS = 500;
 const PANEL_MOTION_SECONDS = CANVAS_AGENT_PANEL_MOTION_MS / 1000;
@@ -68,6 +69,7 @@ const CANVAS_OP_SCHEMA = {
         all: { type: "boolean" },
         fromNodeId: { type: "string" },
         toNodeId: { type: "string" },
+        targetImageRole: { type: "string", enum: canvasImageRoles },
         viewport: VIEWPORT_SCHEMA,
         nodeId: { type: "string" },
         mode: GENERATION_MODE_SCHEMA,
@@ -180,7 +182,13 @@ const ONLINE_AGENT_TOOLS: ResponseFunctionTool[] = [
     toolDefinition(
         "canvas_connect_nodes",
         "批量连接节点。",
-        { connections: { type: "array", minItems: 1, items: { type: "object", properties: { fromNodeId: { type: "string" }, toNodeId: { type: "string" } }, required: ["fromNodeId", "toNodeId"], additionalProperties: false } } },
+        {
+            connections: {
+                type: "array",
+                minItems: 1,
+                items: { type: "object", properties: { fromNodeId: { type: "string" }, toNodeId: { type: "string" }, targetImageRole: { type: "string", enum: canvasImageRoles } }, required: ["fromNodeId", "toNodeId"], additionalProperties: false },
+            },
+        },
         ["connections"],
     ),
     toolDefinition("canvas_select_nodes", "设置当前选中节点。", { ids: { type: "array", items: { type: "string" } } }, ["ids"]),
@@ -1097,7 +1105,12 @@ function onlineToolToOps(name: string, input: Record<string, unknown>, snapshot:
         ];
     if (name === "canvas_delete_nodes") return [{ type: "delete_node", ids: requireStringArray(input.ids, "ids") }];
     if (name === "canvas_connect_nodes")
-        return requireRecordArray(input.connections, "connections").map((connection) => ({ type: "connect_nodes", fromNodeId: requireString(connection.fromNodeId, "fromNodeId"), toNodeId: requireString(connection.toNodeId, "toNodeId") }));
+        return requireRecordArray(input.connections, "connections").map((connection) => ({
+            type: "connect_nodes",
+            fromNodeId: requireString(connection.fromNodeId, "fromNodeId"),
+            toNodeId: requireString(connection.toNodeId, "toNodeId"),
+            ...targetImageRoleField(connection.targetImageRole),
+        }));
     if (name === "canvas_select_nodes") return [{ type: "select_nodes", ids: requireStringArray(input.ids, "ids") }];
     if (name === "canvas_set_viewport") return [{ type: "set_viewport", viewport: requireViewport(input.viewport) }];
     if (name === "canvas_run_generation") return [runGenerationOp(requireString(input.nodeId, "nodeId"), generationMode(input.mode), stringOptional(input.prompt))];
@@ -1257,7 +1270,7 @@ function toCanvasAgentOp(value: unknown): CanvasAgentOp {
     if (type === "update_node") return { type, id: requireString(item.id, "id"), patch: recordOptional(item.patch) as Partial<CanvasNodeData> | undefined, metadata: recordOptional(item.metadata) as CanvasNodeData["metadata"] };
     if (type === "delete_node") return { type, id: stringOptional(item.id), ids: Array.isArray(item.ids) ? requireStringArray(item.ids, "ids") : undefined };
     if (type === "delete_connections") return { type, id: stringOptional(item.id), ids: Array.isArray(item.ids) ? requireStringArray(item.ids, "ids") : undefined, all: typeof item.all === "boolean" ? item.all : undefined };
-    if (type === "connect_nodes") return { type, id: stringOptional(item.id), fromNodeId: requireString(item.fromNodeId, "fromNodeId"), toNodeId: requireString(item.toNodeId, "toNodeId") };
+    if (type === "connect_nodes") return { type, id: stringOptional(item.id), fromNodeId: requireString(item.fromNodeId, "fromNodeId"), toNodeId: requireString(item.toNodeId, "toNodeId"), ...targetImageRoleField(item.targetImageRole) };
     if (type === "set_viewport") return { type, viewport: requireViewport(item.viewport) };
     if (type === "select_nodes") return { type, ids: requireStringArray(item.ids, "ids") };
     if (type === "run_generation") return { type, nodeId: requireString(item.nodeId, "nodeId"), mode: generationMode(item.mode), prompt: stringOptional(item.prompt) };
@@ -1281,6 +1294,13 @@ function requireString(value: unknown, field: string) {
 function requireNumber(value: unknown, field: string) {
     if (typeof value !== "number" || !Number.isFinite(value)) throw new Error(`${field} 必须是数字`);
     return value;
+}
+
+function targetImageRoleField(value: unknown) {
+    if (value === undefined) return {};
+    const targetImageRole = normalizeCanvasImageRole(value);
+    if (!targetImageRole) throw new Error("targetImageRole 必须是图片媒体角色");
+    return { targetImageRole };
 }
 
 function requireNodeType(value: unknown): CanvasNodeType {

@@ -56,6 +56,18 @@ export function normalizeCustomVideoRuntimeStateForModelSwitch(config: CustomVid
     };
 }
 
+export function normalizePersistedCustomVideoMedia(media: unknown): CustomVideoMediaState {
+    const record = isRecord(media) ? media : {};
+    return {
+        images: normalizePersistedMediaRole(record.images),
+        input_reference: normalizePersistedMediaRole(record.input_reference),
+        style_references: normalizePersistedMediaRole(record.style_references),
+        element_references: normalizePersistedMediaRole(record.element_references),
+        reference_images: normalizePersistedMediaRole(record.reference_images),
+        input_video: normalizePersistedMediaRole(record.input_video),
+    };
+}
+
 export function customVideoRequiredMediaErrors(config: CustomVideoConfig, media: unknown = undefined): readonly CustomVideoRequiredMediaError[] {
     const normalized = normalizeMedia(config, media);
     return customVideoMediaFeatureNames.flatMap((role) => (config[role].enabled && config[role].required && normalized[role].length === 0 ? [{ role, message: `缺少必填素材：${customVideoRequiredMediaLabels[role]}` }] : []));
@@ -136,6 +148,11 @@ function normalizeMediaRole(config: CustomVideoConfig, role: CustomVideoMediaFea
         .filter(isMediaSource)
         .map((item) => item.trim())
         .slice(0, config[role].max_count);
+}
+
+function normalizePersistedMediaRole(value: unknown) {
+    if (!Array.isArray(value)) return [];
+    return value.filter(isMediaSource).map((item) => item.trim());
 }
 
 function isMediaSource(value: unknown): value is string {

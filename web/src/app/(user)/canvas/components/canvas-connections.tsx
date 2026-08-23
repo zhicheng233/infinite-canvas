@@ -3,11 +3,13 @@ import type { MouseEvent as ReactMouseEvent } from "react";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
 import type { CanvasConnection, CanvasNodeData, ConnectionHandle, Position } from "../types";
+import { canvasConnectionSourceAnchor, canvasConnectionTargetAnchor, type CanvasConnectionTarget } from "../utils/canvas-connection-targets";
 
 export function ConnectionPath({
     connection,
     from,
     to,
+    targetTargets,
     active,
     onSelect,
     onContextMenu,
@@ -15,15 +17,18 @@ export function ConnectionPath({
     connection: CanvasConnection;
     from: CanvasNodeData;
     to: CanvasNodeData;
+    targetTargets?: readonly CanvasConnectionTarget[];
     active: boolean;
     onSelect: () => void;
     onContextMenu?: (event: ReactMouseEvent<SVGPathElement>) => void;
 }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
-    const startX = from.position.x + from.width;
-    const startY = from.position.y + from.height / 2;
-    const endX = to.position.x;
-    const endY = to.position.y + to.height / 2;
+    const start = canvasConnectionSourceAnchor(from);
+    const end = canvasConnectionTargetAnchor(to, targetTargets || [], connection.targetImageRole);
+    const startX = start.x;
+    const startY = start.y;
+    const endX = end.x;
+    const endY = end.y;
     const dx = Math.abs(endX - startX);
     const curvature = Math.max(dx * 0.5, 50);
     const pathD = `M ${startX} ${startY} C ${startX + curvature} ${startY}, ${endX - curvature} ${endY}, ${endX} ${endY}`;
@@ -59,18 +64,39 @@ export function ConnectionPath({
     );
 }
 
-export function ActiveConnectionPath({ node, handle, mouseWorld, target }: { node?: CanvasNodeData; handle: ConnectionHandle; mouseWorld: Position; target?: CanvasNodeData }) {
+export function ActiveConnectionPath({
+    node,
+    handle,
+    mouseWorld,
+    target,
+    targetImageRole,
+    nodeTargets,
+    targetTargets,
+}: {
+    node?: CanvasNodeData;
+    handle: ConnectionHandle;
+    mouseWorld: Position;
+    target?: CanvasNodeData;
+    targetImageRole?: ConnectionHandle["targetImageRole"];
+    nodeTargets?: readonly CanvasConnectionTarget[];
+    targetTargets?: readonly CanvasConnectionTarget[];
+}) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     if (!node) return null;
 
-    const startX = handle.handleType === "source" ? node.position.x + node.width : mouseWorld.x;
-    const startY = handle.handleType === "source" ? node.position.y + node.height / 2 : mouseWorld.y;
-    const endX = handle.handleType === "source" ? mouseWorld.x : node.position.x;
-    const endY = handle.handleType === "source" ? mouseWorld.y : node.position.y + node.height / 2;
-    const snappedStartX = handle.handleType === "target" && target ? target.position.x + target.width : startX;
-    const snappedStartY = handle.handleType === "target" && target ? target.position.y + target.height / 2 : startY;
-    const snappedEndX = handle.handleType === "source" && target ? target.position.x : endX;
-    const snappedEndY = handle.handleType === "source" && target ? target.position.y + target.height / 2 : endY;
+    const effectiveTargetImageRole = targetImageRole ?? handle.targetImageRole;
+    const source = canvasConnectionSourceAnchor(node);
+    const targetSource = target ? canvasConnectionSourceAnchor(target) : undefined;
+    const targetImage = target ? canvasConnectionTargetAnchor(target, targetTargets || [], effectiveTargetImageRole) : undefined;
+    const nodeTarget = canvasConnectionTargetAnchor(node, nodeTargets || [], effectiveTargetImageRole);
+    const startX = handle.handleType === "source" ? source.x : mouseWorld.x;
+    const startY = handle.handleType === "source" ? source.y : mouseWorld.y;
+    const endX = handle.handleType === "source" ? mouseWorld.x : nodeTarget.x;
+    const endY = handle.handleType === "source" ? mouseWorld.y : nodeTarget.y;
+    const snappedStartX = handle.handleType === "target" && targetSource ? targetSource.x : startX;
+    const snappedStartY = handle.handleType === "target" && targetSource ? targetSource.y : startY;
+    const snappedEndX = handle.handleType === "source" && targetImage ? targetImage.x : endX;
+    const snappedEndY = handle.handleType === "source" && targetImage ? targetImage.y : endY;
     const distance = Math.abs(snappedEndX - snappedStartX);
     const pathD = `M ${snappedStartX} ${snappedStartY} C ${snappedStartX + distance * 0.5} ${snappedStartY}, ${snappedEndX - distance * 0.5} ${snappedEndY}, ${snappedEndX} ${snappedEndY}`;
 

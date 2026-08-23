@@ -8,8 +8,9 @@ import { canvasThemes } from "@/lib/canvas-theme";
 import { formatBytes } from "@/lib/image-utils";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { CanvasResourceMentionTextarea } from "./canvas-resource-mention-textarea";
-import { CanvasNodeType, type CanvasNodeData, type Position } from "../types";
+import { CanvasNodeType, type CanvasImageRole, type CanvasNodeData, type Position } from "../types";
 import type { CanvasResourceReference } from "../utils/canvas-resource-references";
+import type { CanvasConnectionTarget } from "../utils/canvas-connection-targets";
 
 type ResizeCorner = "top-left" | "top-right" | "bottom-left" | "bottom-right";
 const selectionBlue = "#2f80ff";
@@ -21,6 +22,8 @@ type CanvasNodeProps = {
     isRelated: boolean;
     isFocusRelated: boolean;
     isConnectionTarget: boolean;
+    connectionTargetImageRole?: CanvasImageRole;
+    connectionTargets?: readonly CanvasConnectionTarget[];
     isConnecting: boolean;
     editRequestNonce?: number;
     showPanel: boolean;
@@ -38,7 +41,7 @@ type CanvasNodeProps = {
     onMouseDown: (event: React.MouseEvent, nodeId: string) => void;
     onHoverStart: (nodeId: string) => void;
     onHoverEnd: (nodeId: string) => void;
-    onConnectStart: (event: React.MouseEvent, nodeId: string, handleType: "source" | "target") => void;
+    onConnectStart: (event: React.MouseEvent, nodeId: string, handleType: "source" | "target", targetImageRole?: CanvasImageRole) => void;
     onResize: (nodeId: string, width: number, height: number, position?: Position) => void;
     onContentChange: (nodeId: string, content: string) => void;
     onToggleBatch?: (nodeId: string) => void;
@@ -76,6 +79,8 @@ export const CanvasNode = React.memo(function CanvasNode({
     isRelated,
     isFocusRelated,
     isConnectionTarget,
+    connectionTargetImageRole,
+    connectionTargets,
     isConnecting,
     editRequestNonce = 0,
     showPanel,
@@ -326,7 +331,19 @@ export const CanvasNode = React.memo(function CanvasNode({
                 <ResizeHandle corner="bottom-right" onMouseDown={handleResizeMouseDown} />
             </div>
 
-            <ConnectionHandleDot side="left" visible={hovered || isSelected || isConnecting} onMouseDown={(event) => onConnectStart(event, data.id, "target")} />
+            {(connectionTargets || [{ label: "", yRatio: 0.5, enabled: true, available: true, isImageTarget: false, connectedCount: 0 }]).map((target) => (
+                <ConnectionHandleDot
+                    key={target.targetImageRole || "generic"}
+                    side="left"
+                    target={target}
+                    visible={hovered || isSelected || isConnecting}
+                    interactive={target.available}
+                    active={isConnectionTarget && target.targetImageRole === connectionTargetImageRole}
+                    onMouseDown={(event) => {
+                        if (target.available) onConnectStart(event, data.id, "target", target.targetImageRole);
+                    }}
+                />
+            ))}
             <ConnectionHandleDot side="right" visible={data.type !== CanvasNodeType.Config && (hovered || isSelected || isConnecting)} onMouseDown={(event) => onConnectStart(event, data.id, "source")} />
 
             {showPanel && renderPanel ? <div className="absolute left-1/2 top-full z-[70] w-[calc(100vw-24px)] max-w-[880px] -translate-x-1/2 pt-4">{renderPanel(data)}</div> : null}
@@ -683,17 +700,41 @@ function ResizeHandle({ corner, onMouseDown }: { corner: ResizeCorner; onMouseDo
     return <div className={`absolute z-50 size-7 ${positionClass}`} onMouseDown={(event) => onMouseDown(event, corner)} />;
 }
 
-function ConnectionHandleDot({ side, visible, onMouseDown }: { side: "left" | "right"; visible: boolean; onMouseDown: (event: React.MouseEvent) => void }) {
+function ConnectionHandleDot({
+    side,
+    target,
+    visible,
+    interactive = true,
+    active,
+    onMouseDown,
+}: {
+    side: "left" | "right";
+    target?: CanvasConnectionTarget;
+    visible: boolean;
+    interactive?: boolean;
+    active?: boolean;
+    onMouseDown: (event: React.MouseEvent) => void;
+}) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
 
     return (
         <div
-            className={`absolute top-1/2 z-30 flex size-12 -translate-y-1/2 cursor-crosshair items-center justify-center transition-opacity duration-150 ${
+            className={`absolute z-30 flex size-12 -translate-y-1/2 cursor-crosshair items-center justify-center transition-opacity duration-150 ${
                 side === "left" ? "-left-6" : "-right-6"
-            } ${visible ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"}`}
+            } ${visible ? `${interactive ? "pointer-events-auto" : "pointer-events-none"} opacity-100` : "pointer-events-none opacity-0"}`}
+            style={{ top: target ? `${target.yRatio * 100}%` : "50%" }}
             onMouseDown={onMouseDown}
+            aria-label={target?.label || undefined}
         >
-            <div className="size-3 rounded-full border-2 transition-all hover:scale-125" style={{ background: theme.node.panel, borderColor: theme.node.muted }} />
+            {target?.label ? (
+                <span className="pointer-events-none absolute right-full mr-1.5 max-w-44 truncate text-[10px] leading-4" style={{ color: target.available ? theme.node.muted : theme.node.faint }}>
+                    {target.label}
+                </span>
+            ) : null}
+            <div
+                className={`size-3 rounded-full border-2 transition-all ${target?.available === false ? "border-dashed opacity-55" : "hover:scale-125"}`}
+                style={{ background: theme.node.panel, borderColor: active ? theme.node.activeStroke : target?.available === false ? theme.node.faint : theme.node.muted }}
+            />
         </div>
     );
 }

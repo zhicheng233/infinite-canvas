@@ -9,6 +9,7 @@ import { normalizeCustomVideoRuntimeState, type CustomVideoRuntimeSnapshot } fro
 import type { CanvasTheme } from "@/lib/canvas-theme";
 import { uploadImage } from "@/services/image-storage";
 import { uploadMediaFile } from "@/services/file-storage";
+import type { CanvasConnectedVideoMedia, CanvasConnectedVideoMediaByRole } from "./canvas-connected-video-media";
 
 type CanvasCustomVideoReferenceInputsProps = {
     readonly config: CustomVideoConfig;
@@ -16,6 +17,7 @@ type CanvasCustomVideoReferenceInputsProps = {
     readonly theme: CanvasTheme;
     readonly onChange: (runtime: CustomVideoRuntimeSnapshot) => void;
     readonly focusRole?: CustomVideoMediaFeature;
+    readonly connectedMedia?: CanvasConnectedVideoMediaByRole;
 };
 
 const roleLabels: Record<CustomVideoMediaFeature, string> = {
@@ -44,7 +46,7 @@ export function removeCanvasCustomVideoMedia(runtime: CustomVideoRuntimeSnapshot
     return normalizeCustomVideoRuntimeState(config, runtime.values, { ...runtime.media, [role]: runtime.media[role].filter((_, itemIndex) => itemIndex !== index) });
 }
 
-export function CanvasCustomVideoReferenceInputs({ config, runtime, theme, onChange, focusRole }: CanvasCustomVideoReferenceInputsProps) {
+export function CanvasCustomVideoReferenceInputs({ config, runtime, theme, onChange, focusRole, connectedMedia = {} }: CanvasCustomVideoReferenceInputsProps) {
     const roles = canvasCustomVideoReferenceRoles(config);
     const roleKey = roles.join(",");
     const [expanded, setExpanded] = useState(false);
@@ -54,7 +56,7 @@ export function CanvasCustomVideoReferenceInputs({ config, runtime, theme, onCha
     }, [focusRole, roleKey]);
 
     if (!roles.length) return null;
-    const selected = roles.reduce((total, role) => total + runtime.media[role].length, 0);
+    const selected = roles.reduce((total, role) => total + runtime.media[role].length + (role === "input_video" ? 0 : connectedMedia[role]?.length || 0), 0);
     const requiredRoles = roles.filter((role) => config[role].required);
 
     return (
@@ -76,7 +78,7 @@ export function CanvasCustomVideoReferenceInputs({ config, runtime, theme, onCha
             {expanded ? (
                 <div className="mt-3 space-y-2.5">
                     {roles.map((role) => (
-                        <CanvasCustomVideoRoleInput key={role} role={role} config={config} runtime={runtime} theme={theme} onChange={onChange} />
+                        <CanvasCustomVideoRoleInput key={role} role={role} config={config} runtime={runtime} theme={theme} onChange={onChange} connectedMedia={role === "input_video" ? [] : connectedMedia[role] || []} />
                     ))}
                 </div>
             ) : null}
@@ -90,17 +92,20 @@ function CanvasCustomVideoRoleInput({
     runtime,
     theme,
     onChange,
+    connectedMedia,
 }: {
     readonly role: CustomVideoMediaFeature;
     readonly config: CustomVideoConfig;
     readonly runtime: CustomVideoRuntimeSnapshot;
     readonly theme: CanvasTheme;
     readonly onChange: (runtime: CustomVideoRuntimeSnapshot) => void;
+    readonly connectedMedia: readonly CanvasConnectedVideoMedia[];
 }) {
     const inputRef = useRef<HTMLInputElement>(null);
     const [url, setUrl] = useState("");
     const sources = runtime.media[role];
-    const atLimit = sources.length >= config[role].max_count;
+    const combinedCount = sources.length + connectedMedia.length;
+    const atLimit = combinedCount >= config[role].max_count;
     const isVideo = role === "input_video";
     const showReferenceMode = role === "reference_images" && config.reference_mode.enabled;
 
@@ -112,7 +117,7 @@ function CanvasCustomVideoRoleInput({
 
     const addFiles = async (files: FileList | null) => {
         if (!files || atLimit) return;
-        const sources = await uploadCanvasCustomMediaFiles(files, isVideo, config[role].max_count - runtime.media[role].length);
+        const sources = await uploadCanvasCustomMediaFiles(files, isVideo, config[role].max_count - combinedCount);
         onChange(appendCanvasCustomVideoMedia(runtime, role, sources, config));
     };
 
@@ -138,7 +143,7 @@ function CanvasCustomVideoRoleInput({
                     ) : null}
                 </div>
                 <span className="shrink-0 text-xs" style={{ color: theme.node.muted }}>
-                    {sources.length} / {config[role].max_count}
+                    {combinedCount} / {config[role].max_count}
                 </span>
             </div>
             {sources.length ? (
@@ -154,6 +159,20 @@ function CanvasCustomVideoRoleInput({
                                 aria-label={`删除${roleLabels[role]} ${index + 1}`}
                                 onClick={() => onChange(removeCanvasCustomVideoMedia(runtime, role, index, config))}
                             />
+                        </div>
+                    ))}
+                </div>
+            ) : null}
+            {connectedMedia.length ? (
+                <div className="mt-2 space-y-1">
+                    {connectedMedia.map((media) => (
+                        <div key={media.nodeId} className="flex min-w-0 items-center gap-1.5 text-xs" style={{ color: theme.node.muted }}>
+                            <span className="shrink-0 rounded border px-1.5 py-0.5 text-[10px]" style={{ borderColor: theme.node.stroke, background: theme.toolbar.panel }}>
+                                画布连线
+                            </span>
+                            <span className="min-w-0 flex-1 truncate" title={media.source}>
+                                {media.title}
+                            </span>
                         </div>
                     ))}
                 </div>
