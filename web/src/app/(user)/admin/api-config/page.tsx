@@ -15,6 +15,7 @@ import { testApiModel, type ApiModelTestResult } from "@/services/api/api-config
 import { listWebhookConfigs, saveWebhookConfig, testWebhookSend, listWebhookLogs } from "@/services/api/webhook";
 import type { WebhookConfig, WebhookLogItem, TestSendResult } from "@/services/api/webhook";
 import { listMergeGroups, deleteMergeGroup, autoCreateMergeGroups, type MergeGroup } from "@/services/api/merge-groups-admin";
+import { ApiConfigTransfer } from "./components/api-config-transfer";
 import { initialVideoModelFormValues, ModelVideoConfigFields, normalizeVideoModelFormValues } from "./components/model-video-config-fields";
 
 const imageRouteOptions = [
@@ -127,13 +128,13 @@ export default function AdminApiConfigPage() {
     const [loadingMergeGroups, setLoadingMergeGroups] = useState(false);
 
     // Load initial data
-    const fetchChannels = async () => {
+    const fetchChannels = async (keepSelection = true) => {
         setLoadingChannels(true);
         try {
             const data = await listAllChannels();
             setChannels(data || []);
             // Update selectedChannel info if it is open to keep sync status current
-            if (selectedChannel) {
+            if (keepSelection && selectedChannel) {
                 const updated = data.find((c) => c.id === selectedChannel.id);
                 if (updated) {
                     setSelectedChannel(updated);
@@ -366,6 +367,13 @@ export default function AdminApiConfigPage() {
 
     const closePanel = () => {
         setSelectedChannel(null);
+    };
+
+    const handleConfigImported = async () => {
+        setSelectedChannel(null);
+        setModels([]);
+        setMergeGroups([]);
+        await Promise.all([fetchChannels(false), fetchPricing()]);
     };
 
     // -- Capability editing handlers --
@@ -989,9 +997,12 @@ export default function AdminApiConfigPage() {
                     <Card
                         title="全局渠道列表"
                         extra={
-                            <Button type="primary" icon={<Plus className="size-4" />} onClick={() => openChannelModal()} disabled={!isSuperAdmin}>
-                                新增渠道
-                            </Button>
+                            <Space>
+                                <ApiConfigTransfer disabled={!isSuperAdmin} onImported={handleConfigImported} />
+                                <Button type="primary" icon={<Plus className="size-4" />} onClick={() => openChannelModal()} disabled={!isSuperAdmin}>
+                                    新增渠道
+                                </Button>
+                            </Space>
                         }
                     >
                         <Table rowKey="id" columns={channelColumns} dataSource={channels} loading={loadingChannels} pagination={false} scroll={{ x: 1000 }} />

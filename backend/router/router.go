@@ -9,7 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func Setup(r *gin.Engine, authService *service.AuthService, authHandler *handler.AuthHandler, adminHandler *handler.AdminHandler, userHandler *handler.UserHandler, creditHandler *handler.CreditHandler, generateHandler *handler.GenerateHandler, apiConfigHandler *handler.ApiConfigHandler, videoConfigPresetHandler *handler.VideoConfigPresetHandler, proxyHandler *handler.ProxyHandler, canvasHandler *handler.CanvasHandler, generationRecordHandler *handler.GenerationRecordHandler, rechargeHandler *handler.RechargeHandler, captchaHandler *handler.CaptchaHandler, tempMediaHandler *handler.TempMediaHandler, channelStatusHandler *handler.ChannelStatusHandler, channelHandler *handler.ChannelHandler, channelModelHandler *handler.ChannelModelHandler, metricsHandler *handler.MetricsHandler, webhookHandler *handler.WebhookHandler, mergeGroupHandler *handler.MergeGroupHandler, siteAnnouncementHandler *handler.SiteAnnouncementHandler) {
+func Setup(r *gin.Engine, authService *service.AuthService, authHandler *handler.AuthHandler, adminHandler *handler.AdminHandler, userHandler *handler.UserHandler, creditHandler *handler.CreditHandler, generateHandler *handler.GenerateHandler, apiConfigHandler *handler.ApiConfigHandler, videoConfigPresetHandler *handler.VideoConfigPresetHandler, proxyHandler *handler.ProxyHandler, canvasHandler *handler.CanvasHandler, generationRecordHandler *handler.GenerationRecordHandler, rechargeHandler *handler.RechargeHandler, captchaHandler *handler.CaptchaHandler, tempMediaHandler *handler.TempMediaHandler, channelStatusHandler *handler.ChannelStatusHandler, channelHandler *handler.ChannelHandler, channelModelHandler *handler.ChannelModelHandler, metricsHandler *handler.MetricsHandler, webhookHandler *handler.WebhookHandler, mergeGroupHandler *handler.MergeGroupHandler, apiConfigTransferHandler *handler.APIConfigTransferHandler, siteAnnouncementHandler *handler.SiteAnnouncementHandler) {
 	r.Use(middleware.Cors())
 	healthHandler := handler.NewHealthHandler(config.BuildVersion)
 
@@ -111,6 +111,9 @@ func Setup(r *gin.Engine, authService *service.AuthService, authHandler *handler
 			superAdmin.POST("/admin/channels/:id/merge-groups", mergeGroupHandler.Create)
 			superAdmin.DELETE("/admin/channels/:id/merge-groups/:groupId", mergeGroupHandler.Delete)
 			superAdmin.POST("/admin/channels/:id/merge-groups/auto", mergeGroupHandler.AutoCreate)
+			superAdmin.POST("/admin/api-config/export", apiConfigTransferHandler.Export)
+			superAdmin.POST("/admin/api-config/import/preview", apiConfigTransferHandler.Preview)
+			superAdmin.POST("/admin/api-config/import", apiConfigTransferHandler.Import)
 			superAdmin.GET("/admin/metrics-config", metricsHandler.GetConfig)
 			superAdmin.POST("/admin/metrics-config", metricsHandler.SaveConfig)
 			superAdmin.GET("/admin/announcement", siteAnnouncementHandler.AdminGet)

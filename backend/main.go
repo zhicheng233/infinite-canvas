@@ -60,6 +60,7 @@ func main() {
 	metricsConfigRepo := repository.NewMetricsConfigRepo(db)
 	webhookRepo := repository.NewWebhookRepo(db)
 	mergeGroupRepo := repository.NewMergeGroupRepo(db)
+	apiConfigTransferRepo := repository.NewAPIConfigTransferRepo(db)
 	siteAnnouncementRepo := repository.NewSiteAnnouncementRepo(db)
 
 	captchaService := service.NewCaptchaService()
@@ -84,6 +85,7 @@ func main() {
 	channelStatusService := service.NewChannelStatusService(modelCallLogRepo, apiConfigRepo)
 	paymentGateway := service.NewMockPaymentGateway(rechargeRepo, creditService)
 	mergeGroupService := service.NewMergeGroupService(mergeGroupRepo)
+	apiConfigTransferService := service.NewAPIConfigTransferService(apiConfigTransferRepo, cfg.ApiKeyEncryptKey)
 
 	authHandler := handler.NewAuthHandler(authService, userService)
 	adminHandler := handler.NewAdminHandler(tenantRepo, userRepo, creditService, creditRepo, rechargeRepo, modelCallLogRepo, modelCallLogService)
@@ -104,10 +106,11 @@ func main() {
 	metricsHandler := handler.NewMetricsHandler(metricsService)
 	webhookHandler := handler.NewWebhookHandler(webhookService)
 	mergeGroupHandler := handler.NewMergeGroupHandler(mergeGroupService)
+	apiConfigTransferHandler := handler.NewAPIConfigTransferHandler(apiConfigTransferService)
 	siteAnnouncementHandler := handler.NewSiteAnnouncementHandler(siteAnnouncementService)
 
 	r := gin.Default()
-	router.Setup(r, authService, authHandler, adminHandler, userHandler, creditHandler, generateHandler, apiConfigHandler, videoConfigPresetHandler, proxyHandler, canvasHandler, generationRecordHandler, rechargeHandler, captchaHandler, tempMediaHandler, channelStatusHandler, channelHandler, channelModelHandler, metricsHandler, webhookHandler, mergeGroupHandler, siteAnnouncementHandler)
+	router.Setup(r, authService, authHandler, adminHandler, userHandler, creditHandler, generateHandler, apiConfigHandler, videoConfigPresetHandler, proxyHandler, canvasHandler, generationRecordHandler, rechargeHandler, captchaHandler, tempMediaHandler, channelStatusHandler, channelHandler, channelModelHandler, metricsHandler, webhookHandler, mergeGroupHandler, apiConfigTransferHandler, siteAnnouncementHandler)
 
 	log.Printf("Server starting on port %s", cfg.Port)
 	if err := r.Run(":" + cfg.Port); err != nil {
