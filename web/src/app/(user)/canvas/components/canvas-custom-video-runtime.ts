@@ -10,7 +10,7 @@ import {
     type CustomVideoRuntimeSnapshot,
 } from "@/lib/custom-video-runtime";
 import { resolveNodeGenerationImageSources, type NodeGenerationImageInput, type NodeGenerationImageSource } from "./canvas-node-generation";
-import { canvasImageRoleLabel } from "../utils/canvas-connection-targets";
+import { canvasImageRoleLabel, canvasLegacyImageRoleForConfig } from "../utils/canvas-connection-targets";
 
 export type CanvasCustomVideoGenerationState = {
     readonly runtime?: CustomVideoRuntimeSnapshot;
@@ -72,8 +72,8 @@ function mergeCanvasCustomVideoMedia(config: CustomVideoConfig, runtime: CustomV
     customVideoMediaFeatureNames.forEach((role) => media[role].push(...normalizedSourcesForRole(config, role, runtime?.media[role] || [])));
 
     for (const image of graphImages) {
-        const role = image.targetImageRole || "images";
-        if (!image.targetImageRole && !config.images.enabled) return { error: "旧图片连线无法用于当前模型，请重新连接到可用的图片角色入口" };
+        const role = image.targetImageRole && image.targetImageRole !== "images" ? image.targetImageRole : canvasLegacyImageRoleForConfig(config);
+        if (!role) return { error: "旧图片连线无法确定素材角色，请重新连接到可用的图片角色入口" };
         if (!config[role].enabled) return { error: `图片角色“${canvasImageRoleLabel(role)}”当前不可用，请切换模型或重新连接` };
         const source = image.source ? normalizedSourcesForRole(config, role, [image.source])[0] : undefined;
         if (!source) return { error: `连接图片“${image.title}”没有可序列化来源，请重新上传或连接其他图片` };

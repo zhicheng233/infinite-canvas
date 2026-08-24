@@ -24,7 +24,7 @@ import { fitNodeSize, nodeSizeFromRatio } from "../utils/canvas-node-size";
 import { App, Button, Dropdown, Modal } from "antd";
 import { NODE_DEFAULT_SIZE, getNodeSpec } from "../constants";
 import { ActiveConnectionPath, ConnectionPath } from "../components/canvas-connections";
-import { canvasConnectionTargetAnchor, canvasConnectionTargetsForNode, canvasConnectionValidationError, isCanvasVideoInputNode } from "../utils/canvas-connection-targets";
+import { canvasConnectionImageRole, canvasConnectionTargetAnchor, canvasConnectionTargetsForNode, canvasConnectionValidationError, isCanvasVideoInputNode } from "../utils/canvas-connection-targets";
 import { CanvasConfigComposer } from "../components/canvas-config-composer";
 import { CanvasConfigNodePanel } from "../components/canvas-config-node-panel";
 import { canvasCustomVideoGenerationState, canvasCustomVideoRuntimeForHydration, canvasCustomVideoRuntimeForModel, canvasVideoGenerationOptions, resolveCanvasCustomVideoGenerationState } from "../components/canvas-custom-video-runtime";
@@ -787,16 +787,18 @@ function InfiniteCanvasPage() {
     const connectedVideoMediaByNodeId = useMemo(() => {
         const mediaByNodeId = new Map<string, CanvasConnectedVideoMediaByRole>();
         connections.forEach((connection) => {
-            if (!connection.targetImageRole) return;
             const sourceNode = nodeById.get(connection.fromNodeId);
+            const targetNode = nodeById.get(connection.toNodeId);
             if (sourceNode?.type !== CanvasNodeType.Image) return;
+            const targetImageRole = canvasConnectionImageRole(effectiveConfig, targetNode, connection.targetImageRole);
+            if (!targetImageRole) return;
             const nodeMedia = mediaByNodeId.get(connection.toNodeId) || {};
-            const roleMedia = nodeMedia[connection.targetImageRole] || [];
-            nodeMedia[connection.targetImageRole] = [...roleMedia, { nodeId: sourceNode.id, title: sourceNode.title || sourceNode.id, source: sourceNode.metadata?.content || sourceNode.id }];
+            const roleMedia = nodeMedia[targetImageRole] || [];
+            nodeMedia[targetImageRole] = [...roleMedia, { nodeId: sourceNode.id, title: sourceNode.title || sourceNode.id, source: sourceNode.metadata?.content || sourceNode.id }];
             mediaByNodeId.set(connection.toNodeId, nodeMedia);
         });
         return mediaByNodeId;
-    }, [connections, nodeById]);
+    }, [connections, effectiveConfig, nodeById]);
     const resourceContextNodeId = dialogNodeId || activeNodeId;
     const canvasResourceReferences = useMemo(() => buildCanvasResourceReferences(nodes, connections, resourceContextNodeId), [connections, nodes, resourceContextNodeId]);
     const resourceReferenceByNodeId = useMemo(() => new Map(canvasResourceReferences.map((reference) => [reference.nodeId, reference])), [canvasResourceReferences]);

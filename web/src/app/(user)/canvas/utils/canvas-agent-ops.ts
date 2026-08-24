@@ -77,7 +77,7 @@ export function applyCanvasAgentOps(snapshot: CanvasAgentSnapshot, config: AiCon
             if (!op.fromNodeId || !op.toNodeId) return;
             const connection = normalizeCanvasConnection({ id: op.id || nanoid(), fromNodeId: op.fromNodeId, toNodeId: op.toNodeId, ...(op.targetImageRole === undefined ? {} : { targetImageRole: op.targetImageRole }) });
             if (!connection) return;
-            if (connection.targetImageRole) {
+            if (op.targetImageRole !== undefined) {
                 if (!canvasConnectionValidationError(connection, config, nodes, connections)) connections = [...connections, connection];
                 return;
             }

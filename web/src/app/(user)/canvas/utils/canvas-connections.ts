@@ -8,7 +8,7 @@ export function normalizeCanvasImageRole(value: unknown): CanvasImageRole | unde
 }
 
 export function sameCanvasConnectionIdentity(left: Pick<CanvasConnection, "fromNodeId" | "toNodeId" | "targetImageRole">, right: Pick<CanvasConnection, "fromNodeId" | "toNodeId" | "targetImageRole">) {
-    return left.fromNodeId === right.fromNodeId && left.toNodeId === right.toNodeId && left.targetImageRole === right.targetImageRole;
+    return left.fromNodeId === right.fromNodeId && left.toNodeId === right.toNodeId && canonicalConnectionImageRole(left.targetImageRole) === canonicalConnectionImageRole(right.targetImageRole);
 }
 
 export function normalizeCanvasConnection(value: unknown): CanvasConnection | null {
@@ -19,7 +19,8 @@ export function normalizeCanvasConnection(value: unknown): CanvasConnection | nu
     if (typeof id !== "string" || !id || typeof fromNodeId !== "string" || !fromNodeId || typeof toNodeId !== "string" || !toNodeId) return null;
     if (!("targetImageRole" in value) || value.targetImageRole === undefined) return { id, fromNodeId, toNodeId };
     const targetImageRole = normalizeCanvasImageRole(value.targetImageRole);
-    return targetImageRole ? { id, fromNodeId, toNodeId, targetImageRole } : null;
+    if (!targetImageRole) return null;
+    return targetImageRole === "images" ? { id, fromNodeId, toNodeId } : { id, fromNodeId, toNodeId, targetImageRole };
 }
 
 export function normalizeCanvasConnections(value: unknown): CanvasConnection[] {
@@ -29,4 +30,8 @@ export function normalizeCanvasConnections(value: unknown): CanvasConnection[] {
         if (!connection || connections.some((existing) => sameCanvasConnectionIdentity(existing, connection))) return connections;
         return [...connections, connection];
     }, []);
+}
+
+function canonicalConnectionImageRole(role: CanvasImageRole | undefined) {
+    return role === "images" ? undefined : role;
 }

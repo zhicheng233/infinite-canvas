@@ -115,4 +115,45 @@ describe("canvas custom video runtime", () => {
 
         expect(sources[0]?.source).toBe("https://cdn.example.com/role.png");
     });
+
+    test("routes a legacy image connection to normal reference images", async () => {
+        const imagesConfig = { ...customConfig, images: { ...customConfig.images, enabled: true }, style_references: { ...customConfig.style_references, enabled: false } } satisfies CustomVideoConfig;
+        const result = await resolveCanvasCustomVideoGenerationState({ config: configWith(imagesConfig), model, graphImages: [legacyGraphImage()] });
+        const explicitAlias = await resolveCanvasCustomVideoGenerationState({ config: configWith(imagesConfig), model, graphImages: [{ ...legacyGraphImage(), targetImageRole: "images" }] });
+
+        expect(result.error).toBeUndefined();
+        expect(result.runtime?.media.images).toEqual(["https://cdn.example.com/legacy.png"]);
+        expect(explicitAlias.runtime?.media.images).toEqual(["https://cdn.example.com/legacy.png"]);
+    });
+
+    test("routes a legacy image connection to the sole enabled first-frame role", async () => {
+        const firstFrameConfig = { ...customConfig, input_reference: { ...customConfig.input_reference, enabled: true }, style_references: { ...customConfig.style_references, enabled: false } } satisfies CustomVideoConfig;
+        const result = await resolveCanvasCustomVideoGenerationState({ config: configWith(firstFrameConfig), model, graphImages: [legacyGraphImage()] });
+
+        expect(result.error).toBeUndefined();
+        expect(result.runtime?.media.input_reference).toEqual(["https://cdn.example.com/legacy.png"]);
+    });
+
+    test("rejects an ambiguous legacy image connection instead of guessing its role", async () => {
+        const ambiguousConfig = { ...customConfig, input_reference: { ...customConfig.input_reference, enabled: true } } satisfies CustomVideoConfig;
+        const result = await resolveCanvasCustomVideoGenerationState({ config: configWith(ambiguousConfig), model, graphImages: [legacyGraphImage()] });
+
+        expect(result).toEqual({ error: "旧图片连线无法确定素材角色，请重新连接到可用的图片角色入口" });
+    });
 });
+
+function configWith(videoConfig: CustomVideoConfig): AiConfig {
+    return { ...config, modelCustomVideoConfigs: { [model]: videoConfig } };
+}
+
+function legacyGraphImage() {
+    return {
+        image: {
+            id: "legacy-image",
+            name: "旧版图片参考.png",
+            type: "image/png",
+            dataUrl: "https://cdn.example.com/legacy.png",
+            url: "https://cdn.example.com/legacy.png",
+        },
+    };
+}
