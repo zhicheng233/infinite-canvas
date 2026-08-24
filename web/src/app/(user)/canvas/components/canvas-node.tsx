@@ -352,9 +352,11 @@ export const CanvasNode = React.memo(function CanvasNode({
 });
 
 function NodeContent(props: NodeContentRendererProps) {
-    if (props.node.type === CanvasNodeType.Config && props.renderNodeContent) return props.renderNodeContent(props.node);
     if (props.isBatchRoot) return <ImageNodeContent {...props} />;
-    if (props.node.metadata?.status === "loading") return <LoadingContent theme={props.theme} />;
+    if (props.node.metadata?.loadingPhase) return <LoadingContent node={props.node} theme={props.theme} />;
+    if (props.node.type === CanvasNodeType.Config && props.node.metadata?.generationMode === "video" && props.node.metadata?.status === "error") return <ErrorContent node={props.node} theme={props.theme} onRetry={props.onRetry} />;
+    if (props.node.type === CanvasNodeType.Config && props.renderNodeContent) return props.renderNodeContent(props.node);
+    if (props.node.metadata?.status === "loading") return <LoadingContent node={props.node} theme={props.theme} />;
     if (props.node.metadata?.status === "error") return <ErrorContent node={props.node} theme={props.theme} onRetry={props.onRetry} />;
 
     const Renderer = nodeContentRenderers[props.node.type];
@@ -369,11 +371,13 @@ const nodeContentRenderers = {
     [CanvasNodeType.Audio]: AudioNodeContent,
 } satisfies Record<CanvasNodeType, (props: NodeContentRendererProps) => ReactNode>;
 
-function LoadingContent({ theme }: Pick<NodeContentRendererProps, "theme">) {
+function LoadingContent({ node, theme }: Pick<NodeContentRendererProps, "node" | "theme">) {
+    const label = node.metadata?.loadingPhase === "preparing_reference_materials" ? "正在准备参考素材" : node.metadata?.loadingPhase === "generating_video" ? "正在生成视频" : "生成中";
+
     return (
         <div className="flex h-full w-full flex-col items-center justify-center gap-3" style={{ color: theme.node.activeStroke }}>
             <div className="size-10 animate-spin rounded-full border-2" style={{ borderColor: theme.node.stroke, borderTopColor: theme.node.activeStroke }} />
-            <span className="text-[10px] tracking-[0.2em]">生成中</span>
+            <span className="text-[10px] tracking-[0.2em]">{label}</span>
         </div>
     );
 }
@@ -464,7 +468,7 @@ function ImageNodeContent(props: NodeContentRendererProps) {
         return (
             <BatchFrame batchCount={props.batchCount} batchExpanded={props.batchExpanded} batchOpening={props.batchOpening} batchRecovering={props.batchRecovering} onToggleBatch={props.onToggleBatch}>
                 {props.node.metadata?.status === "loading" ? (
-                    <LoadingContent theme={props.theme} />
+                    <LoadingContent node={props.node} theme={props.theme} />
                 ) : props.node.metadata?.status === "error" ? (
                     <ErrorContent node={props.node} theme={props.theme} onRetry={props.onRetry} />
                 ) : (

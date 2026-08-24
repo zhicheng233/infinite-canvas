@@ -30,6 +30,7 @@ export type CanvasNodeMetadata = CustomVideoRuntimeContainer & {
     composerContent?: string;
     prompt?: string;
     status?: CanvasNodeStatus;
+    loadingPhase?: "preparing_reference_materials" | "generating_video";
     errorDetails?: string;
     fontSize?: number;
     generationMode?: CanvasGenerationMode;
