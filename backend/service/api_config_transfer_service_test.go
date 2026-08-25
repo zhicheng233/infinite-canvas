@@ -94,6 +94,93 @@ func TestAPIConfigTransferExportIncludesRoutesPricingPresetsAndDecryptedKey(t *t
 	}
 }
 
+func TestAPIConfigTransferImportAllowsChannelsToShareBaseURL(t *testing.T) {
+	service := NewAPIConfigTransferService(&apiConfigTransferRepoStub{}, "app-key")
+	snapshot := sharedURLTransferSnapshot()
+
+	plan, result := service.buildImportPlan(5, snapshot, &repository.APIConfigTransferData{})
+	if result.Stats.Channels.Create != 2 || result.Stats.Channels.Skip != 0 || len(result.Conflicts) != 0 {
+		t.Fatalf("shared URL channels should be created: %#v", result)
+	}
+	if len(plan.Channels) != 2 || len(plan.Models) != 2 || len(plan.Pricing) != 2 || len(plan.MergeGroups) != 2 {
+		t.Fatalf("shared URL dependencies should remain importable: %#v", plan)
+	}
+
+	existing := &repository.APIConfigTransferData{
+		Channels: []model.Channel{
+			{BaseModel: model.BaseModel{ID: 1}, Name: "Image Channel", BaseUrl: "https://shared.example.com", ApiKey: "key"},
+			{BaseModel: model.BaseModel{ID: 2}, Name: "Mixed Channel", BaseUrl: "https://shared.example.com", ApiKey: "key"},
+		},
+		Models: []model.ChannelModel{
+			{BaseModel: model.BaseModel{ID: 11}, ChannelID: 1, ModelName: "image-model", Capabilities: `["image"]`, VideoDurations: `[]`},
+			{BaseModel: model.BaseModel{ID: 12}, ChannelID: 2, ModelName: "mixed-model", Capabilities: `["image","video"]`, VideoDurations: `[]`},
+		},
+		Pricing: []model.CreditPricing{
+			{BaseModel: model.BaseModel{ID: 21}, TenantID: 5, ChannelID: 1, Model: "image-model", CreditsPerUnit: 1, UnitType: model.UnitPerImage, PricingMode: model.PricingModePerUnit},
+			{BaseModel: model.BaseModel{ID: 22}, TenantID: 5, ChannelID: 2, Model: "mixed-model", CreditsPerUnit: 2, UnitType: model.UnitPerImage, PricingMode: model.PricingModePerUnit},
+		},
+		MergeGroups: []model.ModelMergeGroup{
+			{ID: 31, ChannelID: 1, GroupName: "image", Pattern: "image", Enabled: true},
+			{ID: 32, ChannelID: 2, GroupName: "mixed", Pattern: "mixed", Enabled: true},
+		},
+	}
+	plan, result = service.buildImportPlan(5, snapshot, existing)
+	if result.Stats.Channels.Update != 2 || result.Stats.Channels.Skip != 0 || len(result.Conflicts) != 0 {
+		t.Fatalf("reimport should update shared URL channels: %#v", result)
+	}
+	if result.Stats.Models.Update != 2 || result.Stats.Pricing.Update != 2 || result.Stats.MergeGroups.Update != 2 {
+		t.Fatalf("reimport should update shared URL dependencies: %#v", result.Stats)
+	}
+}
+
+func TestAPIConfigTransferImportAllowsNewNameOnExistingBaseURL(t *testing.T) {
+	service := NewAPIConfigTransferService(&apiConfigTransferRepoStub{}, "app-key")
+	snapshot := sharedURLTransferSnapshot()
+	snapshot.Channels = snapshot.Channels[:1]
+	snapshot.Pricing = snapshot.Pricing[:1]
+	data := &repository.APIConfigTransferData{Channels: []model.Channel{{BaseModel: model.BaseModel{ID: 9}, Name: "Existing Channel", BaseUrl: "https://shared.example.com", ApiKey: "key"}}}
+
+	_, result := service.buildImportPlan(5, snapshot, data)
+	if result.Stats.Channels.Create != 1 || result.Stats.Channels.Skip != 0 || len(result.Conflicts) != 0 {
+		t.Fatalf("different name on shared URL should be created: %#v", result)
+	}
+}
+
+func TestAPIConfigTransferImportRejectsDuplicateChannelNamesAndReferences(t *testing.T) {
+	service := NewAPIConfigTransferService(&apiConfigTransferRepoStub{}, "app-key")
+	for name, channels := range map[string][]model.APIConfigTransferChannel{
+		"duplicate reference": {
+			{Ref: "same", Name: "Channel A", BaseURL: "https://a.example.com", APIKey: "key", VideoAPIStandard: "default"},
+			{Ref: "same", Name: "Channel B", BaseURL: "https://b.example.com", APIKey: "key", VideoAPIStandard: "default"},
+		},
+		"duplicate name": {
+			{Ref: "a", Name: "Same Channel", BaseURL: "https://a.example.com", APIKey: "key", VideoAPIStandard: "default"},
+			{Ref: "b", Name: "Same Channel", BaseURL: "https://b.example.com", APIKey: "key", VideoAPIStandard: "default"},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, result := service.buildImportPlan(5, &model.APIConfigTransferSnapshot{SchemaVersion: 1, Channels: channels}, &repository.APIConfigTransferData{})
+			if result.Stats.Channels.Skip != 2 || len(result.Conflicts) != 2 {
+				t.Fatalf("duplicates should be rejected: %#v", result)
+			}
+		})
+	}
+}
+
+func sharedURLTransferSnapshot() *model.APIConfigTransferSnapshot {
+	return &model.APIConfigTransferSnapshot{
+		SchemaVersion: 1,
+		Channels: []model.APIConfigTransferChannel{
+			{Ref: "image", Name: "Image Channel", BaseURL: "https://shared.example.com", APIKey: "image-key", Enabled: true, VideoAPIStandard: "default", Models: []model.APIConfigTransferModel{{ModelName: "image-model", Capabilities: []string{"image"}, Enabled: true, VideoDurations: []int{}}}, MergeGroups: []model.APIConfigTransferMergeGroup{{GroupName: "image", Pattern: "image", Enabled: true}}},
+			{Ref: "mixed", Name: "Mixed Channel", BaseURL: "https://shared.example.com", APIKey: "mixed-key", Enabled: true, VideoAPIStandard: "default", Models: []model.APIConfigTransferModel{{ModelName: "mixed-model", Capabilities: []string{"image", "video"}, Enabled: true, VideoDurations: []int{}}}, MergeGroups: []model.APIConfigTransferMergeGroup{{GroupName: "mixed", Pattern: "mixed", Enabled: true}}},
+		},
+		Pricing: []model.APIConfigTransferPricing{
+			{Model: "image-model", ChannelRef: "image", CreditsPerUnit: 1, UnitType: model.UnitPerImage, PricingMode: model.PricingModePerUnit},
+			{Model: "mixed-model", ChannelRef: "mixed", CreditsPerUnit: 2, UnitType: model.UnitPerImage, PricingMode: model.PricingModePerUnit},
+		},
+	}
+}
+
 func TestAPIConfigTransferImportMergesValidItemsAndSkipsChannelConflicts(t *testing.T) {
 	const appKey = "application-encryption-key"
 	existingKey, _ := crypto.Encrypt(appKey, "sk-old")

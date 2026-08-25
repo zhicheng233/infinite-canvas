@@ -195,8 +195,8 @@ func (s *APIConfigTransferService) buildImportPlan(tenantID uint, snapshot *mode
 	plan := &repository.APIConfigTransferApplyPlan{}
 	result := &model.APIConfigTransferResult{Conflicts: []model.APIConfigTransferConflict{}}
 	states := make(map[string]transferChannelState, len(snapshot.Channels))
-	targetByKey, targetByName, targetByURL := indexTransferChannels(data.Channels)
-	refCounts, sourceNameCounts, sourceURLCounts, sourceKeyCounts := countSnapshotChannels(snapshot.Channels)
+	targetByKey, targetByName := indexTransferChannels(data.Channels)
+	refCounts, sourceNameCounts, sourceKeyCounts := countSnapshotChannels(snapshot.Channels)
 
 	for index := range snapshot.Channels {
 		input := &snapshot.Channels[index]
@@ -204,8 +204,8 @@ func (s *APIConfigTransferService) buildImportPlan(tenantID uint, snapshot *mode
 		name, baseURL, err := validateChannelInput(input.Name, input.BaseURL)
 		nameKey, urlKey := normalizeTransferName(input.Name), canonicalTransferURL(input.BaseURL)
 		key := nameKey + "\x00" + urlKey
-		if err != nil || input.Ref == "" || refCounts[input.Ref] > 1 || sourceNameCounts[nameKey] > 1 || sourceURLCounts[urlKey] > 1 || sourceKeyCounts[key] > 1 {
-			reason := "渠道字段无效或导入文件内存在重复名称、地址、引用"
+		if err != nil || input.Ref == "" || refCounts[input.Ref] > 1 || sourceNameCounts[nameKey] > 1 || sourceKeyCounts[key] > 1 {
+			reason := "渠道字段无效或导入文件内存在重复名称、组合键、引用"
 			result.Stats.Channels.Skip++
 			result.Conflicts = append(result.Conflicts, transferConflict("channel", identifier, reason))
 			states[input.Ref] = transferChannelState{conflict: true}
@@ -225,9 +225,9 @@ func (s *APIConfigTransferService) buildImportPlan(tenantID uint, snapshot *mode
 			continue
 		}
 		exact := targetByKey[key]
-		if len(exact) > 1 || len(targetByName[nameKey]) > 1 || len(targetByURL[urlKey]) > 1 || (len(exact) == 0 && (len(targetByName[nameKey]) > 0 || len(targetByURL[urlKey]) > 0)) {
+		if len(exact) > 1 || len(targetByName[nameKey]) > 1 || (len(exact) == 0 && len(targetByName[nameKey]) > 0) {
 			result.Stats.Channels.Skip++
-			result.Conflicts = append(result.Conflicts, transferConflict("channel", identifier, "目标环境存在同名不同地址、同地址不同名或重复渠道"))
+			result.Conflicts = append(result.Conflicts, transferConflict("channel", identifier, "目标环境存在同名不同地址或重复渠道"))
 			states[input.Ref] = transferChannelState{conflict: true}
 			continue
 		}
@@ -612,30 +612,27 @@ func validateTransferPassword(password string) error {
 	return nil
 }
 
-func indexTransferChannels(items []model.Channel) (map[string][]*model.Channel, map[string][]*model.Channel, map[string][]*model.Channel) {
+func indexTransferChannels(items []model.Channel) (map[string][]*model.Channel, map[string][]*model.Channel) {
 	byKey := make(map[string][]*model.Channel)
 	byName := make(map[string][]*model.Channel)
-	byURL := make(map[string][]*model.Channel)
 	for index := range items {
 		item := &items[index]
 		name, baseURL := normalizeTransferName(item.Name), canonicalTransferURL(item.BaseUrl)
 		byKey[name+"\x00"+baseURL] = append(byKey[name+"\x00"+baseURL], item)
 		byName[name] = append(byName[name], item)
-		byURL[baseURL] = append(byURL[baseURL], item)
 	}
-	return byKey, byName, byURL
+	return byKey, byName
 }
 
-func countSnapshotChannels(items []model.APIConfigTransferChannel) (map[string]int, map[string]int, map[string]int, map[string]int) {
-	refs, names, urls, keys := make(map[string]int), make(map[string]int), make(map[string]int), make(map[string]int)
+func countSnapshotChannels(items []model.APIConfigTransferChannel) (map[string]int, map[string]int, map[string]int) {
+	refs, names, keys := make(map[string]int), make(map[string]int), make(map[string]int)
 	for _, item := range items {
 		name, baseURL := normalizeTransferName(item.Name), canonicalTransferURL(item.BaseURL)
 		refs[item.Ref]++
 		names[name]++
-		urls[baseURL]++
 		keys[name+"\x00"+baseURL]++
 	}
-	return refs, names, urls, keys
+	return refs, names, keys
 }
 
 func indexTransferModels(items []model.ChannelModel) map[string][]*model.ChannelModel {
