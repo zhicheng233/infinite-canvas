@@ -5,9 +5,9 @@ import { createPortal } from "react-dom";
 import { Settings2 } from "lucide-react";
 import { Button } from "antd";
 
-import { VideoSettingsPanel, videoResolutionLabel, videoSecondsLabel, videoSizeLabel } from "@/components/video-settings-panel";
+import { VideoSettingsPanel, videoSettingsOverview } from "@/components/video-settings-panel";
 import { canvasThemes } from "@/lib/canvas-theme";
-import { customVideoConfigForModel, normalizeVideoDurationForModel, type AiConfig } from "@/stores/use-config-store";
+import { customVideoConfigForModel, type AiConfig } from "@/stores/use-config-store";
 import type { CustomVideoMediaFeature } from "@/lib/custom-video-config";
 import type { CustomVideoRuntimeSnapshot } from "@/lib/custom-video-runtime";
 import { useThemeStore } from "@/stores/use-theme-store";
@@ -28,7 +28,6 @@ type CanvasVideoSettingsPopoverProps = {
 
 export function CanvasVideoSettingsPopover({ config, model, onConfigChange, customVideoRuntime, onCustomVideoRuntimeChange, buttonClassName, placement = "topLeft", connectedMedia }: CanvasVideoSettingsPopoverProps) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
-    const displaySeconds = normalizeVideoDurationForModel(config, model || config.model || config.videoModel, config.videoSeconds);
     const buttonRef = useRef<HTMLSpanElement>(null);
     const panelRef = useRef<HTMLDivElement>(null);
     const [open, setOpen] = useState(false);
@@ -83,7 +82,7 @@ export function CanvasVideoSettingsPopover({ config, model, onConfigChange, cust
                     onClick={() => setOpen((current) => !current)}
                 >
                     <span className="truncate">
-                        {videoResolutionLabel(config.vquality)} · {videoSizeLabel(config.size)} · {videoSecondsLabel(displaySeconds)}
+                        {videoSettingsOverview(config, model, customVideoRuntime)}
                     </span>
                 </Button>
             </span>
