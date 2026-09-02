@@ -2,6 +2,7 @@ package model
 
 type AutoRoutingPool struct {
 	BaseModel
+	CatalogModelID  uint                    `gorm:"index" json:"catalog_model_id"`
 	PublicModelName string                  `gorm:"size:200;uniqueIndex:idx_auto_pool_model_capability;not null" json:"model"`
 	Capability      string                  `gorm:"size:20;uniqueIndex:idx_auto_pool_model_capability;not null" json:"capability"`
 	ContractKey     string                  `gorm:"size:64;not null" json:"contract_key"`

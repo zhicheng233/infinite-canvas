@@ -21,6 +21,7 @@ type Channel struct {
 	SyncStatus         string     `gorm:"size:20" json:"sync_status"`
 	SyncError          string     `gorm:"size:500" json:"sync_error"`
 	SyncedAt           *time.Time `json:"synced_at,omitempty"`
+	ConfigRevision     uint       `gorm:"default:1" json:"config_revision"`
 }
 
 func (Channel) TableName() string { return "channels" }
