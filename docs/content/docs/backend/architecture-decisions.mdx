@@ -7,7 +7,9 @@ description: 模型目录、协议、计费和画布版本的稳定边界
 
 ## ADR-001 模型目录唯一事实来源
 
-服务端模型配置以 `channels`、`channel_models`、`credit_pricing`、模型合并组和视频预设为唯一事实来源。`TenantApiConfig` 仅用于迁移期只读兼容，不再写入；新功能不得从旧模型列表反推能力或路由。
+服务端模型配置以 `catalog_models`、`channels`、`channel_models`、`channel_model_operations`、`channel_protocol_defaults` 和 `model_pricing_rules` 为规范化事实来源，模型合并组、视频预设和智能路由池引用该目录。`credit_pricing` 仅保留为生成链路的兼容价格投影，不得反向覆盖规范化定价。
+
+v0.5 期间旧 `TenantApiConfig` 保留双读写：旧入口保存时必须在同一事务内同步规范化目录，并返回弃用提示；启动迁移按迁移版本幂等执行。v0.6 将旧写入口改为只读拒绝，v0.7 确认无调用后移除旧接口，旧表继续作为只读备份。新功能不得从旧模型列表反推能力、协议或定价。
 
 前端展示值可以暂时保留编码 key，但业务请求必须先通过目录 Map 解析为结构化 `ModelSelection`：物理模型使用 `channel_model_id`，智能路由使用 `routing_pool_id + model`，合并组使用 `channel_id + group_name`。请求链路不得仅凭 `channel_id=0 + model` 推断候选，也不得自行拆解显示字符串决定业务语义。
 
@@ -27,13 +29,19 @@ description: 模型目录、协议、计费和画布版本的稳定边界
 
 无 `schemaVersion` 的旧画布定义为版本 1。每个版本只通过纯函数迁移到下一版本，禁止在组件中散落旧字段兜底。未知的未来版本不得被当前客户端降级保存。
 
-云端身份是 `tenant_id + user_id + project_id`，`revision` 是并发保存边界。冲突返回最新云端版本，同时客户端保留本地副本。画布导出 envelope `version: 3` 与模型 API 配置包 `schema_version: 1` 保持可读；新增格式只能增加新版本解析器。
+云端身份是 `tenant_id + user_id + project_id`，`revision` 是并发保存边界。冲突返回最新云端版本，同时客户端保留本地副本。画布导出 envelope 保持 `version: 3`。模型 API 配置包的加密 envelope 保持 `version: 1`，当前内部 payload 为 `schema_version: 2`，导入器长期接受 payload v1；新增格式只能增加新版本解析器。
 
 ## ADR-005 智能路由必须显式确认
 
 智能路由池按“公开模型名 + 能力”唯一，由系统按当前模型协议合同生成建议，SuperAdmin 确认后创建；同名模型不再自动聚合。模型配置变化不会改写路由池，只会让合同不匹配成员暂时失效并在后台提示。管理员通过新建议重新确认时，合同和候选在同一事务中更新，路由池自动关闭，检查后再手动启用。
 
 运行时只在同一合同内选路。排序固定为熔断状态、24 小时平滑可靠性、管理员优先级、P95 延迟、当前请求价格和 `channel_model_id`。单次最多尝试两个候选，只有网络、超时、上游鉴权、限流和 5xx 可切换；参数错误、内容拒绝、计费和本地校验失败直接返回。
+
+## ADR-006 模型配置以修订号原子保存
+
+渠道默认协议与模型配置分别使用 `config_revision` 做乐观并发控制。单模型保存必须在一个事务内更新公开身份、上游模型 ID、操作合同、渠道定价覆盖、旧生成链路投影和脱敏审计；任一步失败都回滚整次保存。
+
+新同步发现的模型保持 `draft` 且禁用，只有至少一个完整操作合同和对应有效定价时才能首次启用。迁移前已经启用的模型保留可用状态并标记 `legacy_unreviewed`，由管理员复核，不在升级时强制停用。同步未发现的模型只标记 `discovery_status=missing`，不删除配置。
 
 ## 分阶段实施边界
 

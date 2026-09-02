@@ -107,7 +107,7 @@ export function ModelServicePricing({ refreshToken, onChanged }: { readonly refr
     );
 }
 
-function buildPricingRows(models: ModelConfig[]): PricingRow[] {
+export function buildPricingRows(models: ModelConfig[]): PricingRow[] {
     const rows = new Map<string, PricingRow>();
     for (const item of models) {
         const capabilities = [...new Set(item.operations.filter((operation) => operation.enabled).map((operation) => operation.capability))];

@@ -31,6 +31,10 @@ func (s *LegacyAPIConfigService) MigrateAll() error {
 	}
 	for index := range configs {
 		if err := s.db.Transaction(func(tx *gorm.DB) error {
+			completed, err := legacyAPIConfigMigrationCompleted(tx, configs[index].ID)
+			if err != nil || completed {
+				return err
+			}
 			return syncLegacyAPIConfig(tx, &configs[index], 0)
 		}); err != nil {
 			if recordErr := s.recordMigrationFailure(&configs[index], err); recordErr != nil {
@@ -39,6 +43,22 @@ func (s *LegacyAPIConfigService) MigrateAll() error {
 		}
 	}
 	return nil
+}
+
+func legacyAPIConfigMigrationCompleted(tx *gorm.DB, sourceID uint) (bool, error) {
+	var migration model.ModelConfigMigration
+	err := tx.Where("source = ? AND source_id = ? AND version = ?", legacyAPIConfigMigrationSource, sourceID, legacyAPIConfigMigrationVersion).First(&migration).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return false, nil
+	}
+	if err != nil || migration.Status != "completed" || migration.TargetID == 0 {
+		return false, err
+	}
+	var count int64
+	if err := tx.Unscoped().Model(&model.Channel{}).Where("id = ?", migration.TargetID).Count(&count).Error; err != nil {
+		return false, err
+	}
+	return count == 1, nil
 }
 
 func (s *LegacyAPIConfigService) Save(config *model.TenantApiConfig, actorUserID uint) error {
@@ -68,7 +88,8 @@ func (s *LegacyAPIConfigService) recordMigrationFailure(config *model.TenantApiC
 		if err := tx.Model(&migration).Updates(map[string]any{"status": "failed", "detail": cause.Error(), "completed_at": &now}).Error; err != nil {
 			return err
 		}
-		return tx.Create(&model.ModelConfigMigrationIssue{MigrationID: migration.ID, Resource: "tenant_api_config", Identifier: fmt.Sprintf("tenant:%d", config.TenantID), Reason: cause.Error()}).Error
+		issue := model.ModelConfigMigrationIssue{MigrationID: migration.ID, Resource: "tenant_api_config", Identifier: fmt.Sprintf("tenant:%d", config.TenantID), Reason: cause.Error()}
+		return tx.Where("migration_id = ? AND resource = ? AND identifier = ?", issue.MigrationID, issue.Resource, issue.Identifier).Assign(map[string]any{"reason": issue.Reason, "resolved": false}).FirstOrCreate(&issue).Error
 	})
 }
 

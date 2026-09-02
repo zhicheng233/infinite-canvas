@@ -75,25 +75,8 @@ export function ModelServiceModels({ view, onViewChange, refreshToken, onChanged
         return true;
     }), [models, readiness]);
 
-    const channelGroups = useMemo(() => {
-        const grouped = new Map<number, { id: number; name: string; models: ModelConfig[] }>();
-        for (const item of visibleModels) {
-            const group = grouped.get(item.channel_id) ?? { id: item.channel_id, name: item.channel_name, models: [] };
-            group.models.push(item);
-            grouped.set(item.channel_id, group);
-        }
-        return [...grouped.values()];
-    }, [visibleModels]);
-
-    const catalogGroups = useMemo(() => {
-        const grouped = new Map<number, { id: number; publicKey: string; displayName: string; models: ModelConfig[] }>();
-        for (const item of visibleModels) {
-            const group = grouped.get(item.catalog_model_id) ?? { id: item.catalog_model_id, publicKey: item.public_key, displayName: item.display_name, models: [] };
-            group.models.push(item);
-            grouped.set(item.catalog_model_id, group);
-        }
-        return [...grouped.values()];
-    }, [visibleModels]);
+    const channelGroups = useMemo(() => groupModelsByChannel(visibleModels), [visibleModels]);
+    const catalogGroups = useMemo(() => groupModelsByCatalog(visibleModels), [visibleModels]);
 
     const archive = async (item: ModelConfig, archived: boolean) => {
         try {
@@ -382,7 +365,27 @@ function PricingEditor({ operations, pricing, onChange }: { operations: SaveMode
     );
 }
 
-function completeOperations(items: ModelOperation[]): SaveModelOperationInput[] {
+export function groupModelsByChannel(items: ModelConfig[]) {
+    const grouped = new Map<number, { id: number; name: string; models: ModelConfig[] }>();
+    for (const item of items) {
+        const group = grouped.get(item.channel_id) ?? { id: item.channel_id, name: item.channel_name, models: [] };
+        group.models.push(item);
+        grouped.set(item.channel_id, group);
+    }
+    return [...grouped.values()];
+}
+
+export function groupModelsByCatalog(items: ModelConfig[]) {
+    const grouped = new Map<number, { id: number; publicKey: string; displayName: string; models: ModelConfig[] }>();
+    for (const item of items) {
+        const group = grouped.get(item.catalog_model_id) ?? { id: item.catalog_model_id, publicKey: item.public_key, displayName: item.display_name, models: [] };
+        group.models.push(item);
+        grouped.set(item.catalog_model_id, group);
+    }
+    return [...grouped.values()];
+}
+
+export function completeOperations(items: ModelOperation[]): SaveModelOperationInput[] {
     const byKey = new Map(items.map((item) => [`${item.capability}:${item.operation}`, item]));
     return operationDefinitions.map((definition) => {
         const item = byKey.get(definition.key);
@@ -397,7 +400,7 @@ const emptyPricing: Record<ModelCapability, PricingDraft> = {
     audio: { capability: "audio", override: false, credits_per_unit: 0, unit_type: "per_token", pricing_mode: "per_unit", pricing_rule: "" },
 };
 
-function pricingDrafts(items: ModelPricingRule[]) {
+export function pricingDrafts(items: ModelPricingRule[]) {
     const result = structuredClone(emptyPricing);
     for (const item of items) result[item.capability] = { capability: item.capability, override: item.effective_source === "implementation", credits_per_unit: item.credits_per_unit, unit_type: item.unit_type, pricing_mode: item.pricing_mode, pricing_rule: item.pricing_rule, effective_source: item.effective_source };
     return result;

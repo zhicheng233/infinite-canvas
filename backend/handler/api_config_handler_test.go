@@ -8,9 +8,31 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"infinite-canvas-server/config"
+	"infinite-canvas-server/crypto"
 	"infinite-canvas-server/model"
 	"infinite-canvas-server/service"
 )
+
+type apiConfigRepositoryStub struct {
+	item *model.TenantApiConfig
+	err  error
+}
+
+func (stub apiConfigRepositoryStub) FindByTenant(uint) (*model.TenantApiConfig, error) {
+	return stub.item, stub.err
+}
+
+type legacyAPIConfigWriterStub struct {
+	saved *model.TenantApiConfig
+	actor uint
+	err   error
+}
+
+func (stub *legacyAPIConfigWriterStub) Save(config *model.TenantApiConfig, actorUserID uint) error {
+	stub.saved, stub.actor = config, actorUserID
+	return stub.err
+}
 
 type apiConfigPricingCatalogStub struct {
 	items map[string]map[uint]model.CreditPricing
@@ -143,22 +165,51 @@ func TestApiConfigCatalogReturnsChannelModelCustomConfigWithoutTenantMap(t *test
 	}
 }
 
-func TestLegacyApiConfigWriteIsDisabled(t *testing.T) {
+func TestLegacyApiConfigWriteDualWritesWithDeprecationNotice(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	handler := &ApiConfigHandler{}
+	writer := &legacyAPIConfigWriterStub{}
+	handler := &ApiConfigHandler{
+		apiConfigRepo: apiConfigRepositoryStub{},
+		legacyConfig:  writer,
+		cfg:           &config.Config{ApiKeyEncryptKey: "application-key"},
+	}
 	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		c.Set("claims", &service.Claims{TenantID: 7, UserID: 9})
+		c.Next()
+	})
 	router.POST("/api-config", handler.Save)
 	recorder := httptest.NewRecorder()
-	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/api-config", strings.NewReader(`{"models":["legacy"]}`)))
+	request := httptest.NewRequest(http.MethodPost, "/api-config", strings.NewReader(`{
+		"base_url":"https://legacy.example.com/","api_key":"sk-legacy","models":["legacy"],
+		"image_models":["legacy"],"video_models":[],"text_models":[],"audio_models":[],
+		"model_routes":{"image_edit:legacy":"generations"},"model_video_durations":{},"model_video_customizable":{}
+	}`))
+	request.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(recorder, request)
 
 	var response struct {
-		Code int    `json:"code"`
-		Msg  string `json:"msg"`
+		Code int `json:"code"`
+		Data struct {
+			Saved       bool   `json:"saved"`
+			Deprecated  bool   `json:"deprecated"`
+			Deprecation string `json:"deprecation"`
+		} `json:"data"`
 	}
 	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if response.Code != 410 || !strings.Contains(response.Msg, "渠道与模型配置") {
+	if response.Code != 0 || !response.Data.Saved || !response.Data.Deprecated || !strings.Contains(response.Data.Deprecation, "v0.6") {
 		t.Fatalf("unexpected response: status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if writer.saved == nil || writer.saved.TenantID != 7 || writer.actor != 9 || writer.saved.BaseUrl != "https://legacy.example.com" {
+		t.Fatalf("legacy projection was not saved: config=%#v actor=%d", writer.saved, writer.actor)
+	}
+	decrypted, err := crypto.Decrypt("application-key", writer.saved.ApiKey)
+	if err != nil || decrypted != "sk-legacy" {
+		t.Fatalf("saved key=%q err=%v", decrypted, err)
+	}
+	if writer.saved.ModelRoutes != `{"image_edit:legacy":"generations"}` {
+		t.Fatalf("unexpected model routes: %s", writer.saved.ModelRoutes)
 	}
 }

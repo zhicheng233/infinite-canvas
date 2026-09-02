@@ -76,6 +76,9 @@ func TestAPIConfigTransferExportIncludesRoutesPricingPresetsAndDecryptedKey(t *t
 	if err != nil {
 		t.Fatalf("decrypt export: %v", err)
 	}
+	if result.Envelope.Version != 1 || snapshot.SchemaVersion != 2 {
+		t.Fatalf("unexpected envelope/payload versions: envelope=%d payload=%d", result.Envelope.Version, snapshot.SchemaVersion)
+	}
 	if len(snapshot.Channels) != 1 || snapshot.Channels[0].APIKey != "sk-exported" || snapshot.Channels[0].Models[0].VideoRoute != "custom" {
 		t.Fatalf("unexpected exported channel: %#v", snapshot.Channels)
 	}
@@ -91,6 +94,69 @@ func TestAPIConfigTransferExportIncludesRoutesPricingPresetsAndDecryptedKey(t *t
 	}
 	if result.Summary.Models.Create != 1 || result.Summary.Pricing.Create != 1 || len(result.Warnings) != 0 {
 		t.Fatalf("unexpected export summary: %#v", result)
+	}
+}
+
+func TestAPIConfigTransferSchemaTwoRoundTripsNormalizedModelDomain(t *testing.T) {
+	encryptedKey, err := crypto.Encrypt("app-key", "sk-schema-two")
+	if err != nil {
+		t.Fatal(err)
+	}
+	data := &repository.APIConfigTransferData{
+		Channels: []model.Channel{{BaseModel: model.BaseModel{ID: 7}, Name: "Primary", BaseUrl: "https://api.example.com", ApiKey: encryptedKey, Enabled: true, ConfigRevision: 3}},
+		Catalogs: []model.CatalogModel{{BaseModel: model.BaseModel{ID: 5}, PublicKey: "public-image", DisplayName: "Public image"}},
+		Models: []model.ChannelModel{{
+			BaseModel: model.BaseModel{ID: 8}, ChannelID: 7, ModelName: "upstream-image", CatalogModelID: 5, UpstreamModelID: "upstream-image",
+			Status: model.ModelStatusActive, DiscoveryStatus: model.DiscoveryStatusPresent, ConfigRevision: 4, Capabilities: `["image"]`, Enabled: true,
+			ImageGenerateRoute: "generations", ImageEditRoute: "generations", VideoRoute: "auto", VideoDurations: `[]`,
+		}},
+		ProtocolDefaults: []model.ChannelProtocolDefault{{ChannelID: 7, Capability: "image", Operation: "generate", Adapter: "generations", ConfigJSON: `{"response_format":"url"}`, ConfigVersion: 2}},
+		Operations: []model.ChannelModelOperation{{
+			ChannelModelID: 8, Capability: "image", Operation: "edit", Enabled: true, ProtocolMode: model.ProtocolModeOverride,
+			Adapter: "generations", ConfigJSON: `{"image_field":"image"}`, ConfigVersion: 3, ContractKey: "saved-contract",
+		}},
+		PricingRules: []model.ModelPricingRule{
+			{TenantID: 11, CatalogModelID: 5, Capability: "image", Scope: model.PricingScopeDefault, ScopeID: 0, CreditsPerUnit: 2, UnitType: model.UnitPerImage, PricingMode: model.PricingModePerUnit, ConfigRevision: 2},
+			{TenantID: 11, CatalogModelID: 5, Capability: "image", Scope: model.PricingScopeImplementation, ScopeID: 8, CreditsPerUnit: 4, UnitType: model.UnitPerImage, PricingMode: model.PricingModePerUnit, ConfigRevision: 5},
+		},
+	}
+	service := NewAPIConfigTransferService(&apiConfigTransferRepoStub{}, "app-key")
+	snapshot, summary, warnings, err := service.buildSnapshot(data)
+	if err != nil {
+		t.Fatalf("build schema two snapshot: %v", err)
+	}
+	if snapshot.SchemaVersion != 2 || len(warnings) != 0 || summary.Channels.Create != 1 || summary.Models.Create != 1 || summary.Pricing.Create != 2 {
+		t.Fatalf("unexpected schema two summary: snapshot=%#v summary=%#v warnings=%#v", snapshot, summary, warnings)
+	}
+	channel := snapshot.Channels[0]
+	if channel.ConfigRevision != 3 || len(channel.ProtocolDefaults) != 1 || channel.ProtocolDefaults[0].ConfigVersion != 2 {
+		t.Fatalf("channel defaults did not round trip: %#v", channel)
+	}
+	transferredModel := channel.Models[0]
+	if transferredModel.PublicKey != "public-image" || transferredModel.DisplayName != "Public image" || transferredModel.UpstreamModelID != "upstream-image" || transferredModel.ConfigRevision != 4 {
+		t.Fatalf("model identity did not round trip: %#v", transferredModel)
+	}
+	if len(transferredModel.Operations) != 1 || transferredModel.Operations[0].ProtocolMode != model.ProtocolModeOverride || transferredModel.Operations[0].ContractKey != "saved-contract" {
+		t.Fatalf("model operations did not round trip: %#v", transferredModel.Operations)
+	}
+
+	envelope, err := encryptAPIConfigSnapshot(snapshot, "password-123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := decryptAPIConfigSnapshot(envelope, "password-123")
+	if err != nil || decoded.SchemaVersion != 2 {
+		t.Fatalf("decrypt schema two payload: %#v %v", decoded, err)
+	}
+	plan, result := service.buildImportPlan(21, decoded, &repository.APIConfigTransferData{})
+	if len(result.Conflicts) != 0 || result.Stats.Channels.Create != 1 || result.Stats.Models.Create != 1 || result.Stats.Pricing.Create != 2 {
+		t.Fatalf("unexpected schema two import result: %#v", result)
+	}
+	if len(plan.Channels) != 1 || len(plan.Channels[0].Defaults) != 1 || len(plan.Models) != 1 || len(plan.Models[0].Operations) != 1 || len(plan.PricingRules) != 2 {
+		t.Fatalf("normalized domain missing from import plan: %#v", plan)
+	}
+	if plan.PricingRules[0].Item.TenantID != 21 || plan.PricingRules[1].Item.TenantID != 21 {
+		t.Fatalf("pricing rules were not rebound to target tenant: %#v", plan.PricingRules)
 	}
 }
 

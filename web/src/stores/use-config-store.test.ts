@@ -14,6 +14,7 @@ import {
     customVideoConfigForModel,
     resolveModelRequestConfig,
     resolveModelSelection,
+    resolveCompatibleModelSelection,
     selectedChannelId,
     selectedChannelIdentityForModel,
     useConfigStore,
@@ -95,6 +96,27 @@ test("canonical identity keeps same raw model names distinct", () => {
     expect(value).toBe("2::22::same-model");
     expect(decodeChannelModel(value)).toEqual({ channelId: "2", channelModelId: 22, model: "same-model" });
     expect(modelOptionName(value)).toBe("same-model");
+});
+
+test("legacy physical and raw model selections migrate only when unambiguous", () => {
+    const legacyPhysical = resolveCompatibleModelSelection("1::same-model", "image", channels, models, pricing, null, [], {});
+    expect(legacyPhysical).toEqual({ value: "1::11::same-model", channelId: 1 });
+
+    const uniqueRaw = resolveCompatibleModelSelection("zero-model", "image", channels, models, pricing, null, [], {});
+    expect(uniqueRaw).toEqual({ value: "1::12::zero-model", channelId: 1 });
+
+    expect(resolveCompatibleModelSelection("same-model", "image", channels, models, pricing, null, [], {})).toBeNull();
+    expect(resolveCompatibleModelSelection("1::999::same-model", "image", channels, models, pricing, null, [], {})).toBeNull();
+});
+
+test("confirmed Smart Routing and merge selections survive compatibility resolution", () => {
+    expect(resolveCompatibleModelSelection("auto://1::gpt-image-auto", "image", channels, models, [...pricing, autoPricing], null, [autoModel], {})).toEqual({
+        value: "auto://1::gpt-image-auto",
+        channelId: 0,
+    });
+    const groups = { 1: [{ id: 1, channel_id: 1, group_name: "same", pattern: "same-", enabled: true, created_at: "", updated_at: "" }] };
+    expect(resolveCompatibleModelSelection("merge://1::same", "image", channels, models, pricing, null, [], groups)).toEqual({ value: "merge://1::same", channelId: 1 });
+    expect(resolveCompatibleModelSelection("auto://99::missing", "image", channels, models, pricing, null, [autoModel], groups)).toBeNull();
 });
 
 test("model selection resolves temporary keys into structured routing identities", () => {

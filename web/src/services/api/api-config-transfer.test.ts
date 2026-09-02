@@ -23,9 +23,9 @@ describe("API config transfer service", () => {
         await previewApiConfigImport("password-123", envelope);
         await importApiConfig("password-123", envelope);
 
-        expect(post).toHaveBeenNthCalledWith(1, "/admin/api-config/export", { password: "password-123" });
-        expect(post).toHaveBeenNthCalledWith(2, "/admin/api-config/import/preview", { password: "password-123", envelope });
-        expect(post).toHaveBeenNthCalledWith(3, "/admin/api-config/import", { password: "password-123", envelope });
+        expect(post).toHaveBeenNthCalledWith(1, "/admin/model-service/export", { password: "password-123" });
+        expect(post).toHaveBeenNthCalledWith(2, "/admin/model-service/import/preview", { password: "password-123", envelope });
+        expect(post).toHaveBeenNthCalledWith(3, "/admin/model-service/import", { password: "password-123", envelope });
     });
 
     it("reads a valid encrypted JSON envelope", async () => {

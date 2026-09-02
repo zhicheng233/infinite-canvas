@@ -142,9 +142,9 @@ go test ./... -count=1
 
 1. 删除或不创建 `TenantApiConfig`，仅配置渠道、渠道模型和定价。
 2. 普通用户仍能读取图片、视频、文本和音频模型目录。
-3. 旧 `POST /api-config` 返回业务码 410。
+3. v0.5 旧 `POST /api-config` 返回成功和弃用提示，并原子双写旧记录与规范化模型目录；任一步失败时两边都不留部分数据。
 4. 物理模型按 `channel_model_id` 选路。
-5. Auto 按模型名和能力选路，并返回实际物理渠道 ID。
+5. 智能路由按管理员确认的 `routing_pool_id` 选路，并返回实际物理渠道 ID；不再按同名模型隐式聚合。
 6. 合并组按 `channel_id + group_name` 选路。
 7. `/chat/completions` 图片模型携带 `routing_capability=image` 时按图片能力路由和计费。
 8. 未知图片或视频路由在保存、导入和模型测试前被拒绝。
@@ -156,7 +156,7 @@ go test ./... -count=1
 3. 同 URL 不同名称允许创建。
 4. 同名不同 URL、重复 `channel_ref`、重复渠道名称和完全重复渠道仍应冲突。
 5. 共享 URL 渠道的模型、渠道定价和合并组必须分别关联正确渠道。
-6. API 配置包继续使用 `schema_version: 1`，错误密码或篡改文件必须拒绝。
+6. API 配置包加密 envelope 保持 `version: 1`，新导出 payload 使用 `schema_version: 2`，并继续接受 payload v1；错误密码或篡改文件必须拒绝。
 
 ## 7. 计费生命周期测试
 

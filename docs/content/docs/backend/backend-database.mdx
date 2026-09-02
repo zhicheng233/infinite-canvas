@@ -61,6 +61,8 @@ description: 当前后端数据库表结构说明
 | pricing_mode | enum(per_unit/video_dynamic) | 计费方式；`video_dynamic` 表示按视频秒数和分辨率动态计费 |
 | pricing_rule | longtext | 动态计费规则 JSON，例如视频基础积分和各分辨率秒单价 |
 
+该表是当前生成与计费链路使用的兼容投影。管理后台以 `model_pricing_rules` 为规范化写入入口，保存默认价或渠道模型覆盖价时在同一事务内刷新本表；不得直接用本表反向覆盖规范化规则。
+
 ## tenant_api_configs 表
 
 | 字段 | 类型 | 说明 |
@@ -69,10 +71,12 @@ description: 当前后端数据库表结构说明
 | tenant_id | uint | 当前固定为默认租户 |
 | base_url | string(500) | 上游 API 地址 |
 | api_key | text | 加密后的上游 API Key |
-| models_json | longtext | 模型目录 JSON |
-| model_routes | longtext | 模型视频接口路由 JSON |
+| models / image_models / video_models / text_models / audio_models | longtext | 旧版模型与能力列表 JSON |
+| model_routes | longtext | 旧版模型图片、视频接口路由 JSON |
+| model_video_durations | longtext | 旧版视频时长映射 JSON |
+| model_video_customizable | longtext | 旧版视频可配置状态映射 JSON |
 
-该表是只读兼容来源，不再接受业务写入。新站点的模型目录、能力和路由以 `channels`、`channel_models`、定价、合并组和视频预设为唯一事实来源；`POST /api-config` 固定返回 410。
+v0.5 保留该表用于旧 `/api-config` 双读写。旧入口保存会在同一事务内更新本表和规范化模型目录，并返回弃用提示；启动时会为旧记录创建稳定兼容渠道，原样复制已加密 API Key。v0.6 改为只读，v0.7 移除旧业务入口后继续保留该表作为备份。
 
 ## channels 表
 
@@ -91,6 +95,7 @@ description: 当前后端数据库表结构说明
 | sync_status | string(20) | 模型同步状态：pending/syncing/success/failed |
 | sync_error | string(500) | 最近一次同步错误信息 |
 | synced_at | datetime | 可为空，最近一次成功同步时间 |
+| config_revision | uint | 渠道协议与配置的乐观锁修订号，默认 1 |
 
 API Key 仅用于后端代理调用，按 `API_KEY_ENCRYPTION_KEY` 配置加密存储，不应出现在 JSON 响应中。
 
@@ -101,6 +106,13 @@ API Key 仅用于后端代理调用，按 `API_KEY_ENCRYPTION_KEY` 配置加密�
 | id | uint | 主键 |
 | channel_id | uint | 所属渠道 ID，非空，带索引 |
 | model_name | string(200) | 上游原始模型名，非空 |
+| catalog_model_id | uint | 对应稳定公开模型目录 ID |
+| upstream_model_id | string(200) | 可编辑的上游实际模型 ID |
+| status | enum(draft/active/disabled) | 后台配置状态 |
+| discovery_status | enum(present/missing) | 最近一次同步是否仍由上游返回 |
+| last_discovered_at | datetime | 最近发现时间，可为空 |
+| config_revision | uint | 单模型原子保存的乐观锁修订号 |
+| legacy_unreviewed | bool | 升级保留可用但仍需管理员复核的旧模型标记 |
 | capabilities | string(100) | 模型能力 JSON 数组，可包含 image/video/text/audio |
 | enabled | bool | 渠道内模型是否启用，默认 true |
 | image_generate_route | string(30) | 图片生成路由：auto/generations/edits/chat/banana |
@@ -114,6 +126,62 @@ API Key 仅用于后端代理调用，按 `API_KEY_ENCRYPTION_KEY` 配置加密�
 `channel_id` 与 `model_name` 组成唯一约束 `idx_channel_model`，避免同一渠道重复记录同名模型。
 
 `video_custom_config` 中只有 `images`、`input_reference`、`style_references`、`element_references`、`reference_images` 和 `input_video` 六个媒体角色可以设置 `required`。禁用的媒体角色统一规范化为 `required=false`；启用且 `required=true` 的角色必须在运行时提供至少一个有效素材，启用但 `required=false` 的空角色不会写入上游请求。时长、尺寸、参考图模式、音频和生成数量等标量或固定字段没有 `required` 语义。
+
+## catalog_models 表
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| public_key | string(191) | 面向前端和业务调用的稳定公开键，全局唯一 |
+| display_name | string(200) | 可编辑显示名称，不参与上游调用 |
+
+一个公开模型可以由多个 `channel_models` 实现，上游模型 ID 或显示名称变化时不需要改写用户保存的公开身份。
+
+## channel_protocol_defaults 表
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| channel_id | uint | 所属渠道，与能力和操作组成唯一约束 |
+| capability | enum(image/video/text/audio) | 能力 |
+| operation | string(30) | `generate` 或图片 `edit` |
+| adapter | string(50) | 渠道默认协议适配器；`auto` 表示兼容默认，不是智能路由 |
+| config_json | longtext | 协议参数 JSON 对象 |
+| config_version | int | 协议参数版本 |
+
+## channel_model_operations 表
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| channel_model_id | uint | 所属渠道模型，与能力和操作组成唯一约束 |
+| capability / operation | string | 模型支持的能力与操作 |
+| enabled | bool | 该操作是否启用 |
+| protocol_mode | enum(inherit/override) | 继承渠道默认协议或使用模型覆盖 |
+| adapter | string(50) | 覆盖模式下的协议适配器 |
+| config_json | longtext | 模型协议参数 JSON 对象 |
+| config_version | int | 参数版本 |
+| contract_key | string(64) | 能力、操作、有效协议和参数的 SHA-256 合同指纹 |
+
+## model_pricing_rules 表
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| tenant_id | uint | 当前配置所属租户 |
+| catalog_model_id | uint | 公开模型 ID |
+| capability | enum(image/video/text/audio) | 独立计费能力 |
+| scope | enum(default/implementation) | 全局默认价或渠道模型覆盖价 |
+| scope_id | uint | 默认价为 0，渠道覆盖价为 `channel_model_id` |
+| credits_per_unit / unit_type | int / enum | 单价与计费单位 |
+| pricing_mode / pricing_rule | enum / longtext | 固定或动态定价规则 |
+| config_revision | uint | 定价修订号 |
+
+同一租户、公开模型、能力、范围和范围 ID 唯一。读取时渠道模型覆盖价优先于公开模型默认价。
+
+## model_config_audit_logs 表
+
+保存模型服务敏感操作的脱敏前后快照，包含 `tenant_id`、`actor_user_id`、资源类型、资源 ID 和动作。API Key 不写入审计 JSON。
+
+## model_config_migrations / model_config_migration_issues 表
+
+`model_config_migrations` 按来源、来源 ID 和版本唯一登记兼容迁移状态与目标资源；`model_config_migration_issues` 记录无法安全推断的配置及原因。已完成且目标仍存在的启动迁移直接跳过，失败记录彼此隔离，不阻止其它旧配置迁移。
 
 ## video_config_presets 表
 
@@ -234,7 +302,7 @@ API Key 仅用于后端代理调用，按 `API_KEY_ENCRYPTION_KEY` 配置加密�
 
 ## 数据库迁移
 
-新增结构迁移使用嵌入式 Goose SQL。`00001_canvas_and_generation_jobs.sql` 负责画布复合唯一约束、文档版本字段和生成任务表；`00002_auto_routing_pools.sql` 增加智能路由池、成员、尝试审计及生成任务结算字段。应用启动时先执行现有表的兼容 `AutoMigrate`，再执行有版本的增量迁移。后续表会逐步移出 `AutoMigrate`，每个增量只允许新增新的迁移版本，不修改已经发布的迁移文件。
+新增结构迁移使用嵌入式 Goose SQL。`00001_canvas_and_generation_jobs.sql` 负责画布复合唯一约束、文档版本字段和生成任务表；`00002_auto_routing_pools.sql` 增加智能路由池、成员、尝试审计及生成任务结算字段；`00003_model_service_catalog.sql` 建立规范化模型目录、协议、定价、修订与审计结构并投影已有渠道模型；`00004_legacy_api_config_compatibility.sql` 登记旧 `TenantApiConfig` 的应用级兼容迁移。应用启动时先执行现有表的兼容 `AutoMigrate`，再执行有版本的增量迁移，随后幂等处理待迁移旧配置。后续表会逐步移出 `AutoMigrate`，每个增量只允许新增新的迁移版本，不修改已经发布的迁移文件。
 
 ## generation_records 表
 

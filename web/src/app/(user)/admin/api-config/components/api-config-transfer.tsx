@@ -114,8 +114,7 @@ export function ApiConfigTransfer({ disabled, onImported }: ApiConfigTransferPro
         if (!envelope || !preview) return;
         setImporting(true);
         try {
-            const result = await importApiConfig(password, envelope);
-            await onImported();
+            const result = await completeConfigImport(() => importApiConfig(password, envelope), onImported);
             resetImport();
             const skipped = totalSkipped(result.stats);
             if (skipped > 0) message.warning(`配置已导入，${skipped} 项冲突已跳过`);
@@ -204,6 +203,12 @@ export function ApiConfigTransfer({ disabled, onImported }: ApiConfigTransferPro
             </Modal>
         </>
     );
+}
+
+export async function completeConfigImport(importer: () => Promise<ApiConfigTransferResult>, onImported: () => Promise<void>) {
+    const result = await importer();
+    await onImported();
+    return result;
 }
 
 function ImportPreview({ result }: { readonly result: ApiConfigTransferResult }) {

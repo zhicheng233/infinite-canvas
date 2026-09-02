@@ -18,7 +18,43 @@ description: 后端业务响应、生成请求标识和冲突响应约定
 - `code = 0` 表示成功；失败时使用稳定的业务或 HTTP 对应代码。
 - `data` 保存结构化结果；列表为空时返回空数组，不返回 `null`。
 - `msg` 是面向用户的简短中文消息。供应商原始响应只进入脱敏日志，不作为成功结果结构。
-- HTTP 状态码仍表达传输语义，例如参数错误 400、未认证 401、无权限 403、冲突 409、旧入口停用 410、请求过大 413。
+- HTTP 状态码仍表达传输语义，例如参数错误 400、未认证 401、无权限 403、修订冲突 409、后续版本旧入口停用 410、请求过大 413。
+
+## 模型服务接口
+
+管理员与超级管理员通过统一的 `/admin/model-service/*` 管理渠道、模型和定价：
+
+| 接口 | 用途 |
+|------|------|
+| `GET/POST /admin/model-service/channels` | 列出或创建渠道 |
+| `PUT /admin/model-service/channels/:id` | 保存渠道身份和凭据 |
+| `POST /admin/model-service/channels/:id/sync` | 同步上游模型并返回新增、恢复、缺失统计 |
+| `PUT /admin/model-service/channels/:id/protocol-defaults/preview` | 预览默认协议变更影响 |
+| `PUT /admin/model-service/channels/:id/protocol-defaults` | 按 `expected_revision` 原子保存默认协议 |
+| `GET/PUT /admin/model-service/models/:id` | 读取或原子保存模型身份、操作合同和渠道定价覆盖 |
+| `POST /admin/model-service/models/:id/test` | 使用当前已保存配置或请求中的未保存草稿测试模型 |
+| `PUT /admin/model-service/pricing/defaults/:catalogModelId` | 保存公开模型某项能力的默认定价 |
+| `POST /admin/model-service/*/archive` / `restore` | 归档或恢复渠道、模型 |
+
+模型或渠道保存中的 `expected_revision` 已过期时返回 409，客户端应刷新详情后重新编辑，不覆盖其他管理员的新配置。同步发现的新模型返回 `draft` 且默认禁用；上游缺失只更新 `discovery_status`。
+
+## 配置导入导出版本
+
+`POST /admin/model-service/export`、`/import/preview` 和 `/import` 使用加密 envelope。外层 `version` 保持 1，当前解密后的 payload 使用 `schema_version: 2`，并包含公开模型身份、渠道默认协议、模型操作合同、规范化定价和配置修订；导入器继续接受旧 payload `schema_version: 1` 并生成规范化投影。密码和 API Key 不出现在 URL、浏览器持久化或 envelope 明文中。
+
+## 旧接口兼容
+
+v0.5 的 `GET/POST /api-config` 仍可读取和保存旧结构，成功响应的 `data` 包含：
+
+```json
+{
+  "saved": true,
+  "deprecated": true,
+  "deprecation": "旧版 API 配置将在 v0.6 变为只读，请迁移到模型服务"
+}
+```
+
+POST 会在同一事务内写入旧记录和规范化模型服务投影，任一步失败则全部回滚。v0.6 起旧写入口返回 410，v0.7 移除旧入口；调用方应立即迁移到 `/admin/model-service/*`。
 
 生成代理成功响应可附带以下响应头：
 
