@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Tabs, Typography } from "antd";
 import { Boxes, Cable, Coins, Route, SlidersHorizontal } from "lucide-react";
@@ -15,6 +15,14 @@ const sections = ["channels", "models", "pricing", "routing", "presets"] as cons
 type Section = (typeof sections)[number];
 
 export default function AdminModelServicePage() {
+    return (
+        <Suspense fallback={null}>
+            <AdminModelServiceContent />
+        </Suspense>
+    );
+}
+
+function AdminModelServiceContent() {
     const router = useRouter();
     const pathname = usePathname();
     const searchParams = useSearchParams();

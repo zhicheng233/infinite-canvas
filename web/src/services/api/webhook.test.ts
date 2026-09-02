@@ -21,10 +21,10 @@ describe("webhook API client", () => {
 
     // ─── listWebhookConfigs ───────────────────────────────────────────────────
 
-    it("listWebhookConfigs calls GET /admin/webhook/config and returns array", async () => {
+    it("listWebhookConfigs calls GET /admin/notifications/webhooks and returns array", async () => {
         const spy = jest.spyOn(apiClient, "get").mockResolvedValue(mockResponse([]));
         const result = await listWebhookConfigs();
-        expect(spy).toHaveBeenCalledWith("/admin/webhook/config");
+        expect(spy).toHaveBeenCalledWith("/admin/notifications/webhooks");
         expect(Array.isArray(result)).toBe(true);
         expect(result).toEqual([]);
     });
@@ -36,7 +36,7 @@ describe("webhook API client", () => {
         ];
         const spy = jest.spyOn(apiClient, "get").mockResolvedValue(mockResponse(configs));
         const result = await listWebhookConfigs();
-        expect(spy).toHaveBeenCalledWith("/admin/webhook/config");
+        expect(spy).toHaveBeenCalledWith("/admin/notifications/webhooks");
         expect(result).toHaveLength(2);
         expect(result[0].platform).toBe("feishu");
         expect(result[1].platform).toBe("dtalk");
@@ -49,11 +49,11 @@ describe("webhook API client", () => {
 
     // ─── saveWebhookConfig ────────────────────────────────────────────────────
 
-    it("saveWebhookConfig calls PUT /admin/webhook/config with body", async () => {
+    it("saveWebhookConfig calls PUT /admin/notifications/webhooks with body", async () => {
         const input = { platform: "feishu", webhook_url: "https://example.com", enabled: true };
         const spy = jest.spyOn(apiClient, "put").mockResolvedValue(mockResponse(input));
         const result = await saveWebhookConfig(input);
-        expect(spy).toHaveBeenCalledWith("/admin/webhook/config", input);
+        expect(spy).toHaveBeenCalledWith("/admin/notifications/webhooks", input);
         expect(result).toEqual(input);
     });
 
@@ -61,7 +61,7 @@ describe("webhook API client", () => {
         const partial = { platform: "feishu", cooldown_minutes: 5 };
         const spy = jest.spyOn(apiClient, "put").mockResolvedValue(mockResponse(partial));
         await saveWebhookConfig(partial);
-        expect(spy).toHaveBeenCalledWith("/admin/webhook/config", partial);
+        expect(spy).toHaveBeenCalledWith("/admin/notifications/webhooks", partial);
     });
 
     it("saveWebhookConfig rejects when API call fails", async () => {
@@ -71,17 +71,17 @@ describe("webhook API client", () => {
 
     // ─── listWebhookLogs ──────────────────────────────────────────────────────
 
-    it("listWebhookLogs calls GET /admin/webhook/logs with limit param", async () => {
+    it("listWebhookLogs calls GET /admin/notifications/webhook-logs with limit param", async () => {
         const spy = jest.spyOn(apiClient, "get").mockResolvedValue(mockResponse([]));
         await listWebhookLogs(10);
-        expect(spy).toHaveBeenCalledWith("/admin/webhook/logs", { params: { limit: 10 } });
+        expect(spy).toHaveBeenCalledWith("/admin/notifications/webhook-logs", { params: { limit: 10 } });
     });
 
     it("listWebhookLogs calls GET without limit when no arg provided", async () => {
         const spy = jest.spyOn(apiClient, "get").mockResolvedValue(mockResponse([]));
         await listWebhookLogs();
         // limit is undefined — axios strips it, but the JS call still passes it
-        expect(spy).toHaveBeenCalledWith("/admin/webhook/logs", { params: { limit: undefined } });
+        expect(spy).toHaveBeenCalledWith("/admin/notifications/webhook-logs", { params: { limit: undefined } });
     });
 
     it("listWebhookLogs returns log items matching WebhookLogItem shape", async () => {
@@ -114,10 +114,10 @@ describe("webhook API client", () => {
 
     // ─── testWebhookSend ──────────────────────────────────────────────────────
 
-    it("testWebhookSend calls POST /admin/webhook/test with body", async () => {
+    it("testWebhookSend calls POST /admin/notifications/webhooks/test with body", async () => {
         const spy = jest.spyOn(apiClient, "post").mockResolvedValue(mockResponse({ success: true }));
         const result = await testWebhookSend({ platform: "feishu", message: "hello" });
-        expect(spy).toHaveBeenCalledWith("/admin/webhook/test", { platform: "feishu", message: "hello" });
+        expect(spy).toHaveBeenCalledWith("/admin/notifications/webhooks/test", { platform: "feishu", message: "hello" });
         expect(result).toEqual({ success: true });
     });
 

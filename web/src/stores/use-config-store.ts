@@ -1194,8 +1194,13 @@ export function resolveCompatibleModelSelection(
         const options = buildChannelModelOptions(channels, models, pricing, metrics, capability, channelId, autoChannelModels, mergeGroupsByChannel[channelId]).filter((option) => !option.autoPoolId && option.rawModel === decoded.model);
         if (decoded.channelModelId) {
             const exact = options.find((option) => option.channelModelId === decoded.channelModelId);
-            return exact ? { value: exact.value, channelId } : null;
+            if (exact) return { value: exact.value, channelId };
+            const physical = options.filter((option) => !isMergeModelValue(option.value));
+            const merged = options.filter((option) => isMergeModelValue(option.value));
+            return !physical.length && merged.length === 1 ? { value: merged[0].value, channelId } : null;
         }
+        const merged = options.filter((option) => isMergeModelValue(option.value));
+        if (merged.length === 1) return { value: merged[0].value, channelId };
         return options.length === 1 ? { value: options[0].value, channelId } : null;
     }
     const matches = channels.flatMap((channel) => buildChannelModelOptions(channels, models, pricing, metrics, capability, channel.id, autoChannelModels, mergeGroupsByChannel[channel.id]).filter((option) => !isMergeModelValue(option.value) && option.rawModel === current));

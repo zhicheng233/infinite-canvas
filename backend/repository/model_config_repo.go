@@ -335,6 +335,9 @@ func (r *ModelConfigRepo) ApplyDiscovery(tenantID, actorUserID, channelID uint, 
 			if err := tx.Select("*").Create(&created).Error; err != nil {
 				return err
 			}
+			if err := tx.Model(&created).Update("enabled", false).Error; err != nil {
+				return err
+			}
 			report.Created++
 			report.ModelIDs = append(report.ModelIDs, created.ID)
 		}

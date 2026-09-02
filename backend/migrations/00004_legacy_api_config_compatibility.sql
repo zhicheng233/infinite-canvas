@@ -25,7 +25,7 @@ INSERT INTO model_config_migrations (
 )
 SELECT NOW(3), NOW(3), 'tenant_api_config', id, 2, 'pending', 0, '等待应用启动时迁移到规范化模型配置'
 FROM tenant_api_configs
-ON DUPLICATE KEY UPDATE updated_at = updated_at;
+ON DUPLICATE KEY UPDATE updated_at = model_config_migrations.updated_at;
 
 -- +goose Down
 DELETE operation

@@ -260,10 +260,11 @@ func replaceLegacyOperations(tx *gorm.DB, item *model.ChannelModel, capabilities
 func decodeLegacyAPIConfig(config *model.TenantApiConfig) (map[string][]string, map[string]string, map[string][]int, map[string]bool, error) {
 	lists := map[string][]string{}
 	for key, raw := range map[string]string{"all": config.Models, "image": config.ImageModels, "video": config.VideoModels, "text": config.TextModels, "audio": config.AudioModels} {
-		if err := decodeLegacyJSON(raw, &lists[key]); err != nil {
+		var values []string
+		if err := decodeLegacyJSON(raw, &values); err != nil {
 			return nil, nil, nil, nil, fmt.Errorf("旧版 %s 模型列表无效: %w", key, err)
 		}
-		lists[key] = uniqueLegacyStrings(lists[key])
+		lists[key] = uniqueLegacyStrings(values)
 	}
 	routes := map[string]string{}
 	durations := map[string][]int{}
