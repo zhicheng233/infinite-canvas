@@ -43,6 +43,13 @@ func (s *ModelConfigService) CreateChannel(tenantID, actorUserID uint, input mod
 	if err != nil {
 		return nil, err
 	}
+	defaults, err := normalizeChannelDefaults(item.ID, defaultChannelProtocolInputs())
+	if err != nil {
+		return nil, err
+	}
+	if err := s.repo.SaveChannelDefaults(tenantID, actorUserID, item.ID, 1, defaults); err != nil {
+		return nil, err
+	}
 	afterJSON, _ := json.Marshal(item)
 	if err := s.repo.RecordAudit(&model.ModelConfigAuditLog{TenantID: tenantID, ActorUserID: actorUserID, Resource: "channel", ResourceID: item.ID, Action: "create", AfterJSON: string(afterJSON)}); err != nil {
 		return nil, err
@@ -79,6 +86,9 @@ func (s *ModelConfigService) ListChannels(tenantID uint) ([]model.ModelServiceCh
 	counts := make(map[uint]int)
 	readyCounts := make(map[uint]int)
 	for index := range data.Models {
+		if data.Models[index].DeletedAt.Valid {
+			continue
+		}
 		counts[data.Models[index].ChannelID]++
 		if info, buildErr := buildModelConfigInfo(data, &data.Models[index]); buildErr == nil && info.Ready {
 			readyCounts[data.Models[index].ChannelID]++
@@ -379,13 +389,17 @@ func (s *ModelConfigService) TestModel(tenantID, userID, id uint, input model.Mo
 		if current == nil {
 			return nil, gorm.ErrRecordNotFound
 		}
-		_, effective, normalizeErr := normalizeModelOperations(current.ChannelID, input.Draft.Operations, data.Defaults)
+		operations, effective, normalizeErr := normalizeModelOperations(current.ChannelID, input.Draft.Operations, data.Defaults)
 		if normalizeErr != nil {
 			return nil, normalizeErr
 		}
 		key := operationKey(input.Capability, input.Operation)
-		if value, ok := effective[key]; ok {
-			operation = &model.ModelOperationInfo{Capability: input.Capability, Operation: input.Operation, Enabled: true, Effective: value}
+		operation = nil
+		for _, draftOperation := range operations {
+			if operationKey(draftOperation.Capability, draftOperation.Operation) == key && draftOperation.Enabled {
+				operation = &model.ModelOperationInfo{Capability: input.Capability, Operation: input.Operation, Enabled: true, Effective: effective[key]}
+				break
+			}
 		}
 		if value := strings.TrimSpace(input.Draft.UpstreamModelID); value != "" {
 			info.UpstreamModelID = value
@@ -405,7 +419,7 @@ func (s *ModelConfigService) TestModel(tenantID, userID, id uint, input model.Mo
 func buildModelConfigInfo(data *repository.ModelConfigData, item *model.ChannelModel) (model.ModelConfigInfo, error) {
 	channel := findChannel(data.Channels, item.ChannelID)
 	catalog := findCatalog(data.Catalogs, item.CatalogModelID)
-	info := model.ModelConfigInfo{ID: item.ID, ChannelID: item.ChannelID, CatalogModelID: item.CatalogModelID, UpstreamModelID: item.UpstreamModelID, Status: item.Status, DiscoveryStatus: item.DiscoveryStatus, LastDiscoveredAt: item.LastDiscoveredAt, ConfigRevision: normalizedRevision(item.ConfigRevision), LegacyUnreviewed: item.LegacyUnreviewed, SortOrder: item.SortOrder, Operations: []model.ModelOperationInfo{}, Pricing: []model.ModelPricingRuleInfo{}, ReadinessIssues: []model.ModelReadinessIssue{}}
+	info := model.ModelConfigInfo{ID: item.ID, ChannelID: item.ChannelID, CatalogModelID: item.CatalogModelID, UpstreamModelID: item.UpstreamModelID, Status: item.Status, DiscoveryStatus: item.DiscoveryStatus, LastDiscoveredAt: item.LastDiscoveredAt, ConfigRevision: normalizedRevision(item.ConfigRevision), LegacyUnreviewed: item.LegacyUnreviewed, Archived: item.DeletedAt.Valid, SortOrder: item.SortOrder, Operations: []model.ModelOperationInfo{}, Pricing: []model.ModelPricingRuleInfo{}, ReadinessIssues: []model.ModelReadinessIssue{}}
 	if info.UpstreamModelID == "" {
 		info.UpstreamModelID = item.ModelName
 	}
@@ -601,6 +615,9 @@ func effectiveProtocol(operation model.ChannelModelOperation, defaults []model.C
 		return model.EffectiveProtocolInfo{}, err
 	}
 	config := decodeConfigMap(configJSON)
+	if err := validateOperationConfig(operation.Capability, operation.Operation, normalizedAdapter, config); err != nil {
+		return model.EffectiveProtocolInfo{}, err
+	}
 	contract := contractKey(operation.Capability, operation.Operation, normalizedAdapter, config, version)
 	return model.EffectiveProtocolInfo{Source: source, Adapter: normalizedAdapter, Config: config, ConfigVersion: version, ContractKey: contract}, nil
 }
@@ -626,6 +643,25 @@ func normalizeOperationAdapter(capability, operation, adapter string) (string, e
 	default:
 		return "", errors.New("模型能力无效")
 	}
+}
+
+func validateOperationConfig(capability, operation, adapter string, config map[string]any) error {
+	if capability != "video" || operation != "generate" || adapter != "custom" {
+		return nil
+	}
+	raw, ok := config["custom_config"]
+	if !ok {
+		return errors.New("自定义视频协议缺少 custom_config")
+	}
+	encoded, err := json.Marshal(raw)
+	if err != nil {
+		return errors.New("自定义视频配置格式无效")
+	}
+	var custom model.CustomVideoConfig
+	if err := json.Unmarshal(encoded, &custom); err != nil {
+		return errors.New("自定义视频配置格式无效")
+	}
+	return model.NormalizeAndValidateCustomVideoConfig(&custom)
 }
 
 type legacyModelProjection struct {
@@ -759,6 +795,16 @@ func defaultsForChannel(items []model.ChannelProtocolDefault, channelID uint) []
 		}
 	}
 	return result
+}
+
+func defaultChannelProtocolInputs() []model.SaveChannelProtocolDefaultInput {
+	return []model.SaveChannelProtocolDefaultInput{
+		{Capability: "image", Operation: "generate", Adapter: model.ImageRouteAuto, Config: map[string]any{}},
+		{Capability: "image", Operation: "edit", Adapter: model.ImageRouteAuto, Config: map[string]any{}},
+		{Capability: "video", Operation: "generate", Adapter: "auto", Config: map[string]any{}},
+		{Capability: "text", Operation: "generate", Adapter: "openai", Config: map[string]any{}},
+		{Capability: "audio", Operation: "generate", Adapter: "openai", Config: map[string]any{}},
+	}
 }
 
 func operationsForModel(items []model.ChannelModelOperation, modelID uint) []model.ChannelModelOperation {

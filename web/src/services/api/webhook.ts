@@ -37,21 +37,21 @@ export type TestSendResult = {
 export type SaveWebhookConfigInput = Pick<WebhookConfig, "platform"> & Partial<Omit<WebhookConfig, "platform">>;
 
 export async function listWebhookConfigs() {
-    const res = await apiClient.get("/admin/webhook/config");
+    const res = await apiClient.get("/admin/notifications/webhooks");
     return res.data.data as WebhookConfig[];
 }
 
 export async function saveWebhookConfig(input: SaveWebhookConfigInput) {
-    const res = await apiClient.put("/admin/webhook/config", input);
+    const res = await apiClient.put("/admin/notifications/webhooks", input);
     return res.data.data as WebhookConfig;
 }
 
 export async function testWebhookSend(input: TestSendInput) {
-    const res = await apiClient.post("/admin/webhook/test", input);
+    const res = await apiClient.post("/admin/notifications/webhooks/test", input);
     return res.data.data as TestSendResult;
 }
 
 export async function listWebhookLogs(limit?: number) {
-    const res = await apiClient.get("/admin/webhook/logs", { params: { limit } });
+    const res = await apiClient.get("/admin/notifications/webhook-logs", { params: { limit } });
     return res.data.data as WebhookLogItem[];
 }

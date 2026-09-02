@@ -8,7 +8,7 @@ export default function AdminPricingPage() {
     const router = useRouter();
 
     useEffect(() => {
-        router.replace("/admin/api-config");
+        router.replace("/admin/api-config?section=pricing");
     }, [router]);
 
     return (

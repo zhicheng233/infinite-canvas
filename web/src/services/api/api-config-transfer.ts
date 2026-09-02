@@ -52,17 +52,17 @@ export type ApiConfigTransferExportResult = {
 const MAX_CONFIG_FILE_BYTES = 16 * 1024 * 1024;
 
 export async function exportApiConfig(password: string): Promise<ApiConfigTransferExportResult> {
-    const response = await apiClient.post("/admin/api-config/export", { password });
+    const response = await apiClient.post("/admin/model-service/export", { password });
     return response.data.data;
 }
 
 export async function previewApiConfigImport(password: string, envelope: ApiConfigTransferEnvelope): Promise<ApiConfigTransferResult> {
-    const response = await apiClient.post("/admin/api-config/import/preview", { password, envelope });
+    const response = await apiClient.post("/admin/model-service/import/preview", { password, envelope });
     return response.data.data;
 }
 
 export async function importApiConfig(password: string, envelope: ApiConfigTransferEnvelope): Promise<ApiConfigTransferResult> {
-    const response = await apiClient.post("/admin/api-config/import", { password, envelope });
+    const response = await apiClient.post("/admin/model-service/import", { password, envelope });
     return response.data.data;
 }
 

@@ -103,9 +103,7 @@ func (s *ChannelService) Update(id uint, input model.SaveChannelInput) (*model.C
 	}
 	channel.NewApiChannelID = input.NewApiChannelID
 	channel.MetricsBaseUrl = input.MetricsBaseUrl
-	if input.Remark != "" {
-		channel.Remark = input.Remark
-	}
+	channel.Remark = input.Remark
 
 	apiKey := strings.TrimSpace(input.ApiKey)
 	if apiKey != "" {

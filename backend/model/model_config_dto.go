@@ -53,6 +53,7 @@ type ModelConfigInfo struct {
 	LastDiscoveredAt *time.Time             `json:"last_discovered_at,omitempty"`
 	ConfigRevision   uint                   `json:"config_revision"`
 	LegacyUnreviewed bool                   `json:"legacy_unreviewed"`
+	Archived         bool                   `json:"archived"`
 	SortOrder        int                    `json:"sort_order"`
 	Operations       []ModelOperationInfo   `json:"operations"`
 	Pricing          []ModelPricingRuleInfo `json:"pricing"`

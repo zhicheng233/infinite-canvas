@@ -167,6 +167,10 @@ func Setup(r *gin.Engine, deps Dependencies) {
 				admin.PUT("/admin/model-service/routing/pools/:id/members/:memberId", autoRoutingHandler.UpdateMember)
 				admin.DELETE("/admin/model-service/routing/pools/:id", autoRoutingHandler.Delete)
 			}
+			admin.GET("/admin/notifications/webhooks", webhookHandler.ListConfig)
+			admin.PUT("/admin/notifications/webhooks", webhookHandler.SaveConfig)
+			admin.POST("/admin/notifications/webhooks/test", webhookHandler.TestSend)
+			admin.GET("/admin/notifications/webhook-logs", webhookHandler.ListLogs)
 		}
 
 		superAdmin := auth.Group("")
