@@ -26,7 +26,7 @@ function memoryStorage() {
 }
 
 function videoConfig(route: string) {
-    const model = "0::0::video-model";
+    const model = "auto://1::video-model";
     return {
         ...defaultConfig,
         model,
@@ -40,7 +40,7 @@ function videoConfig(route: string) {
 }
 
 function customVideoConfig(overrides: Partial<CustomVideoConfig> = {}, requiredRole?: CustomVideoMediaFeature) {
-    const model = "0::0::video-model";
+    const model = "auto://1::video-model";
     const customConfig: CustomVideoConfig = {
         seconds: { enabled: true, key: "duration", mode: "range", min: 3, max: 10, step: 1, default: 6 },
         dimensions: { enabled: true, mode: "size", key: "resolution", options: ["1280x720", "720x1280"], default: "1280x720" },
@@ -86,7 +86,6 @@ beforeEach(() => {
     Object.defineProperty(globalThis, "localStorage", { configurable: true, value: localStorage });
     Object.defineProperty(globalThis, "CustomEvent", { configurable: true, value: class CustomEvent {} });
 });
-
 afterEach(() => {
     jest.restoreAllMocks();
     useConfigStore.getState().invalidateServerCatalogRefresh();
@@ -168,7 +167,7 @@ describe("custom OpenAI video serialization", () => {
 
             await createVideoGenerationTask(customVideoConfig({}, role), "required media", [], [], [], { customVideoRuntime: runtime });
 
-            const body = post.mock.calls[0][1];
+            const body = post.mock.calls[0][1] as Record<string, unknown>;
             expect(body[alias]).toEqual(source);
             expect(body).not.toHaveProperty(role);
             if (role !== "reference_images") expect(body).not.toHaveProperty("referenceMode");
@@ -266,6 +265,8 @@ describe("custom OpenAI video serialization", () => {
         const [requestUrl, body, requestConfig] = post.mock.calls[0];
         const url = new URL(String(requestUrl), "https://app.test");
         expect(url.searchParams.get("path")).toBe("/videos");
+        expect(url.searchParams.get("routing_pool_id")).toBe("1");
+        expect(url.searchParams.has("channel_id")).toBe(false);
         expect(url.searchParams.get("routing_video_route")).toBe("custom");
         expect(requestConfig?.headers).toEqual({ Authorization: "Bearer token", "Content-Type": "application/json" });
         expect(body).toEqual({
@@ -284,7 +285,32 @@ describe("custom OpenAI video serialization", () => {
         });
         for (const canonical of ["seconds", "size", "aspect_ratio", "images", "input_reference", "style_references", "element_references", "reference_images", "reference_mode", "input_video", "audio", "n"]) expect(body).not.toHaveProperty(canonical);
         expect(body).not.toHaveProperty("firstFrame");
-        expect(task).toEqual({ id: "task_custom", provider: "openai", model: "0::0::video-model" });
+        expect(task).toEqual({ id: "task_custom", provider: "openai", model: "auto://1::video-model" });
+    });
+
+    it("keeps the resolved Auto route and settlement metadata on the created task", async () => {
+        jest.spyOn(axios, "post").mockResolvedValue({
+            data: { id: "task_routed" },
+            headers: {
+                "x-resolved-channel-id": "2",
+                "x-resolved-channel-model-id": "62",
+                "x-resolved-channel-name": "视频渠道 2",
+                "x-generation-request-id": "req_auto_1",
+                "x-credits-cost": "12.5",
+            },
+        });
+
+        const task = await createVideoGenerationTask(customVideoConfig(), "routed task");
+
+        expect(task).toMatchObject({
+            id: "task_routed",
+            model: "auto://1::video-model",
+            channelId: 2,
+            channelModelId: 62,
+            resolvedChannelName: "视频渠道 2",
+            generationRequestId: "req_auto_1",
+            generationCost: 12.5,
+        });
     });
 
     it("omits disabled and empty values and emits only the configured dimension mode", async () => {
@@ -404,7 +430,7 @@ describe("video aspect ratio routing", () => {
     });
 
     it("uses yijia JSON when a raw model resolves to a selected yijia channel model", async () => {
-        useConfigStore.getState().applyServerChannelCatalog([{ id: 7, name: "Yijia", enabled: true, video_api_standard: "default" }], {
+        useConfigStore.getState().applyServerChannelCatalog([{ id: 7, name: "Yijia", enabled: true, video_api_standard: "default", sync_status: "success" }], {
             7: [
                 {
                     id: 77,
@@ -451,7 +477,7 @@ describe("video aspect ratio routing", () => {
 
     it("uses yijia JSON when a default-standard merge model inherits a yijia physical route", async () => {
         useConfigStore.setState({ config: { ...defaultConfig, model: "merge://7::omni_flash", videoModel: "merge://7::omni_flash", videoChannelId: 7, size: "720x1280" } });
-        useConfigStore.getState().applyServerChannelCatalog([{ id: 7, name: "混合渠道1", enabled: true, video_api_standard: "default" }], {
+        useConfigStore.getState().applyServerChannelCatalog([{ id: 7, name: "混合渠道1", enabled: true, video_api_standard: "default", sync_status: "success" }], {
             7: [
                 {
                     id: 77,
@@ -531,7 +557,7 @@ describe("video aspect ratio routing", () => {
         const state = await pollVideoGenerationTask(videoConfig("waninter"), {
             id: "task_123",
             provider: "openai",
-            model: "0::0::video-model",
+            model: "auto://1::video-model",
             channelId: 2,
             channelModelId: 62,
         });
@@ -552,7 +578,7 @@ describe("video aspect ratio routing", () => {
         const state = await pollVideoGenerationTask(videoConfig("waninter"), {
             id: "task_123",
             provider: "openai",
-            model: "0::0::video-model",
+            model: "auto://1::video-model",
             channelId: 2,
             channelModelId: 62,
         });
@@ -572,7 +598,7 @@ describe("video aspect ratio routing", () => {
         await pollVideoGenerationTask(videoConfig("waninter"), {
             id: "task_123",
             provider: "openai",
-            model: "0::0::video-model",
+            model: "auto://1::video-model",
             channelId: 2,
             channelModelId: 62,
         });
@@ -592,7 +618,7 @@ describe("video aspect ratio routing", () => {
             pollVideoGenerationTask(videoConfig("binghuo"), {
                 id: "task_binghuo",
                 provider: "binghuo",
-                model: "0::0::video-model",
+                model: "auto://1::video-model",
                 channelId: 2,
                 channelModelId: 62,
             }),
@@ -605,7 +631,7 @@ describe("video aspect ratio routing", () => {
         const state = await pollVideoGenerationTask(videoConfig("binghuo"), {
             id: "task_binghuo",
             provider: "binghuo",
-            model: "0::0::video-model",
+            model: "auto://1::video-model",
             channelId: 2,
             channelModelId: 62,
         });
@@ -625,7 +651,7 @@ describe("video aspect ratio routing", () => {
         const state = await pollVideoGenerationTask(videoConfig("waninter"), {
             id: "task_123",
             provider: "openai",
-            model: "0::0::video-model",
+            model: "auto://1::video-model",
             channelId: 2,
             channelModelId: 62,
         });
@@ -646,7 +672,7 @@ describe("video aspect ratio routing", () => {
         const state = await pollVideoGenerationTask(videoConfig("waninter"), {
             id: "task_123",
             provider: "openai",
-            model: "0::0::video-model",
+            model: "auto://1::video-model",
             channelId: 2,
             channelModelId: 62,
         });
@@ -666,7 +692,7 @@ describe("video aspect ratio routing", () => {
         const state = await pollVideoGenerationTask(videoConfig("waninter"), {
             id: "task_123",
             provider: "openai",
-            model: "0::0::video-model",
+            model: "auto://1::video-model",
             channelId: 2,
             channelModelId: 62,
         });
@@ -688,7 +714,7 @@ describe("video aspect ratio routing", () => {
         const state = await pollVideoGenerationTask(videoConfig("binghuo"), {
             id: "task_binghuo",
             provider: "binghuo",
-            model: "0::0::video-model",
+            model: "auto://1::video-model",
             channelId: 2,
             channelModelId: 62,
         });
@@ -707,7 +733,7 @@ describe("video aspect ratio routing", () => {
         const state = await pollVideoGenerationTask(videoConfig("binghuo"), {
             id: "task_binghuo",
             provider: "binghuo",
-            model: "0::0::video-model",
+            model: "auto://1::video-model",
             channelId: 2,
             channelModelId: 62,
         });
@@ -723,7 +749,7 @@ describe("video aspect ratio routing", () => {
         const state = await pollVideoGenerationTask(videoConfig("binghuo"), {
             id: "task_binghuo",
             provider: "binghuo",
-            model: "0::0::video-model",
+            model: "auto://1::video-model",
             channelId: 2,
             channelModelId: 62,
         });
@@ -741,7 +767,7 @@ describe("video aspect ratio routing", () => {
             pollVideoGenerationTask(videoConfig("waninter"), {
                 id: "task_123",
                 provider: "openai",
-                model: "0::0::video-model",
+                model: "auto://1::video-model",
                 channelId: 2,
                 channelModelId: 62,
             }),

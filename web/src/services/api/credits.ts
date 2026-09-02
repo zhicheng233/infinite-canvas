@@ -13,6 +13,9 @@ type PricingData = {
     seconds?: number;
     resolution?: string;
     formula?: string;
+    min_cost?: number;
+    max_cost?: number;
+    candidate_count?: number;
 };
 export type CreditTransactionMetadata = {
     scene?: string;
@@ -55,7 +58,7 @@ export async function getTransactions(page = 1, pageSize = 20) {
 
 export async function estimateCost(
     model: string,
-    params?: { type?: string; count?: string | number; seconds?: string | number; resolution?: string; size?: string; channel_id?: string | number; channel_model_id?: string | number; fuzzy_group_name?: string },
+    params?: { type?: string; count?: string | number; seconds?: string | number; resolution?: string; size?: string; channel_id?: string | number; channel_model_id?: string | number; fuzzy_group_name?: string; routing_pool_id?: string | number },
 ) {
     const res = await apiClient.get<ApiResult<PricingData>>("/credits/estimate", { params: { model, ...params } });
     return res.data.data;

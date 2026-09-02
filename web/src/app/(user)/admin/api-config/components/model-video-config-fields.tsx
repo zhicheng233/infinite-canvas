@@ -7,7 +7,7 @@ import { createDefaultCustomVideoConfig, normalizeAndValidateCustomVideoConfig, 
 import { CustomVideoConfigEditor, formatCustomVideoConfigError } from "./custom-video-config-editor";
 
 const videoRouteOptions = [
-    { label: "默认 /v1/videos", value: "auto" },
+    { label: "兼容默认 /v1/videos", value: "auto" },
     { label: "/v1/videos", value: "openai" },
     { label: "/v1/videos（JSON / veo）", value: "veo_json" },
     { label: "/v1/videos（JSON / yijia）", value: "yijia" },

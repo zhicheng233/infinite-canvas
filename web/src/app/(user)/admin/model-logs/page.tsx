@@ -38,7 +38,7 @@ type ChannelIdentity = {
 function formatChannelLabel(item: ChannelIdentity) {
     const name = item.channel_name?.trim();
     if (name) return name;
-    if (item.channel_id === 0) return "Auto";
+    if (item.channel_id === 0) return "智能路由";
     if (item.channel_id && item.channel_id > 0) return `渠道 #${item.channel_id}`;
     return "—";
 }

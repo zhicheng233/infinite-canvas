@@ -58,7 +58,8 @@ const seedancePixels = {
 
 export function isSeedanceVideoConfig(config: AiConfig | { model?: string; videoModel?: string; baseUrl?: string }) {
     const requestConfig = "modelRoutes" in config ? resolveModelRequestConfig(config, config.model || config.videoModel) : config;
-    return isSeedanceVideoModel(modelOptionName(requestConfig.model || requestConfig.videoModel || "")) || isArkPlanBaseUrl(requestConfig.baseUrl || readLocalAiCredentials().baseUrl);
+    const baseUrl = "baseUrl" in requestConfig ? requestConfig.baseUrl : undefined;
+    return isSeedanceVideoModel(modelOptionName(requestConfig.model || requestConfig.videoModel || "")) || isArkPlanBaseUrl(baseUrl || readLocalAiCredentials().baseUrl);
 }
 
 export function isSeedanceVideoModel(model: string) {

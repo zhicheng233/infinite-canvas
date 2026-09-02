@@ -102,10 +102,11 @@ func (s *APIConfigTransferService) prepareImport(tenantID uint, input model.APIC
 }
 
 func (s *APIConfigTransferService) buildSnapshot(data *repository.APIConfigTransferData) (*model.APIConfigTransferSnapshot, model.APIConfigTransferStats, []model.APIConfigTransferConflict, error) {
-	snapshot := &model.APIConfigTransferSnapshot{SchemaVersion: 1, ExportedAt: time.Now().UTC(), Channels: make([]model.APIConfigTransferChannel, 0, len(data.Channels)), Pricing: []model.APIConfigTransferPricing{}, VideoPresets: []model.APIConfigTransferVideoPreset{}}
+	snapshot := &model.APIConfigTransferSnapshot{SchemaVersion: 1, ExportedAt: time.Now().UTC(), Channels: make([]model.APIConfigTransferChannel, 0, len(data.Channels)), Pricing: []model.APIConfigTransferPricing{}, VideoPresets: []model.APIConfigTransferVideoPreset{}, AutoRoutingPools: []model.APIConfigTransferAutoRoutingPool{}}
 	stats := model.APIConfigTransferStats{}
 	warnings := make([]model.APIConfigTransferConflict, 0)
 	refs := make(map[uint]string, len(data.Channels))
+	channelsByID := make(map[uint]*model.Channel, len(data.Channels))
 	channelIndexes := make(map[uint]int, len(data.Channels))
 	for index := range data.Channels {
 		item := &data.Channels[index]
@@ -119,6 +120,7 @@ func (s *APIConfigTransferService) buildSnapshot(data *repository.APIConfigTrans
 			apiKey = decrypted
 		}
 		refs[item.ID] = ref
+		channelsByID[item.ID] = item
 		channelIndexes[item.ID] = len(snapshot.Channels)
 		snapshot.Channels = append(snapshot.Channels, model.APIConfigTransferChannel{
 			Ref: ref, Name: item.Name, BaseURL: item.BaseUrl, APIKey: apiKey, Enabled: item.Enabled,
@@ -127,11 +129,13 @@ func (s *APIConfigTransferService) buildSnapshot(data *repository.APIConfigTrans
 		})
 		stats.Channels.Create++
 	}
+	modelsByID := make(map[uint]*model.ChannelModel, len(data.Models))
 	for index := range data.Models {
 		item := &data.Models[index]
 		if item.DeletedAt.Valid {
 			continue
 		}
+		modelsByID[item.ID] = item
 		channelIndex, ok := channelIndexes[item.ChannelID]
 		if !ok {
 			stats.Models.Skip++
@@ -182,6 +186,34 @@ func (s *APIConfigTransferService) buildSnapshot(data *repository.APIConfigTrans
 		}
 		snapshot.VideoPresets = append(snapshot.VideoPresets, model.APIConfigTransferVideoPreset{Name: info.Name, Config: info.Config})
 		stats.VideoPresets.Create++
+	}
+	for index := range data.AutoRoutingPools {
+		pool := &data.AutoRoutingPools[index]
+		output := model.APIConfigTransferAutoRoutingPool{Model: pool.PublicModelName, Capability: pool.Capability, ContractKey: pool.ContractKey, Enabled: pool.Enabled, MaxAttempts: pool.MaxAttempts, Members: []model.APIConfigTransferAutoRoutingMember{}}
+		valid := true
+		for memberIndex := range pool.Members {
+			member := &pool.Members[memberIndex]
+			channelModel := modelsByID[member.ChannelModelID]
+			if channelModel == nil {
+				valid = false
+				break
+			}
+			channelRef, ok := refs[channelModel.ChannelID]
+			channel := channelsByID[channelModel.ChannelID]
+			contract, contractErr := autoRoutingContract(channel, channelModel, pool.Capability)
+			if !ok || contractErr != nil || contract != pool.ContractKey || channelModel.ModelName != pool.PublicModelName {
+				valid = false
+				break
+			}
+			output.Members = append(output.Members, model.APIConfigTransferAutoRoutingMember{ChannelRef: channelRef, Model: channelModel.ModelName, Priority: member.Priority, Enabled: member.Enabled})
+		}
+		if !valid || len(output.Members) < 2 {
+			stats.AutoRoutingPools.Skip++
+			warnings = append(warnings, transferConflict("auto_routing_pool", pool.PublicModelName+"/"+pool.Capability, "路由池合同或候选已失效，已跳过"))
+			continue
+		}
+		snapshot.AutoRoutingPools = append(snapshot.AutoRoutingPools, output)
+		stats.AutoRoutingPools.Create++
 	}
 	return snapshot, stats, warnings, nil
 }
@@ -357,7 +389,104 @@ func (s *APIConfigTransferService) buildImportPlan(tenantID uint, snapshot *mode
 
 	s.addPricingPlan(tenantID, snapshot, data, states, plan, result)
 	s.addPresetPlan(tenantID, snapshot, data, plan, result)
+	s.addAutoRoutingPlan(snapshot, data, states, plan, result)
 	return plan, result
+}
+
+func (s *APIConfigTransferService) addAutoRoutingPlan(snapshot *model.APIConfigTransferSnapshot, data *repository.APIConfigTransferData, states map[string]transferChannelState, plan *repository.APIConfigTransferApplyPlan, result *model.APIConfigTransferResult) {
+	current := make(map[string][]*model.AutoRoutingPool, len(data.AutoRoutingPools))
+	for index := range data.AutoRoutingPools {
+		item := &data.AutoRoutingPools[index]
+		current[autoRoutingPoolKey(item.PublicModelName, item.Capability)] = append(current[autoRoutingPoolKey(item.PublicModelName, item.Capability)], item)
+	}
+	counts := make(map[string]int, len(snapshot.AutoRoutingPools))
+	for _, item := range snapshot.AutoRoutingPools {
+		counts[autoRoutingPoolKey(item.Model, item.Capability)]++
+	}
+	channels := make(map[string]*model.APIConfigTransferChannel, len(snapshot.Channels))
+	models := make(map[string][]model.ChannelModel)
+	for channelIndex := range snapshot.Channels {
+		channel := &snapshot.Channels[channelIndex]
+		channels[channel.Ref] = channel
+		for modelIndex := range channel.Models {
+			if item, err := transferModelToRecord(&channel.Models[modelIndex]); err == nil {
+				models[channel.Ref+"\x00"+item.ModelName] = append(models[channel.Ref+"\x00"+item.ModelName], item)
+			}
+		}
+	}
+	plannedModels := make(map[string]bool, len(plan.Models))
+	for _, operation := range plan.Models {
+		plannedModels[operation.ChannelRef+"\x00"+operation.Item.ModelName] = true
+	}
+
+	for poolIndex := range snapshot.AutoRoutingPools {
+		input := &snapshot.AutoRoutingPools[poolIndex]
+		modelName, capability := strings.TrimSpace(input.Model), strings.TrimSpace(input.Capability)
+		identifier := modelName + "/" + capability
+		key := autoRoutingPoolKey(modelName, capability)
+		if modelName == "" || !validAutoCapability(capability) || counts[key] > 1 || input.MaxAttempts < 1 || input.MaxAttempts > autoDefaultMaxAttempts || len(input.Members) < 2 {
+			result.Stats.AutoRoutingPools.Skip++
+			result.Conflicts = append(result.Conflicts, transferConflict("auto_routing_pool", identifier, "路由池字段无效、重复或候选不足"))
+			continue
+		}
+		memberKeys := make(map[string]bool, len(input.Members))
+		members := make([]repository.APIConfigTransferAutoRoutingMemberOperation, 0, len(input.Members))
+		contractKey := ""
+		enabledMembers := 0
+		invalidReason := ""
+		for _, member := range input.Members {
+			memberModel := strings.TrimSpace(member.Model)
+			memberKey := member.ChannelRef + "\x00" + memberModel
+			state, stateExists := states[member.ChannelRef]
+			channel := channels[member.ChannelRef]
+			modelItems := models[memberKey]
+			if member.ChannelRef == "" || memberModel != modelName || memberKeys[memberKey] || !stateExists || state.conflict || channel == nil || len(modelItems) != 1 || !plannedModels[memberKey] {
+				invalidReason = "候选引用不存在、重复或关联配置已冲突"
+				break
+			}
+			memberKeys[memberKey] = true
+			channelRecord := &model.Channel{Enabled: channel.Enabled, VideoAPIStandard: normalizeChannelVideoAPIStandard(channel.VideoAPIStandard)}
+			modelRecord := modelItems[0]
+			contract, err := autoRoutingContract(channelRecord, &modelRecord, capability)
+			if err != nil || contractKey != "" && contract != contractKey || strings.TrimSpace(input.ContractKey) != "" && contract != strings.TrimSpace(input.ContractKey) {
+				invalidReason = "候选协议合同不一致"
+				break
+			}
+			contractKey = contract
+			if member.Enabled {
+				enabledMembers++
+			}
+			members = append(members, repository.APIConfigTransferAutoRoutingMemberOperation{ChannelRef: member.ChannelRef, Model: memberModel, Priority: member.Priority, Enabled: member.Enabled})
+		}
+		if invalidReason == "" && input.Enabled && enabledMembers < 2 {
+			invalidReason = "启用的路由池至少需要两个启用候选"
+		}
+		if invalidReason != "" || len(members) < 2 {
+			result.Stats.AutoRoutingPools.Skip++
+			result.Conflicts = append(result.Conflicts, transferConflict("auto_routing_pool", identifier, invalidReason))
+			continue
+		}
+		existing := current[key]
+		if len(existing) > 1 {
+			result.Stats.AutoRoutingPools.Skip++
+			result.Conflicts = append(result.Conflicts, transferConflict("auto_routing_pool", identifier, "目标环境存在重复路由池"))
+			continue
+		}
+		item := model.AutoRoutingPool{PublicModelName: modelName, Capability: capability, ContractKey: contractKey, Enabled: input.Enabled, MaxAttempts: input.MaxAttempts}
+		operation := repository.APIConfigTransferAutoRoutingPoolOperation{Item: item, Members: members}
+		if len(existing) == 1 {
+			item.BaseModel = existing[0].BaseModel
+			operation.ExistingID, operation.Item = existing[0].ID, item
+			result.Stats.AutoRoutingPools.Update++
+		} else {
+			result.Stats.AutoRoutingPools.Create++
+		}
+		plan.AutoRoutingPools = append(plan.AutoRoutingPools, operation)
+	}
+}
+
+func autoRoutingPoolKey(modelName, capability string) string {
+	return strings.TrimSpace(modelName) + "\x00" + strings.TrimSpace(capability)
 }
 
 func (s *APIConfigTransferService) addPricingPlan(tenantID uint, snapshot *model.APIConfigTransferSnapshot, data *repository.APIConfigTransferData, states map[string]transferChannelState, plan *repository.APIConfigTransferApplyPlan, result *model.APIConfigTransferResult) {
@@ -475,10 +604,19 @@ func transferModelToRecord(input *model.APIConfigTransferModel) (model.ChannelMo
 	if len(durations) > 200 {
 		return model.ChannelModel{}, errors.New("视频时长配置超过长度限制")
 	}
-	item := model.ChannelModel{ModelName: name, Capabilities: string(capabilities), Enabled: input.Enabled, ImageGenerateRoute: strings.TrimSpace(input.ImageGenerateRoute), ImageEditRoute: strings.TrimSpace(input.ImageEditRoute), VideoRoute: strings.TrimSpace(input.VideoRoute), VideoDurations: string(durations), VideoCustomizable: input.VideoCustomizable, SortOrder: input.SortOrder}
-	if len(item.ImageGenerateRoute) > 30 || len(item.ImageEditRoute) > 30 || len(item.VideoRoute) > 30 {
-		return model.ChannelModel{}, errors.New("模型路由长度无效")
+	imageGenerateRoute, err := model.NormalizeImageGenerateRoute(input.ImageGenerateRoute)
+	if err != nil {
+		return model.ChannelModel{}, err
 	}
+	imageEditRoute, err := model.NormalizeImageEditRoute(input.ImageEditRoute)
+	if err != nil {
+		return model.ChannelModel{}, err
+	}
+	videoRoute, err := model.NormalizeVideoRoute(input.VideoRoute)
+	if err != nil {
+		return model.ChannelModel{}, err
+	}
+	item := model.ChannelModel{ModelName: name, Capabilities: string(capabilities), Enabled: input.Enabled, ImageGenerateRoute: imageGenerateRoute, ImageEditRoute: imageEditRoute, VideoRoute: videoRoute, VideoDurations: string(durations), VideoCustomizable: input.VideoCustomizable, SortOrder: input.SortOrder}
 	if item.VideoRoute == "custom" {
 		if input.VideoCustomConfig == nil {
 			return model.ChannelModel{}, errors.New("自定义视频路由必须提供配置")

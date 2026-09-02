@@ -1,6 +1,7 @@
 import { describe, expect, mock, test } from "bun:test";
-import { createElement, type ReactNode } from "react";
+import { createElement, type ElementType, type ReactNode } from "react";
 import { act, create } from "react-test-renderer";
+import type { FormInstance } from "antd";
 
 import { createDefaultCustomVideoConfig, customVideoMediaFeatureNames, normalizeAndValidateCustomVideoConfig, type CustomVideoConfig } from "@/lib/custom-video-config";
 
@@ -27,6 +28,11 @@ let currentConfig: CustomVideoConfig | undefined;
 let presetCreateCalls = 0;
 
 type MockComponentProps = Readonly<Record<string, unknown>> & { readonly children?: ReactNode };
+type MockFormItemProps = Omit<MockComponentProps, "children"> & { readonly children?: ReactNode | (() => ReactNode) };
+const presetSelectType = "preset-select" as unknown as ElementType;
+const formItemType = "form-item" as unknown as ElementType;
+const inputNumberType = "input-number" as unknown as ElementType;
+const mockFormType = "mock-form" as unknown as ElementType;
 
 function MockComponent({ children }: MockComponentProps) {
     return createElement("div", null, children);
@@ -40,8 +46,9 @@ function MockInputNumber(props: MockComponentProps) {
     return createElement("input-number", props);
 }
 
-function MockFormItem({ children, noStyle, ...props }: MockComponentProps) {
-    return createElement("form-item", props, noStyle && typeof children === "function" ? children() : children);
+function MockFormItem({ children, noStyle, ...props }: MockFormItemProps) {
+    const content = typeof children === "function" ? (noStyle ? children() : null) : children;
+    return createElement("form-item", props, content);
 }
 
 const formInstance = {
@@ -59,7 +66,7 @@ const formInstance = {
         if (Array.isArray(path) && path[0] === "video_custom_config" && typeof path[1] === "string" && value && typeof value === "object") currentConfig = { ...currentConfig, [path[1]]: value } as CustomVideoConfig;
     },
     submit: () => undefined,
-};
+} as unknown as FormInstance;
 const MockForm = Object.assign(MockFormComponent, { Item: MockFormItem, useForm: () => [formInstance], useWatch: () => currentConfig });
 const MockSelect = Object.assign(({ children, ...props }: MockComponentProps) => createElement("preset-select", props, children), { Option: MockComponent });
 const MockModal = Object.assign(MockComponent, { confirm: () => undefined });
@@ -100,9 +107,10 @@ test("applying a preset deep-copies nested configuration values", async () => {
         renderer = create(createElement(CustomVideoConfigPresets, { form, disabled: false }));
     });
     if (!renderer) throw new Error("preset component did not render");
+    const view = renderer;
 
     await act(async () => {
-        renderer.root.findByType("preset-select").props.onChange(preset.id);
+        view.root.findByType(presetSelectType).props.onChange(preset.id);
     });
 
     if (!appliedConfig) throw new Error("preset config was not applied");
@@ -159,9 +167,10 @@ test("media required switch is visible only while the media role is enabled and 
         renderer = create(createElement(CustomVideoConfigEditor, { form: formInstance, disabled: false }));
     });
     if (!renderer) throw new Error("editor did not render");
+    const view = renderer;
 
-    expect(renderer.root.findAllByType("form-item").filter((item) => item.props.label === "必填")).toHaveLength(1);
-    const enabledItem = renderer.root.findAllByType("form-item").find((item) => JSON.stringify(item.props.name) === JSON.stringify(["video_custom_config", "input_reference", "enabled"]));
+    expect(view.root.findAllByType(formItemType).filter((item) => item.props.label === "必填")).toHaveLength(1);
+    const enabledItem = view.root.findAllByType(formItemType).find((item) => JSON.stringify(item.props.name) === JSON.stringify(["video_custom_config", "input_reference", "enabled"]));
     if (!enabledItem) throw new Error("input reference switch was not rendered");
 
     await act(async () => {
@@ -190,11 +199,12 @@ test("media count controls are positive integer fields without model policy ceil
         renderer = create(createElement(CustomVideoConfigEditor, { form: formInstance, disabled: true }));
     });
     if (!renderer) throw new Error("editor did not render");
+    const view = renderer;
 
-    const mediaCountItems = renderer.root.findAllByType("form-item").filter((item) => Array.isArray(item.props.name) && item.props.name[2] === "max_count");
+    const mediaCountItems = view.root.findAllByType(formItemType).filter((item) => Array.isArray(item.props.name) && item.props.name[2] === "max_count");
     expect(mediaCountItems).toHaveLength(6);
     for (const item of mediaCountItems) {
-        const input = item.findByType("input-number");
+        const input = item.findByType(inputNumberType);
         expect(input.props.min).toBe(1);
         expect(input.props.precision).toBe(0);
         expect("max" in input.props).toBe(false);
@@ -212,6 +222,7 @@ test("custom model normalization preserves administrator media counts and locali
             reference_images: { ...defaults.reference_images, enabled: true, max_count: 5 },
         },
     });
+    if (!accepted.video_custom_config) throw new Error("expected normalized custom config");
     expect(accepted.video_custom_config.images.max_count).toBe(2);
     expect(accepted.video_custom_config.reference_images.max_count).toBe(5);
 
@@ -241,13 +252,14 @@ describe("preset creation validation boundary", () => {
                     renderer = create(createElement(CustomVideoConfigPresets, { form: formInstance, disabled: false }));
                 });
                 if (!renderer) throw new Error("preset component did not render");
+                const view = renderer;
 
                 await act(async () => {
-                    await renderer.root.findByType("mock-form").props.onFinish({ name: "invalid" });
+                    await view.root.findByType(mockFormType).props.onFinish({ name: "invalid" });
                 });
 
                 expect(presetCreateCalls).toBe(0);
-                await act(async () => renderer.unmount());
+                await act(async () => view.unmount());
             });
         }
     }

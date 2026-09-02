@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import type { CanvasNodeMetadata } from "@/app/(user)/canvas/types";
 import { customVideoMediaFeatureNames, type CustomVideoConfig } from "./custom-video-config";
-import { createEmptyCustomVideoMediaState, normalizeCustomVideoRuntimeContainer, normalizeCustomVideoRuntimeState, normalizeCustomVideoRuntimeStateForModelSwitch, type CustomVideoRuntimeContainer } from "./custom-video-runtime";
+import { createEmptyCustomVideoMediaState, normalizeCustomVideoRuntimeContainer, normalizeCustomVideoRuntimeState, normalizeCustomVideoRuntimeStateForModelSwitch, type CustomVideoRuntimeContainer, type CustomVideoRuntimeSnapshot } from "./custom-video-runtime";
 
 const sourceConfig: CustomVideoConfig = {
     seconds: { enabled: true, key: "seconds", mode: "range", min: 3, max: 10, step: 1, default: 6 },
@@ -64,7 +64,7 @@ describe("custom video runtime state", () => {
             reference_images: mediaSources("reference", 5),
             input_video: mediaSources("video", 2),
         });
-        expect(Object.keys(normalized.media)).toEqual(customVideoMediaFeatureNames);
+        expect(Object.keys(normalized.media)).toEqual([...customVideoMediaFeatureNames]);
     });
 
     test("preserves scalar values that remain valid after switching models", () => {

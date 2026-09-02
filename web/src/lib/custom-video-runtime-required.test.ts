@@ -43,7 +43,7 @@ describe("custom video prompt-only runtime", () => {
         const invalid = normalizeCustomVideoRuntimeState(optionalConfig, { seconds: 7, dimension: "invalid", reference_mode: "invalid", audio: "invalid" }, undefined);
 
         expect(partial.values).toEqual({ seconds: 5, dimension: "1280x720", reference_mode: "style", audio: true });
-        expect(invalid.values).toEqual({ seconds: 7, dimension: "invalid", reference_mode: "invalid", audio: "invalid" });
+        expect(invalid.values as unknown).toEqual({ seconds: 7, dimension: "invalid", reference_mode: "invalid", audio: "invalid" });
     });
 });
 

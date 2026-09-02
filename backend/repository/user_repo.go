@@ -150,6 +150,18 @@ func (r *UserRepo) DeleteAccount(userID uint) error {
 		if err := tx.Unscoped().Where("user_id = ?", userID).Delete(&model.GenerationRecord{}).Error; err != nil {
 			return fmt.Errorf("delete user generation records: %w", err)
 		}
+		var generationRequestIDs []string
+		if err := tx.Unscoped().Model(&model.GenerationJob{}).Where("user_id = ?", userID).Pluck("request_id", &generationRequestIDs).Error; err != nil {
+			return fmt.Errorf("find user generation jobs: %w", err)
+		}
+		if len(generationRequestIDs) > 0 {
+			if err := tx.Unscoped().Where("request_id IN ?", generationRequestIDs).Delete(&model.GenerationAttempt{}).Error; err != nil {
+				return fmt.Errorf("delete user generation attempts: %w", err)
+			}
+		}
+		if err := tx.Unscoped().Where("user_id = ?", userID).Delete(&model.GenerationJob{}).Error; err != nil {
+			return fmt.Errorf("delete user generation jobs: %w", err)
+		}
 		if err := tx.Unscoped().Where("user_id = ?", userID).Delete(&model.RechargeOrder{}).Error; err != nil {
 			return fmt.Errorf("delete user recharge orders: %w", err)
 		}

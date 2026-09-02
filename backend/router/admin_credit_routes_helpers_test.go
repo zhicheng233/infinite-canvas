@@ -66,7 +66,7 @@ func newAdminCreditRouteFixture(t *testing.T) *adminCreditRouteFixture {
 	adminHandler := handler.NewAdminHandler(nil, userRepo, creditService, creditRepo, nil, nil, nil)
 	gin.SetMode(gin.TestMode)
 	engine := gin.New()
-	Setup(engine, authService, nil, adminHandler, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	Setup(engine, Dependencies{AuthService: authService, AdminHandler: adminHandler})
 	server := httptest.NewServer(engine)
 	t.Cleanup(server.Close)
 	fixture := &adminCreditRouteFixture{db: db, server: server, tenantAdmin: users[0], superAdmin: users[1], target: users[2], foreign: users[3]}

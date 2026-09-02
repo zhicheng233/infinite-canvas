@@ -2,7 +2,14 @@ import { FileText, ImagePlus, Images, Maximize2, Shield, Video, Zap, Activity } 
 
 const ENABLE_VIDEO = process.env.NEXT_PUBLIC_ENABLE_VIDEO !== "false";
 
-export const navigationTools = [
+type NavigationTool = {
+    slug: "canvas" | "image" | "video" | "prompts" | "assets" | "channel-status" | "recharge" | "admin";
+    label: string;
+    icon: typeof Maximize2;
+    adminOnly?: boolean;
+};
+
+export const navigationTools: readonly NavigationTool[] = [
     { slug: "canvas" as const, label: "我的画布", icon: Maximize2 },
     { slug: "image" as const, label: "生图工作台", icon: ImagePlus },
     ...(ENABLE_VIDEO ? [{ slug: "video" as const, label: "视频创作台", icon: Video }] : []),

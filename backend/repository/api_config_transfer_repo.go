@@ -10,11 +10,12 @@ import (
 )
 
 type APIConfigTransferData struct {
-	Channels     []model.Channel
-	Models       []model.ChannelModel
-	Pricing      []model.CreditPricing
-	MergeGroups  []model.ModelMergeGroup
-	VideoPresets []model.VideoConfigPreset
+	Channels         []model.Channel
+	Models           []model.ChannelModel
+	Pricing          []model.CreditPricing
+	MergeGroups      []model.ModelMergeGroup
+	VideoPresets     []model.VideoConfigPreset
+	AutoRoutingPools []model.AutoRoutingPool
 }
 
 type APIConfigTransferChannelOperation struct {
@@ -45,12 +46,26 @@ type APIConfigTransferPresetOperation struct {
 	Item       model.VideoConfigPreset
 }
 
+type APIConfigTransferAutoRoutingMemberOperation struct {
+	ChannelRef string
+	Model      string
+	Priority   int
+	Enabled    bool
+}
+
+type APIConfigTransferAutoRoutingPoolOperation struct {
+	ExistingID uint
+	Item       model.AutoRoutingPool
+	Members    []APIConfigTransferAutoRoutingMemberOperation
+}
+
 type APIConfigTransferApplyPlan struct {
-	Channels     []APIConfigTransferChannelOperation
-	Models       []APIConfigTransferModelOperation
-	Pricing      []APIConfigTransferPricingOperation
-	MergeGroups  []APIConfigTransferMergeGroupOperation
-	VideoPresets []APIConfigTransferPresetOperation
+	Channels         []APIConfigTransferChannelOperation
+	Models           []APIConfigTransferModelOperation
+	Pricing          []APIConfigTransferPricingOperation
+	MergeGroups      []APIConfigTransferMergeGroupOperation
+	VideoPresets     []APIConfigTransferPresetOperation
+	AutoRoutingPools []APIConfigTransferAutoRoutingPoolOperation
 }
 
 type APIConfigTransferRepo struct {
@@ -76,6 +91,9 @@ func (r *APIConfigTransferRepo) Load(tenantID uint) (*APIConfigTransferData, err
 		return nil, err
 	}
 	if err := r.db.Where("tenant_id = ?", tenantID).Order("normalized_name ASC, id ASC").Find(&data.VideoPresets).Error; err != nil {
+		return nil, err
+	}
+	if err := r.db.Preload("Members", func(db *gorm.DB) *gorm.DB { return db.Order("priority DESC, id ASC") }).Order("public_model_name ASC, capability ASC").Find(&data.AutoRoutingPools).Error; err != nil {
 		return nil, err
 	}
 	return data, nil
@@ -171,6 +189,34 @@ func (r *APIConfigTransferRepo) Apply(plan *APIConfigTransferApplyPlan) error {
 				}
 			} else if err := tx.Create(&item).Error; err != nil {
 				return err
+			}
+		}
+
+		for _, operation := range plan.AutoRoutingPools {
+			item := operation.Item
+			if operation.ExistingID > 0 {
+				item.ID = operation.ExistingID
+				if err := tx.Save(&item).Error; err != nil {
+					return err
+				}
+				if err := tx.Unscoped().Where("pool_id = ?", item.ID).Delete(&model.AutoRoutingPoolMember{}).Error; err != nil {
+					return err
+				}
+			} else if err := tx.Create(&item).Error; err != nil {
+				return err
+			}
+			for _, member := range operation.Members {
+				channelID, ok := channelIDs[member.ChannelRef]
+				if !ok {
+					return fmt.Errorf("missing channel reference %q", member.ChannelRef)
+				}
+				var channelModel model.ChannelModel
+				if err := tx.Where("channel_id = ? AND model_name = ?", channelID, member.Model).First(&channelModel).Error; err != nil {
+					return err
+				}
+				if err := tx.Create(&model.AutoRoutingPoolMember{PoolID: item.ID, ChannelModelID: channelModel.ID, Priority: member.Priority, Enabled: member.Enabled}).Error; err != nil {
+					return err
+				}
 			}
 		}
 		return nil

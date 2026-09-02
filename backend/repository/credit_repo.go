@@ -38,6 +38,70 @@ func (r *CreditRepo) CreateTransaction(tx *model.CreditTransaction) error {
 	return r.db.Create(tx).Error
 }
 
+type BalanceChangeInput struct {
+	UserID         uint
+	Type           model.CreditTransactionType
+	Amount         int
+	RefType        string
+	RefID          string
+	Note           string
+	Metadata       string
+	IdempotencyKey string
+}
+
+func (r *CreditRepo) ApplyBalanceChange(input BalanceChangeInput) error {
+	if input.UserID == 0 || input.Amount < 0 {
+		return errors.New("invalid balance change")
+	}
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		if input.IdempotencyKey != "" {
+			var count int64
+			if err := tx.Model(&model.CreditTransaction{}).Where("idempotency_key = ?", input.IdempotencyKey).Count(&count).Error; err != nil {
+				return err
+			}
+			if count > 0 {
+				return nil
+			}
+		}
+
+		var account model.CreditAccount
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("user_id = ?", input.UserID).First(&account).Error; err != nil {
+			return err
+		}
+		balanceBefore := account.Balance
+		switch input.Type {
+		case model.TxTypeSpend:
+			if account.Balance < input.Amount {
+				return errors.New("积分不足")
+			}
+			account.Balance -= input.Amount
+			account.TotalSpent += input.Amount
+		case model.TxTypeEarn:
+			account.Balance += input.Amount
+			account.TotalEarned += input.Amount
+		case model.TxTypeRefund:
+			account.Balance += input.Amount
+			account.TotalSpent -= input.Amount
+		default:
+			return errors.New("unsupported balance change type")
+		}
+		if err := tx.Model(&account).Updates(map[string]interface{}{
+			"balance": account.Balance, "total_earned": account.TotalEarned, "total_spent": account.TotalSpent,
+		}).Error; err != nil {
+			return err
+		}
+		entry := &model.CreditTransaction{
+			AccountID: account.ID, Type: input.Type, Amount: input.Amount, BalanceBefore: creditIntPtr(balanceBefore), BalanceAfter: account.Balance,
+			RefType: input.RefType, RefID: input.RefID, Note: input.Note, Metadata: input.Metadata,
+		}
+		if input.IdempotencyKey != "" {
+			key := input.IdempotencyKey
+			entry.IdempotencyKey = &key
+		}
+		return tx.Create(entry).Error
+	})
+}
+
 type AsyncRefundResult struct {
 	Amount        int
 	Balance       int

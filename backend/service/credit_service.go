@@ -42,34 +42,9 @@ func (s *CreditService) SpendWithMetadata(accountID, userID uint, amount int, re
 }
 
 func (s *CreditService) SpendWithIdempotencyMetadata(accountID, userID uint, amount int, refType, refID, note, metadata, idempotencyKey string) error {
-	account, err := s.creditRepo.FindAccountByUser(userID)
-	if err != nil {
-		return err
-	}
-	if account.Balance < amount {
-		return errors.New("积分不足")
-	}
-	balanceBefore := account.Balance
-	account.Balance -= amount
-	account.TotalSpent += amount
-	if err := s.creditRepo.UpdateAccountBalance(account); err != nil {
-		return err
-	}
-	tx := &model.CreditTransaction{
-		AccountID:     account.ID,
-		Type:          model.TxTypeSpend,
-		Amount:        amount,
-		BalanceBefore: intPtr(balanceBefore),
-		BalanceAfter:  account.Balance,
-		RefType:       refType,
-		RefID:         refID,
-		Note:          note,
-		Metadata:      metadata,
-	}
-	if strings.TrimSpace(idempotencyKey) != "" {
-		tx.IdempotencyKey = &idempotencyKey
-	}
-	return s.creditRepo.CreateTransaction(tx)
+	return s.creditRepo.ApplyBalanceChange(repository.BalanceChangeInput{
+		UserID: userID, Type: model.TxTypeSpend, Amount: amount, RefType: refType, RefID: refID, Note: note, Metadata: metadata, IdempotencyKey: strings.TrimSpace(idempotencyKey),
+	})
 }
 
 func (s *CreditService) Earn(userID uint, amount int, refType, refID, note string) error {
@@ -77,28 +52,7 @@ func (s *CreditService) Earn(userID uint, amount int, refType, refID, note strin
 }
 
 func (s *CreditService) EarnWithMetadata(userID uint, amount int, refType, refID, note, metadata string) error {
-	account, err := s.creditRepo.FindAccountByUser(userID)
-	if err != nil {
-		return err
-	}
-	balanceBefore := account.Balance
-	account.Balance += amount
-	account.TotalEarned += amount
-	if err := s.creditRepo.UpdateAccountBalance(account); err != nil {
-		return err
-	}
-	tx := &model.CreditTransaction{
-		AccountID:     account.ID,
-		Type:          model.TxTypeEarn,
-		Amount:        amount,
-		BalanceBefore: intPtr(balanceBefore),
-		BalanceAfter:  account.Balance,
-		RefType:       refType,
-		RefID:         refID,
-		Note:          note,
-		Metadata:      metadata,
-	}
-	return s.creditRepo.CreateTransaction(tx)
+	return s.creditRepo.ApplyBalanceChange(repository.BalanceChangeInput{UserID: userID, Type: model.TxTypeEarn, Amount: amount, RefType: refType, RefID: refID, Note: note, Metadata: metadata})
 }
 
 func (s *CreditService) Refund(userID uint, amount int, refType, refID, note string) error {
@@ -106,28 +60,7 @@ func (s *CreditService) Refund(userID uint, amount int, refType, refID, note str
 }
 
 func (s *CreditService) RefundWithMetadata(userID uint, amount int, refType, refID, note, metadata string) error {
-	account, err := s.creditRepo.FindAccountByUser(userID)
-	if err != nil {
-		return err
-	}
-	balanceBefore := account.Balance
-	account.Balance += amount
-	account.TotalSpent -= amount
-	if err := s.creditRepo.UpdateAccountBalance(account); err != nil {
-		return err
-	}
-	tx := &model.CreditTransaction{
-		AccountID:     account.ID,
-		Type:          model.TxTypeRefund,
-		Amount:        amount,
-		BalanceBefore: intPtr(balanceBefore),
-		BalanceAfter:  account.Balance,
-		RefType:       refType,
-		RefID:         refID,
-		Note:          note,
-		Metadata:      metadata,
-	}
-	return s.creditRepo.CreateTransaction(tx)
+	return s.creditRepo.ApplyBalanceChange(repository.BalanceChangeInput{UserID: userID, Type: model.TxTypeRefund, Amount: amount, RefType: refType, RefID: refID, Note: note, Metadata: metadata})
 }
 
 func (s *CreditService) RefundAsyncSpendOnce(userID uint, refType, refID, idempotencyKey, note, metadata string) (*repository.AsyncRefundResult, error) {

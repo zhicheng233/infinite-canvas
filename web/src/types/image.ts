@@ -5,4 +5,7 @@ export type ReferenceImage = {
     dataUrl: string;
     url?: string;
     storageKey?: string;
+    generationRequestId?: string;
+    generationCost?: number;
+    resolvedChannelName?: string;
 };

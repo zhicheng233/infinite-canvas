@@ -6,24 +6,14 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"infinite-canvas-server/config"
-	"infinite-canvas-server/crypto"
 	"infinite-canvas-server/model"
-	"infinite-canvas-server/repository"
 	"infinite-canvas-server/service"
 )
 
 type ApiConfigHandler struct {
-	apiConfigRepo  apiConfigRepository
 	creditRepo     apiConfigPricingReader
 	channelCatalog apiConfigChannelCatalog
 	generateSvc    *service.GenerateService
-	cfg            *config.Config
-}
-
-type apiConfigRepository interface {
-	FindByTenant(tenantID uint) (*model.TenantApiConfig, error)
-	Save(cfg *model.TenantApiConfig) error
 }
 
 type apiConfigPricingReader interface {
@@ -34,8 +24,8 @@ type apiConfigChannelCatalog interface {
 	ListTenantCatalog(tenantID uint) ([]model.ChannelCatalogItem, error)
 }
 
-func NewApiConfigHandler(apiConfigRepo *repository.ApiConfigRepo, creditRepo *repository.CreditRepo, channelCatalog apiConfigChannelCatalog, generateSvc *service.GenerateService, cfg *config.Config) *ApiConfigHandler {
-	return &ApiConfigHandler{apiConfigRepo: apiConfigRepo, creditRepo: creditRepo, channelCatalog: channelCatalog, generateSvc: generateSvc, cfg: cfg}
+func NewApiConfigHandler(creditRepo apiConfigPricingReader, channelCatalog apiConfigChannelCatalog, generateSvc *service.GenerateService) *ApiConfigHandler {
+	return &ApiConfigHandler{creditRepo: creditRepo, channelCatalog: channelCatalog, generateSvc: generateSvc}
 }
 
 type SaveApiConfigInput struct {
@@ -53,49 +43,23 @@ type SaveApiConfigInput struct {
 
 func (h *ApiConfigHandler) Get(c *gin.Context) {
 	claims := c.MustGet("claims").(*service.Claims)
-	cfg, err := h.apiConfigRepo.FindByTenant(claims.TenantID)
+	channels, err := h.channelCatalog.ListTenantCatalog(claims.TenantID)
 	if err != nil {
-		model.Fail(c, 404, "未配置 API")
+		model.Fail(c, 500, "读取渠道模型失败")
 		return
 	}
-	models, _ := decodeStringList(cfg.Models)
-	imageModels, _ := decodeStringList(cfg.ImageModels)
-	videoModels, _ := decodeStringList(cfg.VideoModels)
-	textModels, _ := decodeStringList(cfg.TextModels)
-	audioModels, _ := decodeStringList(cfg.AudioModels)
-	modelRoutes, _ := decodeStringMap(cfg.ModelRoutes)
-	modelVideoDurations, _ := decodeIntListMap(cfg.ModelVideoDurations)
-	modelVideoCustomizable, _ := decodeBoolMap(cfg.ModelVideoCustomizable)
+	summary := summarizeChannelCatalog(channels)
 	model.OK(c, gin.H{
-		"base_url":                 cfg.BaseUrl,
-		"has_key":                  len(cfg.ApiKey) > 0,
-		"models":                   models,
-		"image_models":             imageModels,
-		"video_models":             videoModels,
-		"text_models":              textModels,
-		"audio_models":             audioModels,
-		"model_routes":             modelRoutes,
-		"model_video_durations":    modelVideoDurations,
-		"model_video_customizable": modelVideoCustomizable,
+		"base_url": "", "has_key": false,
+		"models": summary.models, "image_models": summary.byCapability["image"],
+		"video_models": summary.byCapability["video"], "text_models": summary.byCapability["text"],
+		"audio_models": summary.byCapability["audio"], "model_routes": map[string]string{},
+		"model_video_durations": map[string][]int{}, "model_video_customizable": map[string]bool{},
 	})
 }
 
 func (h *ApiConfigHandler) Catalog(c *gin.Context) {
 	claims := c.MustGet("claims").(*service.Claims)
-	cfg, err := h.apiConfigRepo.FindByTenant(claims.TenantID)
-	if err != nil {
-		model.Fail(c, 404, "未配置 API")
-		return
-	}
-
-	models, _ := decodeStringList(cfg.Models)
-	imageModels, _ := decodeStringList(cfg.ImageModels)
-	videoModels, _ := decodeStringList(cfg.VideoModels)
-	textModels, _ := decodeStringList(cfg.TextModels)
-	audioModels, _ := decodeStringList(cfg.AudioModels)
-	modelRoutes, _ := decodeStringMap(cfg.ModelRoutes)
-	modelVideoDurations, _ := decodeIntListMap(cfg.ModelVideoDurations)
-	modelVideoCustomizable, _ := decodeBoolMap(cfg.ModelVideoCustomizable)
 	pricingMap, err := h.creditRepo.FindPricingMap(claims.TenantID)
 	if err != nil {
 		model.Fail(c, 500, "读取定价配置失败")
@@ -106,109 +70,61 @@ func (h *ApiConfigHandler) Catalog(c *gin.Context) {
 		model.Fail(c, 500, "读取渠道模型失败")
 		return
 	}
-
-	enabledModels := filterModelsByPricing(models, pricingMap)
+	summary := summarizeChannelCatalog(channels)
 	model.OK(c, gin.H{
-		"models":                   enabledModels,
-		"image_models":             filterModelsByPricing(imageModels, pricingMap),
-		"video_models":             filterModelsByPricing(videoModels, pricingMap),
-		"text_models":              filterModelsByPricing(textModels, pricingMap),
-		"audio_models":             filterModelsByPricing(audioModels, pricingMap),
-		"priced_models":            enabledModels,
+		"models":                   summary.models,
+		"image_models":             summary.byCapability["image"],
+		"video_models":             summary.byCapability["video"],
+		"text_models":              summary.byCapability["text"],
+		"audio_models":             summary.byCapability["audio"],
+		"priced_models":            summary.models,
 		"pricing_map":              pricingMap,
-		"model_routes":             modelRoutes,
-		"model_video_durations":    filterModelDurationsByPricing(modelVideoDurations, pricingMap),
-		"model_video_customizable": filterBoolMapByPricing(modelVideoCustomizable, pricingMap),
-		"total_models":             len(models),
-		"enabled_count":            len(enabledModels),
-		"disabled_models":          collectDisabledModels(models, pricingMap),
+		"model_routes":             map[string]string{},
+		"model_video_durations":    map[string][]int{},
+		"model_video_customizable": map[string]bool{},
+		"total_models":             len(summary.models),
+		"enabled_count":            len(summary.models),
+		"disabled_models":          []string{},
 		"channels":                 channels,
 	})
 }
 
 func (h *ApiConfigHandler) Save(c *gin.Context) {
-	claims := c.MustGet("claims").(*service.Claims)
-	var input SaveApiConfigInput
-	if err := c.ShouldBindJSON(&input); err != nil {
-		model.Fail(c, 400, "无效的请求参数")
-		return
-	}
-	models, err := encodeStringList(input.Models)
-	if err != nil {
-		model.Fail(c, 400, "模型列表格式错误")
-		return
-	}
-	imageModels, err := encodeStringList(input.ImageModels)
-	if err != nil {
-		model.Fail(c, 400, "图片模型列表格式错误")
-		return
-	}
-	videoModels, err := encodeStringList(input.VideoModels)
-	if err != nil {
-		model.Fail(c, 400, "视频模型列表格式错误")
-		return
-	}
-	textModels, err := encodeStringList(input.TextModels)
-	if err != nil {
-		model.Fail(c, 400, "文本模型列表格式错误")
-		return
-	}
-	audioModels, err := encodeStringList(input.AudioModels)
-	if err != nil {
-		model.Fail(c, 400, "音频模型列表格式错误")
-		return
-	}
-	modelRoutes, err := encodeStringMap(input.ModelRoutes)
-	if err != nil {
-		model.Fail(c, 400, "模型路由配置格式错误")
-		return
-	}
-	modelVideoDurations, err := encodeIntListMap(input.ModelVideoDurations)
-	if err != nil {
-		model.Fail(c, 400, "视频时长配置格式错误")
-		return
-	}
-	modelVideoCustomizable, err := encodeBoolMap(input.ModelVideoCustomizable)
-	if err != nil {
-		model.Fail(c, 400, "视频自定义配置格式错误")
-		return
-	}
+	model.Fail(c, 410, "旧版 API 配置入口已停用，请使用渠道与模型配置")
+}
 
-	existingCfg, _ := h.apiConfigRepo.FindByTenant(claims.TenantID)
-	encryptedKey := ""
-	if strings.TrimSpace(input.ApiKey) == "" {
-		if existingCfg == nil || strings.TrimSpace(existingCfg.ApiKey) == "" {
-			model.Fail(c, 400, "请填写 API Key")
-			return
-		}
-		encryptedKey = existingCfg.ApiKey
-	} else {
-		var err error
-		encryptedKey, err = crypto.Encrypt(h.cfg.ApiKeyEncryptKey, input.ApiKey)
-		if err != nil {
-			model.Fail(c, 500, "加密 API Key 失败")
-			return
+type channelCatalogSummary struct {
+	models       []string
+	byCapability map[string][]string
+}
+
+func summarizeChannelCatalog(channels []model.ChannelCatalogItem) channelCatalogSummary {
+	result := channelCatalogSummary{models: []string{}, byCapability: map[string][]string{"image": {}, "video": {}, "text": {}, "audio": {}}}
+	allSeen := make(map[string]struct{})
+	capabilitySeen := map[string]map[string]struct{}{"image": {}, "video": {}, "text": {}, "audio": {}}
+	for _, channel := range channels {
+		for _, item := range channel.Models {
+			name := strings.TrimSpace(item.ModelName)
+			if name == "" {
+				continue
+			}
+			if _, ok := allSeen[name]; !ok {
+				allSeen[name] = struct{}{}
+				result.models = append(result.models, name)
+			}
+			for _, capability := range item.Capabilities {
+				if _, ok := result.byCapability[capability]; !ok {
+					continue
+				}
+				if _, ok := capabilitySeen[capability][name]; ok {
+					continue
+				}
+				capabilitySeen[capability][name] = struct{}{}
+				result.byCapability[capability] = append(result.byCapability[capability], name)
+			}
 		}
 	}
-
-	cfg := &model.TenantApiConfig{
-		TenantID:               claims.TenantID,
-		BaseUrl:                input.BaseUrl,
-		ApiKey:                 encryptedKey,
-		Models:                 models,
-		ImageModels:            imageModels,
-		VideoModels:            videoModels,
-		TextModels:             textModels,
-		AudioModels:            audioModels,
-		ModelRoutes:            modelRoutes,
-		ModelVideoDurations:    modelVideoDurations,
-		ModelVideoCustomizable: modelVideoCustomizable,
-	}
-	if err := h.apiConfigRepo.Save(cfg); err != nil {
-		model.Fail(c, 500, err.Error())
-		return
-	}
-	model.OK(c, gin.H{"saved": true})
+	return result
 }
 
 func (h *ApiConfigHandler) TestModel(c *gin.Context) {

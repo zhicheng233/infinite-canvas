@@ -196,6 +196,25 @@ function parseImagePayload(payload: ImageApiResponse) {
     return images;
 }
 
+function withGenerationRouting<T extends { id: string; dataUrl: string }>(images: T[], headers: unknown): Array<T & Pick<ReferenceImage, "generationRequestId" | "generationCost" | "resolvedChannelName">> {
+    const generationRequestId = readHeader(headers, "x-generation-request-id");
+    const resolvedChannelName = readHeader(headers, "x-resolved-channel-name");
+    const costValue = readHeader(headers, "x-credits-cost").trim();
+    const cost = costValue ? Number(costValue) : Number.NaN;
+    const generationCost = Number.isFinite(cost) && cost >= 0 ? cost : undefined;
+    return images.map((image) => ({ ...image, ...(generationRequestId ? { generationRequestId } : {}), ...(resolvedChannelName ? { resolvedChannelName } : {}), ...(generationCost !== undefined ? { generationCost } : {}) }));
+}
+
+function readHeader(headers: unknown, name: string) {
+    const values = (headers || {}) as { get?: (key: string) => unknown } & Record<string, unknown>;
+    if (typeof values.get === "function") {
+        const value = values.get(name);
+        return value == null ? "" : String(value);
+    }
+    const key = Object.keys(values).find((item) => item.toLowerCase() === name.toLowerCase());
+    return key ? String(values[key] ?? "") : "";
+}
+
 function isBananaImageModel(model: string) {
     const value = modelOptionName(model).trim().toLowerCase();
     return value.includes("nano_banana") || value.includes("banana");
@@ -285,7 +304,7 @@ async function requestChatImageEdit(config: AiConfig, prompt: string, references
                 signal: options?.signal,
             },
         );
-        const images = parseChatImagePayload(response.data);
+        const images = withGenerationRouting(parseChatImagePayload(response.data), response.headers);
         notifyCreditBalanceChanged();
         return images;
     } catch (error) {
@@ -315,11 +334,11 @@ async function requestChatImageGeneration(config: AiConfig, prompt: string, opti
                 signal: options?.signal,
             },
         );
-        const images = parseChatImagePayload(response.data);
+        const images = withGenerationRouting(parseChatImagePayload(response.data), response.headers);
         notifyCreditBalanceChanged();
         return images;
     } catch (error) {
-        throw new Error(readAxiosError(error, "璇锋眰澶辫触"));
+        throw new Error(readAxiosError(error, "请求失败"));
     }
 }
 
@@ -348,7 +367,7 @@ async function requestBananaImage(config: AiConfig, prompt: string, references: 
                 signal: options?.signal,
             },
         );
-        const images = parseChatImagePayload(response.data);
+        const images = withGenerationRouting(parseChatImagePayload(response.data), response.headers);
         notifyCreditBalanceChanged();
         return images;
     } catch (error) {
@@ -506,8 +525,9 @@ function consumeResponseStreamText(state: ResponseStreamState, text: string, onD
     for (;;) {
         const match = state.buffer.match(/\r?\n\r?\n/);
         if (!match) break;
-        consumeResponseStreamBlock(state.buffer.slice(0, match.index), state, onDelta);
-        state.buffer = state.buffer.slice(match.index + match[0].length);
+        const blockEnd = match.index ?? 0;
+        consumeResponseStreamBlock(state.buffer.slice(0, blockEnd), state, onDelta);
+        state.buffer = state.buffer.slice(blockEnd + match[0].length);
     }
     if (flush && state.buffer.trim()) {
         consumeResponseStreamBlock(state.buffer, state, onDelta);
@@ -575,7 +595,7 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
                 signal: options?.signal,
             },
         );
-        const images = parseImagePayload(response.data);
+        const images = withGenerationRouting(parseImagePayload(response.data), response.headers);
         notifyCreditBalanceChanged();
         return images;
     } catch (error) {
@@ -596,7 +616,31 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
     }
     if (routeMode === "generations") {
         if (mask) throw new Error("当前模型路由未启用编辑接口，请切换到支持编辑的图片路由");
-        throw new Error("当前模型路由为纯生图接口，暂不支持参考图编辑，请改用聊天生图路由");
+        const n = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
+        const quality = normalizeQuality(config.quality);
+        const requestSize = resolveRequestSize(quality, config.size);
+        const images = await Promise.all(references.map(imageToDataUrl));
+        try {
+            const response = await axios.post<ImageApiResponse>(
+                aiApiUrl(requestConfig, "/images/generations"),
+                {
+                    model: requestConfig.model,
+                    prompt: withSystemPrompt(requestConfig, buildImageReferencePromptText(prompt, references)),
+                    n,
+                    image: images.length === 1 ? images[0] : images,
+                    ...(quality ? { quality } : {}),
+                    ...(requestSize ? { size: requestSize } : {}),
+                    response_format: "b64_json",
+                    output_format: IMAGE_OUTPUT_FORMAT,
+                },
+                { headers: aiHeaders(requestConfig, "application/json"), signal: options?.signal },
+            );
+            const result = withGenerationRouting(parseImagePayload(response.data), response.headers);
+            notifyCreditBalanceChanged();
+            return result;
+        } catch (error) {
+            throw new Error(readAxiosError(error, "请求失败"));
+        }
     }
     const n = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
     const quality = normalizeQuality(config.quality);
@@ -624,7 +668,7 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
             headers: aiHeaders(requestConfig),
             signal: options?.signal,
         });
-        const images = parseImagePayload(response.data);
+        const images = withGenerationRouting(parseImagePayload(response.data), response.headers);
         notifyCreditBalanceChanged();
         return images;
     } catch (error) {

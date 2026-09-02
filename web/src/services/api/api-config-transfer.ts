@@ -27,6 +27,7 @@ export type ApiConfigTransferStats = {
     pricing: ApiConfigTransferChangeStats;
     merge_groups: ApiConfigTransferChangeStats;
     video_config_presets: ApiConfigTransferChangeStats;
+    auto_routing_pools: ApiConfigTransferChangeStats;
 };
 
 export type ApiConfigTransferConflict = {

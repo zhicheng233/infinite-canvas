@@ -12,16 +12,26 @@ import (
 func TestChannelSelectionAndResolvedHeaders(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	context, _ := gin.CreateTestContext(recorder)
-	context.Request = httptest.NewRequest("GET", "/proxy?channel_id=0&channel_model_id=0&routing_model=omni-fast&routing_video_route=waninter", nil)
+	context.Request = httptest.NewRequest("GET", "/proxy?routing_pool_id=9&routing_model=omni-fast&routing_video_route=waninter&routing_capability=video", nil)
 
 	selection := channelSelectionFromRequest(context)
-	if selection.ModelName != "omni-fast" || selection.VideoRoute != "waninter" {
+	if selection.Kind != service.ModelSelectionAuto || selection.AutoRoutingPoolID != 9 || selection.ModelName != "omni-fast" || selection.VideoRoute != "waninter" || selection.Capability != "video" {
 		t.Fatalf("unexpected routing selection: %#v", selection)
 	}
 
 	writeResolvedChannelHeaders(context, &service.ProxyResult{ResolvedChannelID: 2, ResolvedChannelModelID: 62})
 	if recorder.Header().Get("X-Resolved-Channel-ID") != "2" || recorder.Header().Get("X-Resolved-Channel-Model-ID") != "62" {
 		t.Fatalf("missing resolved channel headers: %#v", recorder.Header())
+	}
+}
+
+func TestChannelSelectionCarriesMergeGroupFromOuterProxyQuery(t *testing.T) {
+	context, _ := gin.CreateTestContext(httptest.NewRecorder())
+	context.Request = httptest.NewRequest("GET", "/proxy?path=%2Fv1%2Fimages%2Fgenerations&channel_id=7&fuzzy_group_name=gpt-image", nil)
+
+	selection := channelSelectionFromRequest(context)
+	if selection.Kind != service.ModelSelectionMerge || selection.ChannelID != 7 || selection.MergeGroupName != "gpt-image" {
+		t.Fatalf("unexpected merge selection: %#v", selection)
 	}
 }
 
@@ -33,6 +43,8 @@ func TestCopyProxyResponseHeadersSkipsBodyManagedHeaders(t *testing.T) {
 		"Content-Encoding":              []string{"gzip"},
 		"Transfer-Encoding":             []string{"chunked"},
 		"Access-Control-Expose-Headers": []string{"X-Upstream-Only"},
+		"X-Credits-Cost":                []string{"999"},
+		"X-Resolved-Channel-Name":       []string{"spoofed"},
 		"X-Upstream-Trace":              []string{"trace-1"},
 	}
 
@@ -49,6 +61,9 @@ func TestCopyProxyResponseHeadersSkipsBodyManagedHeaders(t *testing.T) {
 	}
 	if recorder.Header().Get("Access-Control-Expose-Headers") != "" {
 		t.Fatalf("Access-Control-Expose-Headers should not be copied: %#v", recorder.Header())
+	}
+	if recorder.Header().Get("X-Credits-Cost") != "" || recorder.Header().Get("X-Resolved-Channel-Name") != "" {
+		t.Fatalf("internal routing headers should not be copied: %#v", recorder.Header())
 	}
 	if recorder.Header().Get("X-Upstream-Trace") != "trace-1" {
 		t.Fatalf("custom upstream header not copied: %#v", recorder.Header())

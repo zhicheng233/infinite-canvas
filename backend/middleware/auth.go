@@ -22,6 +22,11 @@ func AuthRequired(authService *service.AuthService) gin.HandlerFunc {
 			c.Abort()
 			return
 		}
+		if err := authService.ValidateClaims(claims); err != nil {
+			model.FailStatus(c, http.StatusUnauthorized, 401, err.Error())
+			c.Abort()
+			return
+		}
 		c.Set("claims", claims)
 		c.Set("user_id", claims.UserID)
 		c.Set("tenant_id", claims.TenantID)

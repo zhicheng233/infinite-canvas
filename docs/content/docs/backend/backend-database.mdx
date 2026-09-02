@@ -72,6 +72,8 @@ description: 当前后端数据库表结构说明
 | models_json | longtext | 模型目录 JSON |
 | model_routes | longtext | 模型视频接口路由 JSON |
 
+该表是只读兼容来源，不再接受业务写入。新站点的模型目录、能力和路由以 `channels`、`channel_models`、定价、合并组和视频预设为唯一事实来源；`POST /api-config` 固定返回 410。
+
 ## channels 表
 
 | 字段 | 类型 | 说明 |
@@ -153,10 +155,86 @@ API Key 仅用于后端代理调用，按 `API_KEY_ENCRYPTION_KEY` 配置加密�
 | id | uint | 主键 |
 | tenant_id | uint | 租户 ID |
 | user_id | uint | 所属用户 |
-| project_id | string(128) | 前端画布 ID |
+| project_id | string(64) | 前端画布 ID |
+| schema_version | int | 画布文档版本；无版本旧文档按版本 1 读取 |
+| revision | uint | 云端乐观锁修订号，每次成功保存递增 |
 | title | string(200) | 画布标题 |
-| data_json | longtext | 画布完整内容 |
-| snapshot_json | longtext | 列表页摘要 |
+| nodes | longtext | 节点 JSON |
+| connections | longtext | 连线 JSON |
+| chat_sessions | longtext | 助手会话 JSON |
+| active_chat_id | string(64) | 当前助手会话 ID |
+| background_mode | string(20) | 背景模式 |
+| show_image_info | bool | 是否显示图片信息 |
+| viewport_x / viewport_y / viewport_k | double | 画布视口 |
+
+唯一约束 `idx_canvas_project_identity` 由 `tenant_id + user_id + project_id` 组成。保存时必须携带客户端已知的 `revision`；版本不一致返回 409 和最新云端文档，不覆盖现有内容。
+
+## generation_jobs 表
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| request_id | string(64) | 生成请求唯一 ID，也是扣款与退款幂等边界 |
+| tenant_id / user_id | uint | 所属租户和用户 |
+| capability | string(20) | image/video/text/audio |
+| model_name | string(191) | 计费模型名快照 |
+| auto_routing_pool_id | uint | 智能路由池 ID；直接渠道为 0 |
+| channel_id / channel_model_id | uint | 已解析的物理渠道快照 |
+| channel_name / channel_base_url | string | 请求时渠道信息快照 |
+| video_route | string(50) | 请求时视频协议快照 |
+| authorized_amount | int | 请求开始时预留的最高候选费用 |
+| billing_amount | int | 最终物理渠道的实际结算费用 |
+| spend_transaction_id | uint | 扣款流水 ID |
+| settlement_transaction_id | uint | 预留差额退回流水 ID |
+| refund_transaction_id | uint | 退款流水 ID |
+| upstream_task_id | string(191) | 异步上游任务 ID |
+| status | enum(reserved/pending/succeeded/refunded) | 计费生命周期状态 |
+| failure_reason | string(500) | 退款或失败原因 |
+
+生成前在一个事务中锁定积分账户、扣款、写入流水并创建 `generation_jobs`。同步上游失败按 `request_id` 幂等退款；异步失败按物理渠道快照和 `upstream_task_id` 查找原任务，不重新选路。
+
+## auto_routing_pools 表
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| public_model_name | string(200) | 用户侧公开模型名，与能力组成唯一约束 |
+| capability | string(20) | image/video/text/audio |
+| contract_key | string(64) | 规范化协议合同的 SHA-256 指纹 |
+| enabled | bool | 路由池是否对用户可用 |
+| max_attempts | int | 单次请求最大物理候选尝试数，当前为 1 或 2 |
+
+路由池由系统建议、SuperAdmin 确认创建。新池默认禁用，至少两个合同有效成员时才能启用。
+
+## auto_routing_pool_members 表
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| pool_id | uint | 所属智能路由池 |
+| channel_model_id | uint | 具体物理渠道模型，与 `pool_id` 组成唯一约束 |
+| priority | int | 可靠性相同时使用的管理员优先级 |
+| enabled | bool | 成员是否参与候选解析 |
+
+成员不复制模型协议字段。运行时会用当前 `channel_models` 和 `channels` 重新计算合同；配置变化导致指纹不匹配时成员暂时失效，切回兼容配置后可恢复。管理员确认新合同建议时，成员替换与池合同更新在同一事务中完成，未变成员的优先级和启用状态保留，池自动关闭等待复核。
+
+## generation_attempts 表
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| request_id / attempt_no | string / int | 用户请求和尝试序号，组成唯一约束 |
+| pool_id | uint | 本次使用的智能路由池 |
+| channel_id / channel_model_id | uint | 实际尝试的物理候选 |
+| status_code | int | 上游 HTTP 状态码，网络错误为 0 |
+| response_time_ms | int | 本次尝试耗时 |
+| success | bool | 是否成功 |
+| failure_category | string(30) | 归一化失败分类 |
+| retryable | bool | 是否允许切换下一候选 |
+| counts_for_health | bool | 是否计入 24 小时可靠性和熔断计算 |
+| error_message | string(500) | 审计错误摘要 |
+
+可靠性只统计真实生成尝试，使用 `(成功数 + 9) / (尝试数 + 10)` 平滑。五分钟内连续三次可重试失败会熔断两分钟，冷却后只允许一个半开探测。
+
+## 数据库迁移
+
+新增结构迁移使用嵌入式 Goose SQL。`00001_canvas_and_generation_jobs.sql` 负责画布复合唯一约束、文档版本字段和生成任务表；`00002_auto_routing_pools.sql` 增加智能路由池、成员、尝试审计及生成任务结算字段。应用启动时先执行现有表的兼容 `AutoMigrate`，再执行有版本的增量迁移。后续表会逐步移出 `AutoMigrate`，每个增量只允许新增新的迁移版本，不修改已经发布的迁移文件。
 
 ## generation_records 表
 

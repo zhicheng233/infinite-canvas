@@ -2,7 +2,7 @@ import { jest, mock } from "bun:test";
 import { createElement, type ReactNode } from "react";
 
 import type { ColumnsType } from "antd/es/table";
-import type { UserWithBalance } from "@/services/api/admin";
+import type { UserWithBalance, UserWithBalanceResult } from "@/services/api/admin";
 
 type MockProps = Readonly<Record<string, unknown>> & { readonly children?: ReactNode };
 type Confirmation = { readonly onCancel?: () => void; readonly onOk: () => Promise<void> };
@@ -37,7 +37,11 @@ export function MockTable({ columns = [], dataSource = [], ...props }: TableProp
     return createElement(
         "admin-table",
         props,
-        dataSource.map((record) => createElement("admin-actions", { key: record.id }, actionColumn?.render?.(undefined, record, 0))),
+        dataSource.map((record) => {
+            const rendered = actionColumn?.render?.(undefined, record, 0);
+            const children = rendered && typeof rendered === "object" && "children" in rendered ? rendered.children : rendered;
+            return createElement("admin-actions", { key: record.id }, children as ReactNode);
+        }),
     );
 }
 
@@ -46,7 +50,8 @@ export const form = {
     resetFields: jest.fn(),
     validateFields: jest.fn(async () => ({ new_password: "ResetPass2", confirm_password: "ResetPass2", note: "测试调整" })),
 };
-export const listUsersWithBalance = jest.fn(async (page = 1, pageSize = 20, keyword = "") => ({ items: [], total: 0, page, page_size: pageSize, keyword }));
+export type MockUserListResult = UserWithBalanceResult & { keyword: string };
+export const listUsersWithBalance = jest.fn(async (page = 1, pageSize = 20, keyword = ""): Promise<MockUserListResult> => ({ items: [], total: 0, page, page_size: pageSize, keyword }));
 export const adjustCredits = jest.fn(async () => ({ user_id: 7, amount: 0, balance: 100, message: "积分调整成功" }));
 export const resetUserPassword = jest.fn(async () => undefined);
 export const deleteUser = jest.fn(async () => ({ deleted: true }));

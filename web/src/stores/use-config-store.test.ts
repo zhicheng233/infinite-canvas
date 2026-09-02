@@ -13,6 +13,7 @@ import {
     persistedConfigState,
     customVideoConfigForModel,
     resolveModelRequestConfig,
+    resolveModelSelection,
     selectedChannelId,
     selectedChannelIdentityForModel,
     useConfigStore,
@@ -63,13 +64,29 @@ const pricing = [
     { model: "stale-model", credits_per_unit: 1, unit_type: "per_image" },
 ];
 const autoModel = {
+    pool_id: 1,
     model: "gpt-image-auto",
-    channels: [{ channel_id: 1, channel_model_id: 13, channel_name: "A", success_rate: 95 }],
+    capability: "image" as const,
+    contract_key: "image-contract",
+    member_count: 1,
+    available_count: 1,
+    min_price: 1,
+    max_price: 1,
+    reliability: 95,
+    channels: [{ channel_id: 1, channel_model_id: 13, channel_name: "A", success_rate: 95, sample_count: 20, p95_latency_ms: 100, priority: 0, circuit_status: "closed" as const, available: true }],
 };
 const autoPricing = { model: autoModel.model, credits_per_unit: 1, unit_type: "per_image" };
 const secondAutoModel = {
+    pool_id: 2,
     model: "image-second-auto",
-    channels: [{ channel_id: 2, channel_model_id: 24, channel_name: "B", success_rate: 80 }],
+    capability: "image" as const,
+    contract_key: "image-contract-2",
+    member_count: 1,
+    available_count: 1,
+    min_price: 1,
+    max_price: 1,
+    reliability: 80,
+    channels: [{ channel_id: 2, channel_model_id: 24, channel_name: "B", success_rate: 80, sample_count: 10, p95_latency_ms: 200, priority: 0, circuit_status: "closed" as const, available: true }],
 };
 const secondAutoPricing = { model: secondAutoModel.model, credits_per_unit: 1, unit_type: "per_image" };
 
@@ -78,6 +95,14 @@ test("canonical identity keeps same raw model names distinct", () => {
     expect(value).toBe("2::22::same-model");
     expect(decodeChannelModel(value)).toEqual({ channelId: "2", channelModelId: 22, model: "same-model" });
     expect(modelOptionName(value)).toBe("same-model");
+});
+
+test("model selection resolves temporary keys into structured routing identities", () => {
+    useConfigStore.setState({ serverChannelModels: models });
+    expect(resolveModelSelection(defaultConfig, "2::22::same-model")).toEqual({ kind: "physical", channelModelId: 22 });
+    expect(resolveModelSelection(defaultConfig, "auto://9::same-model")).toEqual({ kind: "auto", poolId: 9, model: "same-model" });
+    expect(resolveModelSelection(defaultConfig, "merge://2::same-model")).toEqual({ kind: "merge", channelId: 2, groupName: "same-model" });
+    expect(resolveModelSelection(defaultConfig, "2::999::same-model")).toBeNull();
 });
 
 test("four capability selections remain independent", () => {
@@ -100,8 +125,8 @@ test("selecting Auto preserves channel ID 0 and uses encoded Auto models", () =>
 
     const config = useConfigStore.getState().config;
     expect(config.imageChannelId).toBe(0);
-    expect(config.imageModels).toEqual(["0::0::gpt-image-auto"]);
-    expect(config.imageModel).toBe("0::0::gpt-image-auto");
+    expect(config.imageModels).toEqual(["auto://1::gpt-image-auto"]);
+    expect(config.imageModel).toBe("auto://1::gpt-image-auto");
 });
 
 test("applying Auto catalog rebuilds selected Auto capability models", () => {
@@ -118,13 +143,13 @@ test("applying Auto catalog rebuilds selected Auto capability models", () => {
 
     const config = useConfigStore.getState().config;
     expect(config.imageChannelId).toBe(0);
-    expect(config.imageModels).toEqual(["0::0::gpt-image-auto"]);
-    expect(config.imageModel).toBe("0::0::gpt-image-auto");
+    expect(config.imageModels).toEqual(["auto://1::gpt-image-auto"]);
+    expect(config.imageModel).toBe("auto://1::gpt-image-auto");
 });
 
 test("physical catalog and pricing metadata refreshes preserve selected Auto channel", () => {
     useConfigStore.setState({
-        config: { ...defaultConfig, imageChannelId: 0, imageModel: "0::0::gpt-image-auto", imageModels: ["0::0::gpt-image-auto"] },
+        config: { ...defaultConfig, imageChannelId: 0, imageModel: "auto://1::gpt-image-auto", imageModels: ["auto://1::gpt-image-auto"] },
         serverChannels: channels,
         serverChannelModels: models,
         serverPricing: [...pricing, autoPricing],
@@ -137,8 +162,8 @@ test("physical catalog and pricing metadata refreshes preserve selected Auto cha
 
     const config = useConfigStore.getState().config;
     expect(config.imageChannelId).toBe(0);
-    expect(config.imageModels).toEqual(["0::0::gpt-image-auto"]);
-    expect(config.imageModel).toBe("0::0::gpt-image-auto");
+    expect(config.imageModels).toEqual(["auto://1::gpt-image-auto"]);
+    expect(config.imageModel).toBe("auto://1::gpt-image-auto");
 });
 
 test("empty Auto catalog never falls through to physical model options", () => {
@@ -154,7 +179,7 @@ test("unpriced Auto catalog has no usable options", () => {
 test("priced Auto catalog exposes usable options for the matching capability", () => {
     const imageOptions = buildChannelModelOptions(channels, models, [...pricing, autoPricing], null, "image", 0, [autoModel]);
     const videoOptions = buildChannelModelOptions(channels, models, [...pricing, autoPricing], null, "video", 0, [autoModel]);
-    expect(imageOptions.map((option) => option.value)).toEqual(["0::0::gpt-image-auto"]);
+    expect(imageOptions.map((option) => option.value)).toEqual(["auto://1::gpt-image-auto"]);
     expect(videoOptions).toEqual([]);
 });
 
@@ -164,30 +189,38 @@ test("Auto video inherits the highest-success candidate route and duration metad
         2: [{ ...models[2][0], id: 32, model_name: "omni-fast", capabilities: ["video"], video_route: "xai", video_durations: [6], video_customizable: false }],
     };
     const autoVideoModel = {
+        pool_id: 3,
         model: "omni-fast",
+        capability: "video" as const,
+        contract_key: "video-contract",
+        member_count: 2,
+        available_count: 2,
+        min_price: 1,
+        max_price: 1,
+        reliability: 95,
         channels: [
-            { channel_id: 1, channel_model_id: 31, channel_name: "A", success_rate: 95 },
-            { channel_id: 2, channel_model_id: 32, channel_name: "B", success_rate: 80 },
+            { channel_id: 1, channel_model_id: 31, channel_name: "A", success_rate: 95, sample_count: 20, p95_latency_ms: 100, priority: 0, circuit_status: "closed" as const, available: true },
+            { channel_id: 2, channel_model_id: 32, channel_name: "B", success_rate: 80, sample_count: 20, p95_latency_ms: 200, priority: 0, circuit_status: "closed" as const, available: true },
         ],
     };
     const videoPricing = [{ model: "omni-fast", credits_per_unit: 1, unit_type: "per_video" }];
     const options = buildChannelModelOptions(channels, videoModels, videoPricing, null, "video", 0, [autoVideoModel]);
-    expect(options[0]).toMatchObject({ value: "0::0::omni-fast", videoRoute: "waninter", videoDurations: [6, 10], videoCustomizable: true });
+    expect(options[0]).toMatchObject({ value: "auto://3::omni-fast", videoRoute: "waninter", videoDurations: [6, 10], videoCustomizable: true });
 
-    useConfigStore.setState({ config: { ...defaultConfig, videoChannelId: 0, videoModel: "0::0::omni-fast" } });
+    useConfigStore.setState({ config: { ...defaultConfig, videoChannelId: 0, videoModel: "auto://3::omni-fast" } });
     const requestId = useConfigStore.getState().beginServerCatalogRefresh();
     useConfigStore.getState().applyServerCatalogSnapshot(requestId, { channels, channelModels: videoModels, autoChannelModels: [autoVideoModel], pricing: videoPricing, metrics: null });
     const config = useConfigStore.getState().config;
-    expect(videoRouteForModel(config, "0::0::omni-fast")).toBe("waninter");
-    expect(config.modelVideoDurations["0::0::omni-fast"]).toEqual([6, 10]);
-    expect(config.modelVideoCustomizable["0::0::omni-fast"]).toBe(true);
+    expect(videoRouteForModel(config, "auto://3::omni-fast")).toBe("waninter");
+    expect(config.modelVideoDurations["auto://3::omni-fast"]).toEqual([6, 10]);
+    expect(config.modelVideoCustomizable["auto://3::omni-fast"]).toBe(true);
 });
 
 test("Binghuo channel standard overrides direct, merge, and Auto video routes", () => {
     const binghuoChannels = [{ ...channels[0], video_api_standard: "binghuo" as const }, channels[1]];
     const videoModels = { 1: [{ ...models[1][0], id: 41, model_name: "video-model", capabilities: ["video"], video_route: "custom", video_custom_config: validCustomVideoConfig }] };
     const prices = [{ model: "video-model", credits_per_unit: 1, unit_type: "per_video" }];
-    const auto = { model: "video-model", channels: [{ channel_id: 1, channel_model_id: 41, channel_name: "A", success_rate: 100 }] };
+    const auto = { pool_id: 4, model: "video-model", capability: "video" as const, contract_key: "video-contract", member_count: 1, available_count: 1, min_price: 1, max_price: 1, reliability: 100, channels: [{ channel_id: 1, channel_model_id: 41, channel_name: "A", success_rate: 100, sample_count: 1, p95_latency_ms: 100, priority: 0, circuit_status: "closed" as const, available: true }] };
     useConfigStore.getState().applyServerChannelCatalog(binghuoChannels, videoModels);
     const direct = buildChannelModelOptions(useConfigStore.getState().serverChannels, videoModels, prices, null, "video", 1, [auto]);
     const automatic = buildChannelModelOptions(useConfigStore.getState().serverChannels, videoModels, prices, null, "video", 0, [auto]);
@@ -247,7 +280,7 @@ test("custom physical and merge video models resolve the same normalized catalog
                 id: 61,
                 model_name: "omni_custom_v1",
                 capabilities: ["video"],
-                video_route: adminUpdate.video_route,
+                video_route: adminUpdate.video_route || "custom",
                 video_custom_config: adminUpdate.video_custom_config,
             },
         ],
@@ -354,8 +387,10 @@ test("Auto availability uses backing model capabilities instead of model-name in
         1: [{ ...models[1][0], id: 30, model_name: "opaque-auto", capabilities: ["image"] }],
     };
     const opaqueAuto = {
+        ...autoModel,
+        pool_id: 5,
         model: "opaque-auto",
-        channels: [{ channel_id: 1, channel_model_id: 30, channel_name: "A", success_rate: 90 }],
+        channels: [{ ...autoModel.channels[0], channel_model_id: 30, success_rate: 90 }],
     };
     const opaquePricing = [{ model: "opaque-auto", credits_per_unit: 1, unit_type: "per_image" }];
     expect(hasUsableAutoChannel("image", { serverChannels: channels, serverChannelModels: opaqueModels, serverPricing: opaquePricing, serverMetrics: null, autoChannelModels: [opaqueAuto] })).toBe(true);
@@ -364,7 +399,7 @@ test("Auto availability uses backing model capabilities instead of model-name in
 
 test("atomic catalog refresh preserves a valid persisted Auto selection", () => {
     useConfigStore.setState({
-        config: { ...defaultConfig, imageChannelId: 0, imageModel: "0::0::image-second-auto", imageModels: ["0::0::image-second-auto"] },
+        config: { ...defaultConfig, imageChannelId: 0, imageModel: "auto://2::image-second-auto", imageModels: ["auto://2::image-second-auto"] },
         serverChannels: [],
         serverChannelModels: {},
         serverPricing: [],
@@ -383,13 +418,38 @@ test("atomic catalog refresh preserves a valid persisted Auto selection", () => 
 
     const state = useConfigStore.getState();
     expect(state.config.imageChannelId).toBe(0);
-    expect(state.config.imageModel).toBe("0::0::image-second-auto");
+    expect(state.config.imageModel).toBe("auto://2::image-second-auto");
     expect(state.serverCatalogLoading).toBe(false);
 });
 
-test("empty Auto snapshot preserves channel 0 without falling back to a physical channel", () => {
+test("catalog refresh does not migrate a legacy Auto value to a confirmed routing pool", () => {
     useConfigStore.setState({
         config: { ...defaultConfig, imageChannelId: 0, imageModel: "0::0::gpt-image-auto", imageModels: ["0::0::gpt-image-auto"] },
+        serverChannels: [],
+        serverChannelModels: {},
+        serverPricing: [],
+        serverMetrics: null,
+        autoChannelModels: [],
+    });
+
+    const requestId = useConfigStore.getState().beginServerCatalogRefresh();
+    useConfigStore.getState().applyServerCatalogSnapshot(requestId, {
+        channels,
+        channelModels: models,
+        autoChannelModels: [autoModel],
+        pricing: [...pricing, autoPricing],
+        metrics: null,
+    });
+
+    const config = useConfigStore.getState().config;
+    expect(config.imageChannelId).toBe(0);
+    expect(config.imageModels).toEqual(["auto://1::gpt-image-auto"]);
+    expect(config.imageModel).toBe("");
+});
+
+test("empty Smart Routing snapshot clears the invalid selection without falling back to a physical channel", () => {
+    useConfigStore.setState({
+        config: { ...defaultConfig, imageChannelId: 0, imageModel: "auto://1::gpt-image-auto", imageModels: ["auto://1::gpt-image-auto"] },
         serverChannels: channels,
         serverChannelModels: models,
         serverPricing: [...pricing, autoPricing],
@@ -407,14 +467,14 @@ test("empty Auto snapshot preserves channel 0 without falling back to a physical
     });
 
     const config = useConfigStore.getState().config;
-    expect(config.imageChannelId).toBe(0);
+    expect(config.imageChannelId).toBeNull();
     expect(config.imageModels).toEqual([]);
     expect(config.imageModel).toBe("");
 });
 
 test("invalidating catalog refresh clears account-scoped catalog state", () => {
     useConfigStore.setState({
-        config: { ...defaultConfig, imageChannelId: 0, imageModel: "0::0::gpt-image-auto", imageModels: ["0::0::gpt-image-auto"] },
+        config: { ...defaultConfig, imageChannelId: 0, imageModel: "auto://1::gpt-image-auto", imageModels: ["auto://1::gpt-image-auto"] },
         serverChannels: channels,
         serverChannelModels: models,
         serverPricing: [...pricing, autoPricing],
@@ -475,9 +535,13 @@ test("rates sort descending with numeric zero before unavailable metrics", () =>
         pricing,
         {
             channels: [
-                { channel_id: 1, success_rate: 0, status: "ok", models: [{ channel_model_id: 12, channel_id: 1, model_name: "zero-model", request_count: 1, success_count: 0, success_rate: 0, status: "ok" }] },
+                { channel_id: 1, channel_name: "A", new_api_channel_id: null, request_count: 1, success_count: 0, success_rate: 0, status: "ok", models: [{ channel_model_id: 12, channel_id: 1, model_name: "zero-model", request_count: 1, success_count: 0, success_rate: 0, status: "ok" }] },
                 {
                     channel_id: 2,
+                    channel_name: "B",
+                    new_api_channel_id: null,
+                    request_count: 2,
+                    success_count: 2,
                     success_rate: 90,
                     status: "ok",
                     models: [
@@ -486,6 +550,10 @@ test("rates sort descending with numeric zero before unavailable metrics", () =>
                     ],
                 },
             ],
+            hours: 24,
+            window: "24h",
+            status: "ok",
+            updated_at: "",
         },
         "image",
     );
@@ -513,6 +581,7 @@ test("authenticated stale identity fails closed and valid request includes both 
     const query = new URL(valid).searchParams;
     expect(query.get("channel_id")).toBe("2");
     expect(query.get("channel_model_id")).toBe("22");
+    expect(query.get("routing_capability")).toBe("image");
     expect(query.get("routing_model")).toBe("same-model");
     expect(selectedChannelIdentityForModel(config, "2::999::same-model")).toBeNull();
     expect(() => buildProxyApiUrl("https://app.test/backend-api", config, "2::999::same-model", "/images/generations")).toThrow("所选模型已失效");
@@ -520,15 +589,15 @@ test("authenticated stale identity fails closed and valid request includes both 
 });
 
 test("Auto proxy request carries the raw routing model for bodyless polling", () => {
-    const config = { ...defaultConfig, videoChannelId: 0, videoModel: "0::0::gpt-video-auto" };
+    const config = { ...defaultConfig, videoChannelId: 0, videoModel: "auto://5::gpt-video-auto" };
     const query = new URL(buildProxyApiUrl("https://app.test/backend-api", config, config.videoModel, "/videos/task_123")).searchParams;
-    expect(query.get("channel_id")).toBe("0");
-    expect(query.get("channel_model_id")).toBe("0");
+    expect(query.get("routing_pool_id")).toBe("5");
+    expect(query.has("channel_id")).toBe(false);
     expect(query.get("routing_model")).toBe("gpt-video-auto");
 });
 
 test("Auto video proxy carries its protocol and resolved tasks override the physical identity", () => {
-    const config = { ...defaultConfig, videoChannelId: 0, videoModel: "0::0::omni-fast" };
+    const config = { ...defaultConfig, videoChannelId: 0, videoModel: "auto://3::omni-fast" };
     const autoQuery = new URL(buildProxyApiUrl("https://app.test/backend-api", config, config.videoModel, "/videos", { routingVideoRoute: "waninter" })).searchParams;
     expect(autoQuery.get("routing_video_route")).toBe("waninter");
 

@@ -2,7 +2,6 @@ package handler
 
 import (
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,19 +11,6 @@ import (
 	"infinite-canvas-server/model"
 	"infinite-canvas-server/service"
 )
-
-type apiConfigRepoCatalogStub struct {
-	config *model.TenantApiConfig
-}
-
-func (stub apiConfigRepoCatalogStub) FindByTenant(uint) (*model.TenantApiConfig, error) {
-	if stub.config == nil {
-		return nil, errors.New("not found")
-	}
-	return stub.config, nil
-}
-
-func (apiConfigRepoCatalogStub) Save(*model.TenantApiConfig) error { return nil }
 
 type apiConfigPricingCatalogStub struct {
 	items map[string]map[uint]model.CreditPricing
@@ -110,7 +96,6 @@ func TestApiConfigCatalogReturnsChannelModelCustomConfigWithoutTenantMap(t *test
 		N:          model.CustomVideoNConfig{Enabled: true, Key: "n", Value: 1},
 	}
 	handler := &ApiConfigHandler{
-		apiConfigRepo: apiConfigRepoCatalogStub{config: &model.TenantApiConfig{Models: `["catalog-video"]`, VideoModels: `["catalog-video"]`}},
 		creditRepo: apiConfigPricingCatalogStub{items: map[string]map[uint]model.CreditPricing{
 			"catalog-video": {1: {ChannelID: 1, Model: "catalog-video", CreditsPerUnit: 1, UnitType: model.UnitPerVideo}},
 		}},
@@ -155,5 +140,25 @@ func TestApiConfigCatalogReturnsChannelModelCustomConfigWithoutTenantMap(t *test
 	}
 	if strings.Contains(recorder.Body.String(), "model_custom_video_configs") || strings.Count(recorder.Body.String(), `"video_custom_config"`) != 1 {
 		t.Fatalf("unexpected custom config JSON shape: %s", recorder.Body.String())
+	}
+}
+
+func TestLegacyApiConfigWriteIsDisabled(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := &ApiConfigHandler{}
+	router := gin.New()
+	router.POST("/api-config", handler.Save)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/api-config", strings.NewReader(`{"models":["legacy"]}`)))
+
+	var response struct {
+		Code int    `json:"code"`
+		Msg  string `json:"msg"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response.Code != 410 || !strings.Contains(response.Msg, "渠道与模型配置") {
+		t.Fatalf("unexpected response: status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
 }

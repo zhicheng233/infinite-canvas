@@ -7,6 +7,8 @@ import (
 	"gorm.io/gorm"
 )
 
+var ErrCanvasRevisionConflict = errors.New("canvas revision conflict")
+
 type CanvasRepo struct {
 	db *gorm.DB
 }
@@ -15,30 +17,70 @@ func NewCanvasRepo(db *gorm.DB) *CanvasRepo {
 	return &CanvasRepo{db: db}
 }
 
-func (r *CanvasRepo) Upsert(project *model.CanvasProject) error {
-	var existing model.CanvasProject
-	err := r.db.
-		Where("tenant_id = ? AND user_id = ? AND project_id = ?", project.TenantID, project.UserID, project.ProjectID).
-		First(&existing).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return r.db.Create(project).Error
+func (r *CanvasRepo) Save(project *model.CanvasProject, expectedRevision uint) (*model.CanvasProject, error) {
+	err := r.db.Transaction(func(tx *gorm.DB) error {
+		var existing model.CanvasProject
+		err := tx.Where("tenant_id = ? AND user_id = ? AND project_id = ?", project.TenantID, project.UserID, project.ProjectID).First(&existing).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			if expectedRevision != 0 {
+				return ErrCanvasRevisionConflict
+			}
+			project.Revision = 1
+			if project.SchemaVersion <= 0 {
+				project.SchemaVersion = 2
+			}
+			return tx.Create(project).Error
+		}
+		if err != nil {
+			return err
+		}
+		if expectedRevision != existing.Revision {
+			return ErrCanvasRevisionConflict
+		}
+		nextRevision := existing.Revision + 1
+		result := tx.Model(&model.CanvasProject{}).
+			Where("id = ? AND revision = ?", existing.ID, existing.Revision).
+			Updates(map[string]any{
+				"schema_version": project.SchemaVersion, "revision": nextRevision, "title": project.Title,
+				"nodes": project.Nodes, "connections": project.Connections, "chat_sessions": project.ChatSessions,
+				"active_chat_id": project.ActiveChatID, "background_mode": project.BackgroundMode,
+				"show_image_info": project.ShowImageInfo, "viewport_x": project.ViewportX,
+				"viewport_y": project.ViewportY, "viewport_k": project.ViewportK,
+			})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return ErrCanvasRevisionConflict
+		}
+		project.BaseModel = existing.BaseModel
+		project.Revision = nextRevision
+		return nil
+	})
+	if errors.Is(err, ErrCanvasRevisionConflict) {
+		latest, latestErr := r.FindByProjectID(project.TenantID, project.UserID, project.ProjectID)
+		if latestErr == nil {
+			return latest, err
+		}
+		if !errors.Is(latestErr, gorm.ErrRecordNotFound) {
+			return nil, latestErr
+		}
+		return nil, err
 	}
-	if err != nil {
-		return err
-	}
+	return project, err
+}
 
-	return r.db.Model(&existing).Updates(map[string]any{
-		"title":           project.Title,
-		"nodes":           project.Nodes,
-		"connections":     project.Connections,
-		"chat_sessions":   project.ChatSessions,
-		"active_chat_id":  project.ActiveChatID,
-		"background_mode": project.BackgroundMode,
-		"show_image_info": project.ShowImageInfo,
-		"viewport_x":      project.ViewportX,
-		"viewport_y":      project.ViewportY,
-		"viewport_k":      project.ViewportK,
-	}).Error
+func EnsureCanvasProjectIndexes(db *gorm.DB) error {
+	migrator := db.Migrator()
+	if migrator.HasIndex(&model.CanvasProject{}, "idx_canvas_projects_project_id") {
+		if err := migrator.DropIndex(&model.CanvasProject{}, "idx_canvas_projects_project_id"); err != nil {
+			return err
+		}
+	}
+	if !migrator.HasIndex(&model.CanvasProject{}, "idx_canvas_project_identity") {
+		return migrator.CreateIndex(&model.CanvasProject{}, "idx_canvas_project_identity")
+	}
+	return nil
 }
 
 func (r *CanvasRepo) FindByProjectID(tenantID uint, userID uint, projectID string) (*model.CanvasProject, error) {

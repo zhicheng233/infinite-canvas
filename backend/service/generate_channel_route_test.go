@@ -94,9 +94,29 @@ func (f *recordingPricingReader) FindPricing(_ uint, modelName string, channelID
 	return f.items[modelName][channelID], nil
 }
 
-func (f fakeAutoChannelModelAggregator) AggregateModels() ([]AggregatedModel, error) {
+func (f fakeAutoChannelModelAggregator) AggregateModels(_ ...uint) ([]AggregatedModel, error) {
 	return f.items, nil
 }
+
+func (f fakeAutoChannelModelAggregator) ResolveCandidates(poolID, _ uint, capability, modelName string) (*model.AutoRoutingPool, []AutoRouteCandidate, error) {
+	for _, item := range f.items {
+		if item.Model != modelName {
+			continue
+		}
+		pool := &model.AutoRoutingPool{BaseModel: model.BaseModel{ID: poolID}, PublicModelName: modelName, Capability: capability, Enabled: true, MaxAttempts: 2}
+		candidates := make([]AutoRouteCandidate, 0, len(item.Channels))
+		for index, ref := range item.Channels {
+			member := &model.AutoRoutingPoolMember{BaseModel: model.BaseModel{ID: uint(index + 1)}, PoolID: poolID, ChannelModelID: ref.ChannelModelID, Enabled: true}
+			candidates = append(candidates, AutoRouteCandidate{Pool: pool, Member: member, Channel: &model.Channel{BaseModel: model.BaseModel{ID: ref.ChannelID}, Name: ref.ChannelName, Enabled: true}, ChannelModel: &model.ChannelModel{BaseModel: model.BaseModel{ID: ref.ChannelModelID}, ChannelID: ref.ChannelID, ModelName: modelName, Enabled: true}, SuccessRate: ref.SuccessRate, CircuitStatus: "closed"})
+		}
+		return pool, candidates, nil
+	}
+	return nil, nil, errors.New("pool not found")
+}
+
+func (f fakeAutoChannelModelAggregator) AcquireCandidate(AutoRouteCandidate) bool     { return true }
+func (f fakeAutoChannelModelAggregator) ReleaseCandidate(uint)                        {}
+func (f fakeAutoChannelModelAggregator) RecordAttempt(*model.GenerationAttempt) error { return nil }
 
 func (f fakePricingMapReader) FindPricingMap(_ uint) (map[string]map[uint]model.CreditPricing, error) {
 	return f.items, nil
@@ -242,16 +262,16 @@ func TestResolveChannelRouteForEstimateMatchesAutoCandidatePolicy(t *testing.T) 
 		2: {Model: "same-model", ChannelID: 2, CreditsPerUnit: 7, UnitType: model.UnitPerImage},
 	}}
 
-	resolved, err := svc.ResolveChannelRouteForEstimate(1, ChannelSelection{}, "image", "same-model", "")
+	resolved, err := svc.ResolveChannelRouteForEstimate(1, ChannelSelection{Kind: ModelSelectionAuto, AutoRoutingPoolID: 1}, "image", "same-model", "")
 	if err != nil {
 		t.Fatalf("resolve Auto estimate route failed: %v", err)
 	}
-	if resolved.Selection.ChannelID != 2 || resolved.Selection.ChannelModelID != 22 || resolved.PricingModel != "same-model" {
-		t.Fatalf("expected highest-success Auto candidate, got %#v", resolved)
+	if resolved.Selection.AutoRoutingPoolID != 1 || len(resolved.Candidates) != 2 || resolved.Candidates[0].ChannelModelID != 11 || resolved.Candidates[1].ChannelModelID != 22 || resolved.PricingModel != "same-model" {
+		t.Fatalf("expected all eligible Auto candidates, got %#v", resolved)
 	}
 }
 
-func TestResolveChannelRouteForEstimateSkipsUnpricedAutoCandidate(t *testing.T) {
+func TestResolveChannelRouteForEstimateLeavesPricingToEstimateHandler(t *testing.T) {
 	svc := newRouteTestGenerateService()
 	svc.autoChannelService = fakeAutoChannelModelAggregator{items: []AggregatedModel{{Model: "same-model", Channels: []AggregatedChannelRef{
 		{ChannelID: 1, ChannelModelID: 11, SuccessRate: 0.4},
@@ -261,16 +281,16 @@ func TestResolveChannelRouteForEstimateSkipsUnpricedAutoCandidate(t *testing.T) 
 		1: {Model: "same-model", ChannelID: 1, CreditsPerUnit: 3, UnitType: model.UnitPerImage},
 	}}
 
-	resolved, err := svc.ResolveChannelRouteForEstimate(1, ChannelSelection{}, "image", "same-model", "")
+	resolved, err := svc.ResolveChannelRouteForEstimate(1, ChannelSelection{Kind: ModelSelectionAuto, AutoRoutingPoolID: 1}, "image", "same-model", "")
 	if err != nil {
 		t.Fatalf("resolve Auto estimate route failed: %v", err)
 	}
-	if resolved.Selection.ChannelID != 1 || resolved.Selection.ChannelModelID != 11 || resolved.PricingModel != "same-model" {
-		t.Fatalf("expected first priced Auto candidate, got %#v", resolved)
+	if len(resolved.Candidates) != 2 {
+		t.Fatalf("route resolution must retain candidates for request-specific pricing, got %#v", resolved)
 	}
 }
 
-func TestResolveChannelRouteForEstimateRejectsAllUnpricedAutoCandidates(t *testing.T) {
+func TestResolveChannelRouteForEstimateDoesNotReadPricing(t *testing.T) {
 	svc := newRouteTestGenerateService()
 	svc.autoChannelService = fakeAutoChannelModelAggregator{items: []AggregatedModel{{Model: "same-model", Channels: []AggregatedChannelRef{
 		{ChannelID: 1, ChannelModelID: 11, SuccessRate: 40},
@@ -278,9 +298,9 @@ func TestResolveChannelRouteForEstimateRejectsAllUnpricedAutoCandidates(t *testi
 	}}}}
 	svc.creditRepo = fakeChannelPricingReader{items: map[uint]*model.CreditPricing{}}
 
-	_, err := svc.ResolveChannelRouteForEstimate(1, ChannelSelection{}, "image", "same-model", "")
-	if err == nil || !strings.Contains(err.Error(), "无已配置计费的可用候选") {
-		t.Fatalf("expected dedicated no-priced-candidate error, got %v", err)
+	resolved, err := svc.ResolveChannelRouteForEstimate(1, ChannelSelection{Kind: ModelSelectionAuto, AutoRoutingPoolID: 1}, "image", "same-model", "")
+	if err != nil || len(resolved.Candidates) != 2 {
+		t.Fatalf("route resolution should not reject candidates before request-specific pricing: %#v, %v", resolved, err)
 	}
 }
 
@@ -447,7 +467,6 @@ func TestTestModelUsesSelectedChannelWithoutTenantConfig(t *testing.T) {
 	defer fake.Close()
 
 	svc := newRouteTestGenerateService()
-	svc.apiConfigRepo = nil
 	svc.channelRepo = fakeChannelReader{items: map[uint]*model.Channel{
 		1: {BaseModel: model.BaseModel{ID: 1}, Name: "A", BaseUrl: fake.URL(), Enabled: true},
 	}}
@@ -516,7 +535,7 @@ func TestAutoVideoPollingPreservesGetWithoutPricing(t *testing.T) {
 	}}
 	svc.creditRepo = pricing
 
-	result, err := svc.proxyWithAutoFailover(1, 1, http.MethodGet, "video", "/videos/task_123", "", nil, "omni-fast", "")
+	result, err := svc.proxyWithAutoFailover(1, 1, http.MethodGet, "video", "/videos/task_123", "", nil, "omni-fast", "", 1)
 	if err != nil || result == nil || result.StatusCode != http.StatusOK {
 		t.Fatalf("unexpected polling result=%#v err=%v", result, err)
 	}
@@ -526,6 +545,60 @@ func TestAutoVideoPollingPreservesGetWithoutPricing(t *testing.T) {
 	}
 	if pricing.calls != 0 {
 		t.Fatalf("polling queried pricing %d times", pricing.calls)
+	}
+}
+
+func TestAutoFailoverAttemptsAtMostTwoRetryableCandidates(t *testing.T) {
+	first := NewFakeUpstreamServer(t, func(w http.ResponseWriter, _ *http.Request) { http.Error(w, "temporary", http.StatusBadGateway) })
+	defer first.Close()
+	second := NewFakeUpstreamServer(t, func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`{"status":"processing"}`)) })
+	defer second.Close()
+	third := NewFakeUpstreamServer(t, func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`{"status":"processing"}`)) })
+	defer third.Close()
+
+	svc := newRouteTestGenerateService()
+	svc.autoChannelService = fakeAutoChannelModelAggregator{items: []AggregatedModel{{Model: "video-model", Channels: []AggregatedChannelRef{
+		{ChannelID: 1, ChannelModelID: 61, SuccessRate: 100},
+		{ChannelID: 2, ChannelModelID: 62, SuccessRate: 90},
+		{ChannelID: 4, ChannelModelID: 64, SuccessRate: 80},
+	}}}}
+	svc.channelRepo = fakeChannelReader{items: map[uint]*model.Channel{
+		1: {BaseModel: model.BaseModel{ID: 1}, Name: "A", BaseUrl: first.URL(), Enabled: true},
+		2: {BaseModel: model.BaseModel{ID: 2}, Name: "B", BaseUrl: second.URL(), Enabled: true},
+		4: {BaseModel: model.BaseModel{ID: 4}, Name: "C", BaseUrl: third.URL(), Enabled: true},
+	}}
+	svc.modelRepo = fakeChannelModelReader{items: map[uint]*model.ChannelModel{
+		61: {BaseModel: model.BaseModel{ID: 61}, ChannelID: 1, ModelName: "video-model", Capabilities: `["video"]`, Enabled: true},
+		62: {BaseModel: model.BaseModel{ID: 62}, ChannelID: 2, ModelName: "video-model", Capabilities: `["video"]`, Enabled: true},
+		64: {BaseModel: model.BaseModel{ID: 64}, ChannelID: 4, ModelName: "video-model", Capabilities: `["video"]`, Enabled: true},
+	}}
+
+	result, err := svc.proxyWithAutoFailover(1, 1, http.MethodGet, "video", "/videos/task", "", nil, "video-model", "", 1)
+	if err != nil || result == nil || result.ResolvedChannelID != 2 {
+		t.Fatalf("unexpected failover result=%#v err=%v", result, err)
+	}
+	if len(first.Requests()) != 1 || len(second.Requests()) != 1 || len(third.Requests()) != 0 {
+		t.Fatalf("unexpected attempt counts: %d/%d/%d", len(first.Requests()), len(second.Requests()), len(third.Requests()))
+	}
+}
+
+func TestAutoFailoverDoesNotRetryInvalidRequest(t *testing.T) {
+	first := NewFakeUpstreamServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, `{"error":{"message":"invalid size"}}`, http.StatusBadRequest)
+	})
+	defer first.Close()
+	second := NewFakeUpstreamServer(t, func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`{"ok":true}`)) })
+	defer second.Close()
+	svc := newRouteTestGenerateService()
+	svc.autoChannelService = fakeAutoChannelModelAggregator{items: []AggregatedModel{{Model: "video-model", Channels: []AggregatedChannelRef{{ChannelID: 1, ChannelModelID: 61, SuccessRate: 100}, {ChannelID: 2, ChannelModelID: 62, SuccessRate: 90}}}}}
+	svc.channelRepo = fakeChannelReader{items: map[uint]*model.Channel{1: {BaseModel: model.BaseModel{ID: 1}, BaseUrl: first.URL(), Enabled: true}, 2: {BaseModel: model.BaseModel{ID: 2}, BaseUrl: second.URL(), Enabled: true}}}
+	svc.modelRepo = fakeChannelModelReader{items: map[uint]*model.ChannelModel{61: {BaseModel: model.BaseModel{ID: 61}, ChannelID: 1, ModelName: "video-model", Capabilities: `["video"]`, Enabled: true}, 62: {BaseModel: model.BaseModel{ID: 62}, ChannelID: 2, ModelName: "video-model", Capabilities: `["video"]`, Enabled: true}}}
+
+	if _, err := svc.proxyWithAutoFailover(1, 1, http.MethodGet, "video", "/videos/task", "", nil, "video-model", "", 1); err == nil || !strings.Contains(err.Error(), "请求参数") {
+		t.Fatalf("expected normalized non-retryable error, got %v", err)
+	}
+	if len(first.Requests()) != 1 || len(second.Requests()) != 0 {
+		t.Fatalf("invalid request retried: %d/%d", len(first.Requests()), len(second.Requests()))
 	}
 }
 
@@ -558,7 +631,7 @@ func TestAutoVideoRouteFiltersCandidatesAndReturnsResolvedIdentity(t *testing.T)
 		62: {BaseModel: model.BaseModel{ID: 62}, ChannelID: 2, ModelName: "omni-fast", Capabilities: `["video"]`, VideoRoute: "waninter", Enabled: true},
 	}}
 
-	result, err := svc.proxyWithAutoFailover(1, 1, http.MethodGet, "video", "/videos/task_123", "", nil, "omni-fast", "waninter")
+	result, err := svc.proxyWithAutoFailover(1, 1, http.MethodGet, "video", "/videos/task_123", "", nil, "omni-fast", "waninter", 1)
 	if err != nil {
 		t.Fatalf("Auto video route failed: %v", err)
 	}
@@ -590,7 +663,7 @@ func TestAutoBinghuoVideoRouteOnlyUsesBinghuoChannels(t *testing.T) {
 		72: {BaseModel: model.BaseModel{ID: 72}, ChannelID: 2, ModelName: "video-model", Capabilities: `["video"]`, VideoRoute: "openai", Enabled: true},
 	}}
 
-	result, err := svc.proxyWithAutoFailover(1, 1, http.MethodGet, "video", "/video/generations/task", "", nil, "video-model", "binghuo")
+	result, err := svc.proxyWithAutoFailover(1, 1, http.MethodGet, "video", "/video/generations/task", "", nil, "video-model", "binghuo", 1)
 	if err != nil || result.ResolvedChannelID != 2 {
 		t.Fatalf("unexpected result=%#v err=%v", result, err)
 	}
@@ -600,7 +673,7 @@ func TestAutoBinghuoVideoRouteOnlyUsesBinghuoChannels(t *testing.T) {
 }
 
 func TestStripChannelIdentityBeforeUpstream(t *testing.T) {
-	body := stripJSONChannelIdentity("application/json", []byte(`{"model":"same-model","channel_id":1,"channel_model_id":11}`))
+	body := stripJSONChannelIdentity("application/json", []byte(`{"model":"same-model","channel_id":1,"channel_model_id":11,"routing_pool_id":9,"routing_capability":"image"}`))
 	if string(body) != `{"model":"same-model"}` {
 		t.Fatalf("unexpected stripped body: %s", body)
 	}

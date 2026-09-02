@@ -19,7 +19,7 @@ import {
 } from "@/lib/seedance-video";
 import { type CanvasTheme } from "@/lib/canvas-theme";
 import { type CustomVideoMediaFeature } from "@/lib/custom-video-config";
-import { normalizeCustomVideoRuntimeState, type CustomVideoRuntimeSnapshot } from "@/lib/custom-video-runtime";
+import { normalizeCustomVideoRuntimeStateForModelSwitch, type CustomVideoRuntimeSnapshot } from "@/lib/custom-video-runtime";
 import { binghuoRatioOptions, binghuoResolutionOptions, normalizeBinghuoRatio, normalizeBinghuoReferenceMode, normalizeBinghuoResolution } from "@/lib/binghuo-video";
 import { customVideoConfigForModel, fixedConfiguredVideoDurationForModel, isVideoDurationCustomizable, modelOptionName, normalizeVideoDurationForModel, videoDurationOptionsForModel, videoRouteForModel, type AiConfig } from "@/stores/use-config-store";
 import type { CanvasConnectedVideoMediaByRole } from "@/app/(user)/canvas/components/canvas-connected-video-media";
@@ -59,7 +59,7 @@ export function videoSettingsOverview(config: AiConfig, selectedModel?: string, 
     if (videoRouteForModel(resolvedConfig, model) === "custom") {
         const customConfig = customVideoConfigForModel(resolvedConfig, model);
         if (!customConfig) return "自定义视频";
-        const normalized = normalizeCustomVideoRuntimeState(customConfig, runtime?.values, runtime?.media);
+        const normalized = normalizeCustomVideoRuntimeStateForModelSwitch(customConfig, runtime?.values, runtime?.media);
         const values = [
             customConfig.dimensions.enabled ? normalized.values.dimension : undefined,
             customConfig.seconds.enabled ? videoSecondsLabel(String(normalized.values.seconds)) : undefined,

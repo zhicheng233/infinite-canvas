@@ -7,7 +7,7 @@ import { Button } from "antd";
 import { estimateCost, getBalance } from "@/services/api/credits";
 import { getStoredToken } from "@/services/api/client";
 import { useRechargeDialog } from "@/hooks/use-recharge-dialog";
-import { decodeChannelModel, modelOptionName, parseMergeModelValue } from "@/stores/use-config-store";
+import { decodeChannelModel, modelOptionName, parseAutoModelValue, parseMergeModelValue } from "@/stores/use-config-store";
 
 export function CreditSymbol({ className, ...props }: ComponentProps<"span">) {
     return (
@@ -22,7 +22,7 @@ export type ModelCreditCost = {
     credits: number;
 };
 
-export type CreditEstimate = { status: "idle" | "loading" | "ready" | "missing" | "error"; credits: number };
+export type CreditEstimate = { status: "idle" | "loading" | "ready" | "missing" | "error"; credits: number; minCredits?: number; candidateCount?: number };
 
 type CreditEstimateRequest = ReturnType<typeof buildCreditEstimateRequest>;
 
@@ -30,6 +30,7 @@ const inFlightCreditEstimates = new Map<string, ReturnType<typeof estimateCost>>
 
 export function buildCreditEstimateRequest(model: string, count?: string | number, options?: { type?: string; seconds?: string | number; resolution?: string; size?: string }) {
     const decoded = decodeChannelModel(model || "");
+    const auto = parseAutoModelValue(model || "");
     const merge = parseMergeModelValue(model || "");
     const rawModel = merge?.groupName || modelOptionName(model || "");
     const normalizedCount = Math.max(1, Math.floor(Math.abs(Number(count)) || 1));
@@ -38,7 +39,9 @@ export function buildCreditEstimateRequest(model: string, count?: string | numbe
     if (options?.seconds) params.seconds = options.seconds;
     if (options?.resolution) params.resolution = options.resolution;
     if (options?.size) params.size = options.size;
-    if (merge) {
+    if (auto) {
+        params.routing_pool_id = auto.poolId;
+    } else if (merge) {
         params.channel_id = merge.channelId;
         params.fuzzy_group_name = merge.groupName;
     } else if (decoded) {
@@ -52,7 +55,7 @@ export function buildCreditEstimateRequest(model: string, count?: string | numbe
 
 export function creditEstimateRequestKey(request: CreditEstimateRequest) {
     const params = request.params;
-    return JSON.stringify([request.model, params.channel_id ?? null, params.channel_model_id ?? null, params.fuzzy_group_name ?? null, params.count ?? null, params.seconds ?? null, params.resolution ?? null, params.size ?? null, params.type ?? null]);
+    return JSON.stringify([request.model, params.routing_pool_id ?? null, params.channel_id ?? null, params.channel_model_id ?? null, params.fuzzy_group_name ?? null, params.count ?? null, params.seconds ?? null, params.resolution ?? null, params.size ?? null, params.type ?? null]);
 }
 
 export function requestCreditEstimate(request: CreditEstimateRequest) {
@@ -67,9 +70,9 @@ export function requestCreditEstimate(request: CreditEstimateRequest) {
     return pending;
 }
 
-export function resolveCreditEstimate(data: { total_cost?: number; credits_per_unit?: number; unit_type?: string }, count: number): CreditEstimate {
+export function resolveCreditEstimate(data: { total_cost?: number; min_cost?: number; max_cost?: number; candidate_count?: number; credits_per_unit?: number; unit_type?: string }, count: number): CreditEstimate {
     const totalCost = Number(data?.total_cost) || 0;
-    if (totalCost > 0) return { status: "ready", credits: totalCost };
+    if (totalCost > 0) return { status: "ready", credits: totalCost, minCredits: Number(data.min_cost) || totalCost, candidateCount: Number(data.candidate_count) || 1 };
     const unitCost = Number(data?.credits_per_unit) || 0;
     const multiplier = data?.unit_type === "per_image" ? count : 1;
     return unitCost > 0 ? { status: "ready", credits: unitCost * multiplier } : { status: "missing", credits: 0 };
@@ -79,7 +82,7 @@ export function creditEstimateButtonText(estimate: CreditEstimate) {
     if (estimate.status === "idle" || estimate.status === "loading") return "正在预估计费";
     if (estimate.status === "error") return "计费预估失败";
     if (estimate.status === "missing") return "未配置计费";
-    return `${estimate.credits} 积分`;
+    return estimate.minCredits && estimate.minCredits !== estimate.credits ? `${estimate.minCredits}-${estimate.credits} 积分` : `${estimate.credits} 积分`;
 }
 
 function modelCreditCost(modelCosts: ModelCreditCost[] | undefined, model: string) {
@@ -188,7 +191,7 @@ export function CreditCostHint({ credits, estimate, balance, compact = false }: 
         return (
             <span className={`inline-flex items-center gap-1 text-xs ${insufficient ? "text-red-500" : "text-stone-500 dark:text-stone-400"}`}>
                 <CreditSymbol className={insufficient ? "text-red-500" : "text-amber-500"} />
-                {failed ? "计费预估失败" : current.status === "idle" || current.status === "loading" ? "正在预估计费" : hasCost ? `预计 ${currentCredits} 积分` : "未配置计费"}
+                {failed ? "计费预估失败" : current.status === "idle" || current.status === "loading" ? "正在预估计费" : hasCost ? current.minCredits && current.minCredits !== currentCredits ? `预计 ${current.minCredits}-${currentCredits} 积分` : `预计 ${currentCredits} 积分` : "未配置计费"}
             </span>
         );
     }
@@ -199,7 +202,7 @@ export function CreditCostHint({ credits, estimate, balance, compact = false }: 
                 {failed ? "暂时无法读取计费预估" : current.status === "idle" || current.status === "loading" ? "正在预估本次扣费" : balance === null ? "正在读取当前积分" : `当前余额 ${balance}，预计生成后剩余 ${Math.max(postBalance || 0, 0)}`}
             </span>
             <span className={insufficient ? "text-red-500" : ""}>
-                {failed ? "计费预估失败" : current.status === "idle" || current.status === "loading" ? "正在读取计费配置" : hasCost ? `本次预计扣除 ${currentCredits} 积分${insufficient ? "，余额不足" : ""}` : "当前模型未配置扣费"}
+                {failed ? "计费预估失败" : current.status === "idle" || current.status === "loading" ? "正在读取计费配置" : hasCost ? `本次预留 ${currentCredits} 积分${current.minCredits && current.minCredits !== currentCredits ? `，成功后按实际渠道结算 ${current.minCredits}-${currentCredits} 积分` : ""}${insufficient ? "，余额不足" : ""}` : "当前模型未配置扣费"}
             </span>
             {insufficient ? (
                 <Button size="small" type="link" onClick={openRechargeDialog} className="!h-auto !p-0">

@@ -124,15 +124,15 @@ func (h *ChannelHandler) Delete(c *gin.Context) {
 
 func (h *ChannelHandler) GetAuto(c *gin.Context) {
 	model.OK(c, gin.H{
-		"id":          0,
-		"name":        "Auto（自动路由）",
-		"enabled":     true,
-		"is_virtual":  true,
+		"id":         0,
+		"name":       "智能路由",
+		"enabled":    true,
+		"is_virtual": true,
 	})
 }
 
 func (h *ChannelHandler) ListAutoModels(c *gin.Context) {
-	models, err := h.autoChannelService.AggregateModels()
+	models, err := h.autoChannelService.AggregateModels(currentTenantID(c))
 	if err != nil {
 		model.Fail(c, http.StatusInternalServerError, "读取聚合模型失败")
 		return

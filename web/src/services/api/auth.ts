@@ -21,7 +21,7 @@ export async function fetchCaptcha(): Promise<CaptchaData> {
     return res.data.data as CaptchaData;
 }
 
-export async function register(input: { tenant_name?: string; username: string; password: string; captcha_id?: string; captcha_answer?: string }) {
+export async function register(input: { username: string; password: string; captcha_id?: string; captcha_answer?: string }) {
     const res = await apiClient.post("/auth/register", input);
     return res.data.data as AuthResponse;
 }

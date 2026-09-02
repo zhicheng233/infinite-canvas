@@ -143,3 +143,26 @@ func TestChannelModelServiceRejectsInvalidEnabledMediaMaxCountsBeforeSave(t *tes
 		}
 	}
 }
+
+func TestChannelModelServiceRejectsUnknownRoutesBeforeSave(t *testing.T) {
+	for name, input := range map[string]model.UpdateChannelModelInput{
+		"image generation": {ImageGenerateRoute: serviceTestStringPointer("unknown")},
+		"image edit":       {ImageEditRoute: serviceTestStringPointer("unknown")},
+		"video":            {VideoRoute: serviceTestStringPointer("unknown")},
+	} {
+		t.Run(name, func(t *testing.T) {
+			repo := &channelModelPersistenceRepoStub{item: model.ChannelModel{
+				BaseModel: model.BaseModel{ID: 103}, ChannelID: 7, ModelName: "route-model",
+				Capabilities: `["image","video"]`, ImageGenerateRoute: "auto", ImageEditRoute: "auto", VideoRoute: "auto", VideoDurations: `[]`,
+			}}
+			if _, err := NewChannelModelService(nil, nil, repo, nil).Update(103, input); err == nil {
+				t.Fatal("unknown route was accepted")
+			}
+			if repo.saveCalls != 0 {
+				t.Fatalf("save calls = %d, want 0", repo.saveCalls)
+			}
+		})
+	}
+}
+
+func serviceTestStringPointer(value string) *string { return &value }

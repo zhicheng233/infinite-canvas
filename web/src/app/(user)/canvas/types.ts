@@ -62,6 +62,9 @@ export type CanvasNodeMetadata = CustomVideoRuntimeContainer & {
     mimeType?: string;
     bytes?: number;
     durationMs?: number;
+    generationRequestId?: string;
+    generationCost?: number;
+    resolvedChannelName?: string;
 };
 
 export type CanvasNodeData = {

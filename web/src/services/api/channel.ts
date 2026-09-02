@@ -78,11 +78,25 @@ export type AutoChannelModelRef = {
     channel_model_id: number;
     channel_name: string;
     success_rate: number;
+    sample_count: number;
+    p95_latency_ms: number;
+    priority: number;
+    circuit_status: "closed" | "open" | "half_open";
+    available: boolean;
+    unavailable_reason?: string;
 };
 
 export type AutoChannelModelInfo = {
+    pool_id: number;
     model: string;
+    capability: "image" | "video" | "text" | "audio";
+    contract_key: string;
     channels: AutoChannelModelRef[];
+    member_count: number;
+    available_count: number;
+    min_price: number;
+    max_price: number;
+    reliability: number;
 };
 
 export async function getAutoChannelModels(): Promise<AutoChannelModelInfo[]> {

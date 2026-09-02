@@ -9,6 +9,7 @@ import (
 
 	"infinite-canvas-server/config"
 	"infinite-canvas-server/handler"
+	"infinite-canvas-server/migrations"
 	"infinite-canvas-server/model"
 	"infinite-canvas-server/repository"
 	"infinite-canvas-server/router"
@@ -36,7 +37,6 @@ func main() {
 		&model.VideoConfigPreset{},
 		&model.MetricsConfig{},
 		&model.RechargeOrder{},
-		&model.CanvasProject{},
 		&model.ModelCallLog{},
 		&model.ModelMergeGroup{},
 		&model.WebhookConfig{},
@@ -45,12 +45,20 @@ func main() {
 	); err != nil {
 		log.Fatalf("failed to migrate: %v", err)
 	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		log.Fatalf("failed to access database connection: %v", err)
+	}
+	if err := migrations.Up(sqlDB); err != nil {
+		log.Fatalf("failed to run database migrations: %v", err)
+	}
 
 	userRepo := repository.NewUserRepo(db)
 	tenantRepo := repository.NewTenantRepo(db)
 	creditRepo := repository.NewCreditRepo(db)
+	generationJobRepo := repository.NewGenerationJobRepo(db)
+	autoRoutingRepo := repository.NewAutoRoutingRepo(db)
 	rechargeRepo := repository.NewRechargeRepo(db)
-	apiConfigRepo := repository.NewApiConfigRepo(db)
 	canvasRepo := repository.NewCanvasRepo(db)
 	generationRecordRepo := repository.NewGenerationRecordRepo(db)
 	modelCallLogRepo := repository.NewModelCallLogRepo(db)
@@ -71,18 +79,19 @@ func main() {
 	}
 	userService := service.NewUserService(userRepo)
 	creditService := service.NewCreditService(creditRepo)
+	generationBillingService := service.NewGenerationBillingService(generationJobRepo)
 	channelService := service.NewChannelService(channelRepo, cfg.ApiKeyEncryptKey)
 	channelModelService := service.NewChannelModelService(channelService, channelRepo, channelModelRepo, creditRepo)
 	videoConfigPresetService := service.NewVideoConfigPresetService(videoConfigPresetRepo)
 	metricsService := service.NewMetricsService(metricsConfigRepo, channelRepo, channelModelRepo)
 	modelCallLogService := service.NewModelCallLogService(modelCallLogRepo, userRepo)
 	onDemandRepairService := service.NewOnDemandRepairService(cfg.OnDemandRepairURL, cfg.OnDemandRepairUser, cfg.OnDemandRepairPass, cfg.OnDemandRepairTimeoutSeconds)
-	autoChannelService := service.NewAutoChannelService(db, channelRepo, channelModelRepo)
+	autoChannelService := service.NewAutoChannelService(db, channelRepo, channelModelRepo, creditRepo, autoRoutingRepo)
 	webhookService := service.NewWebhookService(webhookRepo)
 	siteAnnouncementService := service.NewSiteAnnouncementService(siteAnnouncementRepo)
-	generateService := service.NewGenerateService(apiConfigRepo, creditService, creditRepo, modelCallLogService, cfg.ApiKeyEncryptKey, onDemandRepairService, channelService, channelRepo, channelModelRepo, mergeGroupRepo, db, autoChannelService, webhookService)
+	generateService := service.NewGenerateService(creditService, creditRepo, generationBillingService, modelCallLogService, cfg.ApiKeyEncryptKey, onDemandRepairService, channelService, channelRepo, channelModelRepo, mergeGroupRepo, db, autoChannelService, webhookService)
 	tempMediaService := service.NewTempMediaService(cfg)
-	channelStatusService := service.NewChannelStatusService(modelCallLogRepo, apiConfigRepo)
+	channelStatusService := service.NewChannelStatusService(modelCallLogRepo)
 	paymentGateway := service.NewMockPaymentGateway(rechargeRepo, creditService)
 	mergeGroupService := service.NewMergeGroupService(mergeGroupRepo)
 	apiConfigTransferService := service.NewAPIConfigTransferService(apiConfigTransferRepo, cfg.ApiKeyEncryptKey)
@@ -92,7 +101,7 @@ func main() {
 	userHandler := handler.NewUserHandler(userService)
 	creditHandler := handler.NewCreditHandler(creditService, creditRepo, generateService, channelModelRepo, channelRepo)
 	generateHandler := handler.NewGenerateHandler(generateService)
-	apiConfigHandler := handler.NewApiConfigHandler(apiConfigRepo, creditRepo, channelModelService, generateService, cfg)
+	apiConfigHandler := handler.NewApiConfigHandler(creditRepo, channelModelService, generateService)
 	proxyHandler := handler.NewProxyHandler(generateService)
 	canvasHandler := handler.NewCanvasHandler(canvasRepo)
 	generationRecordHandler := handler.NewGenerationRecordHandler(generationRecordRepo)
@@ -107,10 +116,21 @@ func main() {
 	webhookHandler := handler.NewWebhookHandler(webhookService)
 	mergeGroupHandler := handler.NewMergeGroupHandler(mergeGroupService)
 	apiConfigTransferHandler := handler.NewAPIConfigTransferHandler(apiConfigTransferService)
+	autoRoutingHandler := handler.NewAutoRoutingHandler(autoChannelService)
 	siteAnnouncementHandler := handler.NewSiteAnnouncementHandler(siteAnnouncementService)
 
 	r := gin.Default()
-	router.Setup(r, authService, authHandler, adminHandler, userHandler, creditHandler, generateHandler, apiConfigHandler, videoConfigPresetHandler, proxyHandler, canvasHandler, generationRecordHandler, rechargeHandler, captchaHandler, tempMediaHandler, channelStatusHandler, channelHandler, channelModelHandler, metricsHandler, webhookHandler, mergeGroupHandler, apiConfigTransferHandler, siteAnnouncementHandler)
+	router.Setup(r, router.Dependencies{
+		AuthService: authService, AuthHandler: authHandler, AdminHandler: adminHandler, UserHandler: userHandler,
+		CreditHandler: creditHandler, GenerateHandler: generateHandler, APIConfigHandler: apiConfigHandler,
+		VideoConfigPresetHandler: videoConfigPresetHandler, ProxyHandler: proxyHandler, CanvasHandler: canvasHandler,
+		GenerationRecordHandler: generationRecordHandler, RechargeHandler: rechargeHandler, CaptchaHandler: captchaHandler,
+		TempMediaHandler: tempMediaHandler, ChannelStatusHandler: channelStatusHandler, ChannelHandler: channelHandler,
+		ChannelModelHandler: channelModelHandler, MetricsHandler: metricsHandler, WebhookHandler: webhookHandler,
+		MergeGroupHandler: mergeGroupHandler, APIConfigTransferHandler: apiConfigTransferHandler,
+		AutoRoutingHandler:      autoRoutingHandler,
+		SiteAnnouncementHandler: siteAnnouncementHandler,
+	})
 
 	log.Printf("Server starting on port %s", cfg.Port)
 	if err := r.Run(":" + cfg.Port); err != nil {

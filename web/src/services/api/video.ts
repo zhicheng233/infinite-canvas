@@ -22,6 +22,7 @@ type XAIVideoTask = {
     request_id?: string;
     status?: string;
     progress?: number;
+    message?: string;
     error?: { code?: string; message?: string } | null;
     video?: { url?: string } | null;
 };
@@ -32,6 +33,7 @@ type NewApiVideoTask = {
     state?: string;
     task_status?: string;
     success?: boolean;
+    progress?: number;
     message?: string;
     url?: string;
     video_url?: string;
@@ -61,8 +63,10 @@ type RequestOptions = { readonly signal?: AbortSignal; readonly customVideoRunti
 
 class ExplicitVideoDownloadError extends Error {}
 
-export type VideoGenerationResult = { blob?: Blob; url?: string; mimeType?: string };
-export type VideoGenerationTask = { id: string; provider: "openai" | "seedance" | "xai" | "newapi" | "yijia" | "binghuo"; model: string; channelId?: number; channelModelId?: number };
+type VideoGenerationRouting = { generationRequestId?: string; generationCost?: number; resolvedChannelName?: string };
+export type VideoGenerationResult = { blob?: Blob; url?: string; mimeType?: string } & VideoGenerationRouting;
+export type VideoGenerationTask = { id: string; provider: "openai" | "seedance" | "xai" | "newapi" | "yijia" | "binghuo"; model: string; channelId?: number; channelModelId?: number } & VideoGenerationRouting;
+export type StoredGeneratedVideo = UploadedFile & VideoGenerationRouting;
 export type VideoGenerationTaskState = { status: "pending" } | { status: "completed"; result: VideoGenerationResult } | { status: "failed"; error: string };
 type VideoTaskRouting = Pick<VideoGenerationTask, "model" | "channelId" | "channelModelId">;
 
@@ -82,7 +86,16 @@ function aiApiUrl(config: AiConfig, path: string, routing?: VideoTaskRouting) {
 function resolvedTaskRouting(headers: unknown) {
     const channelId = Number(readResponseHeader(headers, "x-resolved-channel-id"));
     const channelModelId = Number(readResponseHeader(headers, "x-resolved-channel-model-id"));
-    return channelId > 0 && channelModelId > 0 ? { channelId, channelModelId } : {};
+    const costValue = readResponseHeader(headers, "x-credits-cost").trim();
+    const cost = costValue ? Number(costValue) : Number.NaN;
+    const generationRequestId = readResponseHeader(headers, "x-generation-request-id");
+    const resolvedChannelName = readResponseHeader(headers, "x-resolved-channel-name");
+    return {
+        ...(channelId > 0 && channelModelId > 0 ? { channelId, channelModelId } : {}),
+        ...(Number.isFinite(cost) && cost >= 0 ? { generationCost: cost } : {}),
+        ...(generationRequestId ? { generationRequestId } : {}),
+        ...(resolvedChannelName ? { resolvedChannelName } : {}),
+    };
 }
 
 function notifyCreditRefundIfAny(headers: unknown) {
@@ -129,7 +142,7 @@ export async function requestVideoGeneration(config: AiConfig, prompt: string, r
     for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
         if (options?.signal?.aborted) throw new DOMException("Aborted", "AbortError");
         const state = await pollVideoGenerationTask(config, task, options);
-        if (state.status === "completed") return state.result;
+        if (state.status === "completed") return { ...state.result, ...videoGenerationRouting(task) };
         if (state.status === "failed") throw new Error(state.error);
         if (attempt === maxAttempts - 1) throw new Error(`${task.provider === "seedance" ? "Seedance " : ""}视频生成超时，请稍后重试`);
         await delay(delayMs, options?.signal);
@@ -188,10 +201,19 @@ export async function pollVideoGenerationTask(config: AiConfig, task: VideoGener
     return pollOpenAIVideoTask(requestConfig, task, options);
 }
 
-export async function storeGeneratedVideo(result: VideoGenerationResult): Promise<UploadedFile> {
-    if (result.blob) return uploadMediaFile(await normalizeVideoBlob(result.blob), "video");
-    if (result.url) return { url: result.url, storageKey: "", bytes: 0, mimeType: result.mimeType || "video/mp4" };
+export async function storeGeneratedVideo(result: VideoGenerationResult): Promise<StoredGeneratedVideo> {
+    const routing = videoGenerationRouting(result);
+    if (result.blob) return { ...(await uploadMediaFile(await normalizeVideoBlob(result.blob), "video")), ...routing };
+    if (result.url) return { url: result.url, storageKey: "", bytes: 0, mimeType: result.mimeType || "video/mp4", ...routing };
     throw new Error("视频接口没有返回可播放的视频");
+}
+
+function videoGenerationRouting(value: VideoGenerationRouting): VideoGenerationRouting {
+    return {
+        ...(value.generationRequestId ? { generationRequestId: value.generationRequestId } : {}),
+        ...(value.generationCost !== undefined ? { generationCost: value.generationCost } : {}),
+        ...(value.resolvedChannelName ? { resolvedChannelName: value.resolvedChannelName } : {}),
+    };
 }
 
 async function createOpenAIVideoTask(config: AiConfig, model: string, prompt: string, references: ReferenceImage[], options?: RequestOptions): Promise<VideoGenerationTask> {
@@ -931,8 +953,8 @@ function readVideoTaskUrls(state: Partial<NewApiVideoTask>) {
     return Array.from(new Set(urls));
 }
 
-function normalizeNewApiVideoTask(payload: NewApiVideoTask) {
-    const nested = payload?.data ? normalizeNewApiVideoTask(payload.data) : null;
+function normalizeNewApiVideoTask(payload: NewApiVideoTask): NewApiVideoTask {
+    const nested: NewApiVideoTask | null = payload.data ? normalizeNewApiVideoTask(payload.data) : null;
     const status = normalizeTaskStatus(payload.status || payload.state || payload.task_status, payload.success);
     const nestedStatus = normalizeTaskStatus(nested?.status || nested?.state || nested?.task_status, nested?.success);
     return {
@@ -962,7 +984,7 @@ function normalizeTaskStatus(value?: string, success?: boolean) {
 function unwrapEnvelope<T>(payload: ApiEnvelope<T>, emptyMessage: string): T {
     if (!payload) throw new Error(emptyMessage);
     if (typeof payload === "object") {
-        const envelope = payload as ApiEnvelope<T>;
+        const envelope = payload as { code?: number | string; ok?: boolean; data?: T | null; msg?: string; message?: string; error?: string | { message?: string }; error_detail?: string };
         if ("ok" in envelope && envelope.ok === false) {
             throw new Error(readEnvelopeMessage(envelope) || emptyMessage);
         }

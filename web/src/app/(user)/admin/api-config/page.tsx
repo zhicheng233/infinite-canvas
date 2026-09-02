@@ -17,9 +17,10 @@ import type { WebhookConfig, WebhookLogItem, TestSendResult } from "@/services/a
 import { listMergeGroups, deleteMergeGroup, autoCreateMergeGroups, type MergeGroup } from "@/services/api/merge-groups-admin";
 import { ApiConfigTransfer } from "./components/api-config-transfer";
 import { initialVideoModelFormValues, ModelVideoConfigFields, normalizeVideoModelFormValues } from "./components/model-video-config-fields";
+import { AutoRoutingPools } from "./components/auto-routing-pools";
 
 const imageRouteOptions = [
-    { label: "自动判断", value: "auto" },
+    { label: "兼容默认", value: "auto" },
     { label: "/v1/images/generations", value: "generations" },
     { label: "/v1/images/edits", value: "edits" },
     { label: "/v1/chat/completions（多模态生图）", value: "chat" },
@@ -62,7 +63,7 @@ function PricingInput({ value, onChange, ...rest }: { value: number; onChange: (
     useEffect(() => {
         setLocalVal(value);
     }, [value]);
-    return <InputNumber size="small" min={0} value={localVal} onChange={(v) => setLocalVal(v ?? 0)} onBlur={() => onChange(localVal)} {...rest} />;
+    return <InputNumber size="small" min={0} value={localVal} onChange={(v) => setLocalVal(Number(v ?? 0))} onBlur={() => onChange(localVal)} {...rest} />;
 }
 
 export default function AdminApiConfigPage() {
@@ -1009,11 +1010,20 @@ export default function AdminApiConfigPage() {
                     </Card>
                 </Tabs.TabPane>
 
+                <Tabs.TabPane tab="智能路由" key="auto-routing">
+                    <AutoRoutingPools />
+                </Tabs.TabPane>
+
                 <Tabs.TabPane tab="消息推送" key="webhook">
                     <Card title="平台配置" className="mb-4">
                         <Table
                             rowKey="platform"
-                            dataSource={WEBHOOK_PLATFORMS.map((p) => localConfigs[p] || { platform: p, webhook_url: "", enabled: false, cooldown_minutes: 10 })}
+                            dataSource={WEBHOOK_PLATFORMS.map<WebhookConfig>((platform) => ({
+                                platform,
+                                webhook_url: localConfigs[platform]?.webhook_url ?? "",
+                                enabled: localConfigs[platform]?.enabled ?? false,
+                                cooldown_minutes: localConfigs[platform]?.cooldown_minutes ?? 10,
+                            }))}
                             columns={[
                                 {
                                     title: "平台",

@@ -34,11 +34,12 @@ type APIConfigTransferImportInput struct {
 }
 
 type APIConfigTransferSnapshot struct {
-	SchemaVersion int                            `json:"schema_version"`
-	ExportedAt    time.Time                      `json:"exported_at"`
-	Channels      []APIConfigTransferChannel     `json:"channels"`
-	Pricing       []APIConfigTransferPricing     `json:"pricing"`
-	VideoPresets  []APIConfigTransferVideoPreset `json:"video_config_presets"`
+	SchemaVersion    int                                `json:"schema_version"`
+	ExportedAt       time.Time                          `json:"exported_at"`
+	Channels         []APIConfigTransferChannel         `json:"channels"`
+	Pricing          []APIConfigTransferPricing         `json:"pricing"`
+	VideoPresets     []APIConfigTransferVideoPreset     `json:"video_config_presets"`
+	AutoRoutingPools []APIConfigTransferAutoRoutingPool `json:"auto_routing_pools,omitempty"`
 }
 
 type APIConfigTransferChannel struct {
@@ -88,6 +89,22 @@ type APIConfigTransferVideoPreset struct {
 	Config CustomVideoConfig `json:"config"`
 }
 
+type APIConfigTransferAutoRoutingPool struct {
+	Model       string                               `json:"model"`
+	Capability  string                               `json:"capability"`
+	ContractKey string                               `json:"contract_key"`
+	Enabled     bool                                 `json:"enabled"`
+	MaxAttempts int                                  `json:"max_attempts"`
+	Members     []APIConfigTransferAutoRoutingMember `json:"members"`
+}
+
+type APIConfigTransferAutoRoutingMember struct {
+	ChannelRef string `json:"channel_ref"`
+	Model      string `json:"model"`
+	Priority   int    `json:"priority"`
+	Enabled    bool   `json:"enabled"`
+}
+
 type APIConfigTransferChangeStats struct {
 	Create int `json:"create"`
 	Update int `json:"update"`
@@ -95,11 +112,12 @@ type APIConfigTransferChangeStats struct {
 }
 
 type APIConfigTransferStats struct {
-	Channels     APIConfigTransferChangeStats `json:"channels"`
-	Models       APIConfigTransferChangeStats `json:"models"`
-	Pricing      APIConfigTransferChangeStats `json:"pricing"`
-	MergeGroups  APIConfigTransferChangeStats `json:"merge_groups"`
-	VideoPresets APIConfigTransferChangeStats `json:"video_config_presets"`
+	Channels         APIConfigTransferChangeStats `json:"channels"`
+	Models           APIConfigTransferChangeStats `json:"models"`
+	Pricing          APIConfigTransferChangeStats `json:"pricing"`
+	MergeGroups      APIConfigTransferChangeStats `json:"merge_groups"`
+	VideoPresets     APIConfigTransferChangeStats `json:"video_config_presets"`
+	AutoRoutingPools APIConfigTransferChangeStats `json:"auto_routing_pools"`
 }
 
 type APIConfigTransferConflict struct {

@@ -158,14 +158,14 @@ func (h *CreditHandler) EstimateCost(c *gin.Context) {
 	if resolver == nil && h.generateSvc != nil {
 		resolver = h.generateSvc
 	}
+	resolved := service.ResolvedEstimateRoute{Selection: selection, PricingModel: modelName}
 	if resolver != nil {
-		resolved, err := resolver.ResolveChannelRouteForEstimate(claims.TenantID, selection, genType, modelName, fuzzyGroupName)
+		resolved, err = resolver.ResolveChannelRouteForEstimate(claims.TenantID, selection, genType, modelName, fuzzyGroupName)
 		if err != nil {
 			model.Fail(c, 400, err.Error())
 			return
 		}
-		selection = resolved.Selection
-		modelName = resolved.PricingModel
+		selection, modelName = resolved.Selection, resolved.PricingModel
 	}
 	pricingRepo := h.estimatePricingRepo
 	if pricingRepo == nil {
@@ -173,15 +173,6 @@ func (h *CreditHandler) EstimateCost(c *gin.Context) {
 	}
 	if pricingRepo == nil {
 		model.Fail(c, 500, "查询模型计费失败")
-		return
-	}
-	pricing, err := pricingRepo.FindPricing(claims.TenantID, modelName, selection.ChannelID)
-	if err != nil {
-		model.Fail(c, 500, "查询模型计费失败")
-		return
-	}
-	if pricing == nil {
-		model.Fail(c, 403, "该模型未配置计费，暂不可用")
 		return
 	}
 	fields := map[string]interface{}{}
@@ -201,14 +192,42 @@ func (h *CreditHandler) EstimateCost(c *gin.Context) {
 		fields["n"] = count
 	}
 	body, _ := json.Marshal(fields)
-	if genType == "" {
-		if pricing.PricingMode == model.PricingModeVideoDynamic || pricing.UnitType == model.UnitPerVideo || pricing.UnitType == model.UnitPerVideoSecond {
-			genType = "video"
-		} else if pricing.UnitType == model.UnitPerImage {
-			genType = "image"
+	if len(resolved.Candidates) > 0 {
+		minCost, maxCost, pricedCount := 0, 0, 0
+		for _, candidate := range resolved.Candidates {
+			pricing, pricingErr := pricingRepo.FindPricing(claims.TenantID, modelName, candidate.ChannelID)
+			if pricingErr != nil || pricing == nil {
+				continue
+			}
+			cost, costErr := service.CalculateCreditCost(pricing, estimateGenerationType(genType, pricing), "application/json", body)
+			if costErr != nil {
+				continue
+			}
+			pricedCount++
+			if minCost == 0 || cost.TotalCost < minCost {
+				minCost = cost.TotalCost
+			}
+			if cost.TotalCost > maxCost {
+				maxCost = cost.TotalCost
+			}
 		}
+		if maxCost == 0 {
+			model.Fail(c, 403, "智能路由候选未配置有效计费")
+			return
+		}
+		model.OK(c, gin.H{"model": modelName, "pricing_mode": "actual_channel", "total_cost": maxCost, "min_cost": minCost, "max_cost": maxCost, "candidate_count": pricedCount})
+		return
 	}
-	cost, err := service.CalculateCreditCost(pricing, genType, "application/json", body)
+	pricing, err := pricingRepo.FindPricing(claims.TenantID, modelName, selection.ChannelID)
+	if err != nil {
+		model.Fail(c, 500, "查询模型计费失败")
+		return
+	}
+	if pricing == nil {
+		model.Fail(c, 403, "该模型未配置计费，暂不可用")
+		return
+	}
+	cost, err := service.CalculateCreditCost(pricing, estimateGenerationType(genType, pricing), "application/json", body)
 	if err != nil {
 		model.Fail(c, 400, err.Error())
 		return
@@ -220,12 +239,28 @@ func (h *CreditHandler) EstimateCost(c *gin.Context) {
 		"pricing_mode":     pricing.PricingMode,
 		"pricing_rule":     pricing.PricingRule,
 		"total_cost":       cost.TotalCost,
+		"min_cost":         cost.TotalCost,
+		"max_cost":         cost.TotalCost,
+		"candidate_count":  1,
 		"unit_cost":        cost.UnitCost,
 		"units":            cost.Units,
 		"seconds":          cost.Seconds,
 		"resolution":       cost.Resolution,
 		"formula":          cost.Formula,
 	})
+}
+
+func estimateGenerationType(value string, pricing *model.CreditPricing) string {
+	if strings.TrimSpace(value) != "" {
+		return value
+	}
+	if pricing.PricingMode == model.PricingModeVideoDynamic || pricing.UnitType == model.UnitPerVideo || pricing.UnitType == model.UnitPerVideoSecond {
+		return "video"
+	}
+	if pricing.UnitType == model.UnitPerImage {
+		return "image"
+	}
+	return value
 }
 
 // ComparePricingResponse is returned by ComparePricing.
@@ -281,6 +316,12 @@ func parseUintQuery(value string) uint {
 }
 
 func parseEstimateChannelSelection(c *gin.Context, fuzzyGroupName string) (service.ChannelSelection, error) {
+	if poolID := parseUintQuery(c.Query("routing_pool_id")); poolID > 0 {
+		if fuzzyGroupName != "" || parseUintQuery(c.Query("channel_model_id")) > 0 {
+			return service.ChannelSelection{}, errors.New("智能路由参数无效")
+		}
+		return service.ChannelSelection{Kind: service.ModelSelectionAuto, AutoRoutingPoolID: poolID}, nil
+	}
 	rawChannelID, exists := c.GetQuery("channel_id")
 	if !exists || strings.TrimSpace(rawChannelID) == "" {
 		return service.ChannelSelection{}, errors.New("请指定有效的渠道")
@@ -304,10 +345,7 @@ func parseEstimateChannelSelection(c *gin.Context, fuzzyGroupName string) (servi
 		return selection, nil
 	}
 	if selection.ChannelID == 0 {
-		if selection.ChannelModelID != 0 {
-			return service.ChannelSelection{}, errors.New("Auto 渠道参数无效")
-		}
-		return selection, nil
+		return service.ChannelSelection{}, errors.New("请选择有效的智能路由池")
 	}
 	if selection.ChannelModelID == 0 {
 		return service.ChannelSelection{}, errors.New("请选择有效的渠道模型")

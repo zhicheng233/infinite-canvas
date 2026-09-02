@@ -9,7 +9,9 @@
         "start": "next start",
         "format": "prettier --write .",
         "format:check": "prettier --check .",
-        "test": "bun test"
+        "test": "bun test",
+        "typecheck": "tsc --project tsconfig.json --noEmit",
+        "typecheck:test": "tsc --project tsconfig.test.json --noEmit"
     },
     "dependencies": {
         "@ant-design/icons": "^6.1.1",
@@ -42,6 +44,7 @@
     },
     "devDependencies": {
         "@tailwindcss/postcss": "^4",
+        "@types/bun": "^1.4.0",
         "@types/file-saver": "^2.0.7",
         "@types/node": "^20",
         "@types/react": "19.1.12",

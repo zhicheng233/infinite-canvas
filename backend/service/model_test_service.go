@@ -89,6 +89,9 @@ func (s *GenerateService) TestModel(tenantID, userID uint, input ModelTestInput)
 	if err != nil {
 		return nil, err
 	}
+	if err := validateResolvedRequestProtocol(route, testReq.Generation, testReq.Method, testReq.Path, testReq.ContentType, testReq.Body); err != nil {
+		return nil, err
+	}
 	if _, _, err := s.getRequiredPricing(tenantID, input.ChannelID, testReq.Generation, modelName, testReq.ContentType, testReq.Body); err != nil {
 		s.recordModelFailureWithRoute(tenantID, userID, testReq.Generation, modelName, testReq.Method, testReq.Path, 0, nil, err.Error(), route)
 		return nil, err
@@ -283,7 +286,7 @@ func buildImageModelTestRequest(cfg *model.TenantApiConfig, input ModelTestInput
 			"output_format":   "png",
 		}
 		if hasReferences {
-			payload["image"] = []string{testReferenceImageURL}
+			payload["image"] = modelTestReferenceImages(input.ReferenceCount)
 		}
 		return jsonModelTestRequest("image", route, "/images/generations", payload)
 	case "chat":
@@ -327,6 +330,17 @@ func buildImageModelTestRequest(cfg *model.TenantApiConfig, input ModelTestInput
 	default:
 		return modelTestRequest{}, fmt.Errorf("不支持的图片路由：%s", route)
 	}
+}
+
+func modelTestReferenceImages(count int) interface{} {
+	if count <= 1 {
+		return testReferenceImageURL
+	}
+	items := make([]string, count)
+	for index := range items {
+		items[index] = testReferenceImageURL
+	}
+	return items
 }
 
 func imageEditModelTestRequest(route, modelName, prompt, size string) (modelTestRequest, error) {

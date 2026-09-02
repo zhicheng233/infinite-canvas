@@ -13,11 +13,14 @@ type TempMediaHandler struct {
 	service *service.TempMediaService
 }
 
+const tempMediaMaxRequestBytes = 55 << 20
+
 func NewTempMediaHandler(service *service.TempMediaService) *TempMediaHandler {
 	return &TempMediaHandler{service: service}
 }
 
 func (h *TempMediaHandler) UploadImage(c *gin.Context) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, tempMediaMaxRequestBytes)
 	file, err := c.FormFile("file")
 	if err != nil {
 		model.Fail(c, 400, "请上传媒体文件")

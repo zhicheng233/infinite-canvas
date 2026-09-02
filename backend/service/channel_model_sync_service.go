@@ -126,13 +126,25 @@ func (s *ChannelModelSyncService) Update(id uint, input model.UpdateChannelModel
 		item.Enabled = *input.Enabled
 	}
 	if input.ImageGenerateRoute != nil {
-		item.ImageGenerateRoute = strings.TrimSpace(*input.ImageGenerateRoute)
+		route, routeErr := model.NormalizeImageGenerateRoute(*input.ImageGenerateRoute)
+		if routeErr != nil {
+			return nil, routeErr
+		}
+		item.ImageGenerateRoute = route
 	}
 	if input.ImageEditRoute != nil {
-		item.ImageEditRoute = strings.TrimSpace(*input.ImageEditRoute)
+		route, routeErr := model.NormalizeImageEditRoute(*input.ImageEditRoute)
+		if routeErr != nil {
+			return nil, routeErr
+		}
+		item.ImageEditRoute = route
 	}
 	if input.VideoRoute != nil {
-		item.VideoRoute = strings.TrimSpace(*input.VideoRoute)
+		route, routeErr := model.NormalizeVideoRoute(*input.VideoRoute)
+		if routeErr != nil {
+			return nil, routeErr
+		}
+		item.VideoRoute = route
 	}
 	if input.VideoDurations != nil {
 		encoded, marshalErr := json.Marshal(input.VideoDurations)

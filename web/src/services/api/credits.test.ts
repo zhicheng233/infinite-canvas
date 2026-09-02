@@ -7,7 +7,7 @@ describe("credit estimate API", () => {
     afterEach(() => jest.restoreAllMocks());
 
     it("forwards the exact channel and channel model identity", async () => {
-        const response = { total_cost: 9 };
+        const response = { model: "same-model", credits_per_unit: 3, unit_type: "per_image", total_cost: 9 };
         const get = jest.spyOn(apiClient, "get").mockResolvedValue({ data: { data: response } });
 
         await expect(estimateCost("same-model", { channel_id: 2, channel_model_id: 22, count: 3 })).resolves.toEqual(response);

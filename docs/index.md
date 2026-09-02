@@ -18,6 +18,8 @@
 - [本地开发](/docs/backend/local-development)
 - [画布数据结构](/docs/backend/canvas-data-structure)
 - [数据库结构](/docs/backend/backend-database)
+- [接口响应约定](/docs/backend/api-response)
+- [架构决策记录](/docs/backend/architecture-decisions)
 
 ## 商务合作
 
@@ -36,6 +38,7 @@
 - [更新日志](/docs/progress/changelog)
 - [待测试](/docs/progress/pending-test)
 - [TODO](/docs/progress/todo)
+- [稳定化治理测试需求](./stabilization-test-requirements.md)
 
 ## 说明
 

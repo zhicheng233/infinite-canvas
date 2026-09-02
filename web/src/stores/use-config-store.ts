@@ -35,6 +35,11 @@ export type ChannelModelOption = {
     videoCustomizable: boolean;
     videoCustomConfig: CustomVideoConfig | null;
     sortOrder: number;
+    autoPoolId?: number;
+    candidateCount?: number;
+    availableCandidateCount?: number;
+    minPrice?: number;
+    maxPrice?: number;
 };
 
 export type LocalAiCredentials = {
@@ -101,9 +106,14 @@ export const CONFIG_STORE_KEY = "infinite-canvas:ai_config_store";
 const LOCAL_AI_CREDENTIALS_KEY = "infinite-canvas:local_ai_credentials";
 export type ModelCapability = "image" | "video" | "text" | "audio";
 export type ModelRouteCapability = "image" | "image_generate" | "image_edit" | "video";
+export type ModelSelection =
+    | { kind: "physical"; channelModelId: number }
+    | { kind: "auto"; poolId: number; model: string }
+    | { kind: "merge"; channelId: number; groupName: string };
 export type ImageRouteMode = "auto" | "generations" | "edits" | "chat" | "banana";
 export type VideoRouteMode = "auto" | "openai" | "veo_json" | "waninter" | "yijia" | "xai" | "newapi" | "seedance" | "binghuo" | "custom";
 const CHANNEL_MODEL_SEPARATOR = "::";
+const AUTO_MODEL_PREFIX = "auto://";
 const IMAGE_ROUTE_VALUES = new Set<string>(["generations", "edits", "chat", "banana"]);
 const VIDEO_ROUTE_VALUES = new Set<string>(["openai", "veo_json", "waninter", "yijia", "xai", "newapi", "seedance", "binghuo", "custom"]);
 
@@ -274,31 +284,45 @@ export function selectedChannelId(config: AiConfig, capability: ModelCapability)
     return config.textChannelId;
 }
 
-export function selectedChannelIdentityForModel(config: AiConfig, value: string): { channelId: number; channelModelId: number } | null {
+export function resolveModelSelection(config: AiConfig, value: string): ModelSelection | null {
     const mergeParsed = parseMergeModelValue(value);
-    if (mergeParsed) return { channelId: mergeParsed.channelId, channelModelId: 0 };
+    if (mergeParsed) return { kind: "merge", channelId: mergeParsed.channelId, groupName: mergeParsed.groupName };
+    const autoParsed = parseAutoModelValue(value);
+    if (autoParsed) return { kind: "auto", poolId: autoParsed.poolId, model: autoParsed.model };
     const decoded = decodeChannelModel(value);
-    if (decoded && decoded.channelId === "0") return { channelId: 0, channelModelId: 0 };
     const selectedModel: ServerChannelModel | null = config.channelModelId ? findChannelModelById(config.channelModelId) : null;
-    if (selectedModel && selectedModel.model_name === modelOptionName(value)) return { channelId: selectedModel.channel_id, channelModelId: selectedModel.id };
+    if (selectedModel && selectedModel.model_name === modelOptionName(value)) return { kind: "physical", channelModelId: selectedModel.id };
     const decodedChannelId = toNullableChannelId(decoded?.channelId);
     const channelModelId = selectedChannelModelId(config, value);
-    if (decodedChannelId && channelModelId) return { channelId: decodedChannelId, channelModelId };
+    if (decodedChannelId && channelModelId) return { kind: "physical", channelModelId };
     const channelId = selectedChannelId(config, capabilityForModel(config, value));
-    // When channelId is 0 (auto routing), return identity without channel_model_id
-    if (channelId === 0) return { channelId: 0, channelModelId: 0 };
-    return channelId && channelModelId ? { channelId, channelModelId } : null;
+    return channelId && channelModelId ? { kind: "physical", channelModelId } : null;
+}
+
+export function selectedChannelIdentityForModel(config: AiConfig, value: string): { channelId: number; channelModelId: number } | null {
+    const selection = resolveModelSelection(config, value);
+    if (!selection) return null;
+    if (selection.kind === "auto") return { channelId: 0, channelModelId: 0 };
+    if (selection.kind === "merge") return { channelId: selection.channelId, channelModelId: 0 };
+    const channelModel = findChannelModelById(selection.channelModelId);
+    return channelModel ? { channelId: channelModel.channel_id, channelModelId: channelModel.id } : null;
 }
 
 export function buildProxyApiUrl(apiBase: string, config: AiConfig, value: string, path: string, routing?: { channelId?: number; channelModelId?: number; routingModel?: string; routingVideoRoute?: string }) {
-    const mergeParsed = parseMergeModelValue(value);
-    if (mergeParsed) {
-        return `${apiBase}/proxy?${new URLSearchParams({ path, channel_id: String(mergeParsed.channelId), fuzzy_group_name: mergeParsed.groupName, routing_model: mergeParsed.groupName }).toString()}`;
+    const selection = resolveModelSelection(config, value);
+    if (selection?.kind === "merge") {
+        return `${apiBase}/proxy?${new URLSearchParams({ path, channel_id: String(selection.channelId), fuzzy_group_name: selection.groupName, routing_model: selection.groupName, routing_capability: capabilityForModel(config, value) }).toString()}`;
     }
     const hasRoutingIdentity = routing?.channelId !== undefined && routing.channelModelId !== undefined;
+    if (selection?.kind === "auto" && !hasRoutingIdentity) {
+        const query = new URLSearchParams({ path, routing_pool_id: String(selection.poolId), routing_model: routing?.routingModel || selection.model, routing_capability: capabilityForModel(config, value) });
+        if (routing?.routingVideoRoute) query.set("routing_video_route", routing.routingVideoRoute);
+        return `${apiBase}/proxy?${query.toString()}`;
+    }
     const identity = hasRoutingIdentity ? { channelId: routing.channelId!, channelModelId: routing.channelModelId! } : selectedChannelIdentityForModel(config, value);
     if (!identity) throw new Error("所选模型已失效，请刷新后重新选择");
     const query = new URLSearchParams({ path, channel_id: String(identity.channelId), channel_model_id: String(identity.channelModelId), routing_model: routing?.routingModel || modelOptionName(value) });
+    query.set("routing_capability", capabilityForModel(config, value));
     if (identity.channelId === 0 && routing?.routingVideoRoute) query.set("routing_video_route", routing.routingVideoRoute);
     return `${apiBase}/proxy?${query.toString()}`;
 }
@@ -321,6 +345,9 @@ function channelIdKey(capability: ModelCapability) {
 
 function capabilityForModel(config: AiConfig, value: string): ModelCapability {
     for (const capability of ["image", "video", "text", "audio"] as ModelCapability[]) {
+        if (defaultModelForCapability(config, capability) === value) return capability;
+    }
+    for (const capability of ["image", "video", "text", "audio"] as ModelCapability[]) {
         if (selectableModelsByCapability(config, capability).includes(value)) return capability;
     }
     const model = modelOptionName(value || "");
@@ -338,8 +365,6 @@ function isAiConfigReady(config: AiConfig, model: string): boolean {
     const local = readLocalAiCredentials();
     return Boolean(model.trim() && local.baseUrl.trim() && local.apiKey.trim());
 }
-
-let latestServerChannels: ModelChannel[] = [];
 
 export const useConfigStore = create<ConfigStore>()(
     persist<ConfigStore, [], [], PersistedConfigState>(
@@ -375,7 +400,6 @@ export const useConfigStore = create<ConfigStore>()(
             setServerChannels: (channels) =>
                 set(() => {
                     const serverChannels = normalizeServerChannels(channels);
-                    latestServerChannels = serverChannels;
                     return { serverChannels };
                 }),
             setServerCatalogLoading: (serverCatalogLoading) => set({ serverCatalogLoading }),
@@ -387,7 +411,6 @@ export const useConfigStore = create<ConfigStore>()(
             },
             invalidateServerCatalogRefresh: () =>
                 set((state) => {
-                    latestServerChannels = [];
                     return {
                         serverCatalogRequestId: state.serverCatalogRequestId + 1,
                         serverChannels: [],
@@ -405,7 +428,6 @@ export const useConfigStore = create<ConfigStore>()(
                     if (requestId !== state.serverCatalogRequestId) return state;
                     const serverChannels = normalizeServerChannels(snapshot.channels.map((channel) => ({ ...channel, videoApiStandard: channel.video_api_standard })));
                     const serverChannelModels = normalizeServerChannelModels(snapshot.channelModels, serverChannels);
-                    latestServerChannels = serverChannels;
                     return {
                         serverChannels,
                         serverChannelModels,
@@ -435,7 +457,6 @@ export const useConfigStore = create<ConfigStore>()(
                     const modelVideoDurations = normalizeModelVideoDurations(catalog.modelVideoDurations, allModels);
                     const modelVideoCustomizable = normalizeModelVideoCustomizable(catalog.modelVideoCustomizable, allModels);
                     const serverChannels = catalog.channels ? normalizeServerChannels(catalog.channels) : state.serverChannels;
-                    latestServerChannels = serverChannels;
                     return {
                         serverChannels,
                         serverCatalogError: null,
@@ -466,7 +487,6 @@ export const useConfigStore = create<ConfigStore>()(
                 set((state) => {
                     const serverChannels = normalizeServerChannels(channels.map((channel) => ({ ...channel, videoApiStandard: channel.video_api_standard })));
                     const serverChannelModels = normalizeServerChannelModels(channelModels, serverChannels);
-                    latestServerChannels = serverChannels;
                     return {
                         serverChannels,
                         serverChannelModels,
@@ -590,6 +610,19 @@ export function encodeChannelModelIdentity(channelId: string | number, channelMo
     return `${channelId}${CHANNEL_MODEL_SEPARATOR}${channelModelId}${CHANNEL_MODEL_SEPARATOR}${model.trim()}`;
 }
 
+export function encodeAutoModel(poolId: number, model: string) {
+    return `${AUTO_MODEL_PREFIX}${poolId}${CHANNEL_MODEL_SEPARATOR}${model.trim()}`;
+}
+
+export function parseAutoModelValue(value: string): { poolId: number; model: string } | null {
+    if (!value.startsWith(AUTO_MODEL_PREFIX)) return null;
+    const separator = value.indexOf(CHANNEL_MODEL_SEPARATOR, AUTO_MODEL_PREFIX.length);
+    if (separator < 0) return null;
+    const poolId = Number(value.slice(AUTO_MODEL_PREFIX.length, separator));
+    const model = value.slice(separator + CHANNEL_MODEL_SEPARATOR.length).trim();
+    return Number.isInteger(poolId) && poolId > 0 && model ? { poolId, model } : null;
+}
+
 export function isChannelModelValue(value: string) {
     return value.includes(CHANNEL_MODEL_SEPARATOR);
 }
@@ -618,6 +651,7 @@ export function parseMergeModelValue(value: string): { channelId: number; groupN
 
 export function modelOptionName(value: string) {
     if (isMergeModelValue(value)) return parseMergeModelValue(value)?.groupName || value;
+    if (value.startsWith(AUTO_MODEL_PREFIX)) return parseAutoModelValue(value)?.model || value;
     return decodeChannelModel(value)?.model || value;
 }
 
@@ -685,11 +719,12 @@ export function imageEditRouteForModel(config: Pick<AiConfig, "modelRoutes">, va
 }
 
 export function videoRouteForModel(config: Pick<AiConfig, "modelRoutes"> & Partial<Pick<AiConfig, "videoChannelId" | "channelModelId">>, value: string) {
+    const channels = useConfigStore.getState().serverChannels;
     const merge = parseMergeModelValue(value);
-    if (merge && latestServerChannels.find((channel) => channel.id === merge.channelId)?.videoApiStandard === "binghuo") return "binghuo";
+    if (merge && channels.find((channel) => channel.id === merge.channelId)?.videoApiStandard === "binghuo") return "binghuo";
     const decoded = decodeChannelModel(value);
     const channelId = toNullableChannelId(decoded?.channelId);
-    if (channelId && latestServerChannels.find((channel) => channel.id === channelId)?.videoApiStandard === "binghuo") return "binghuo";
+    if (channelId && channels.find((channel) => channel.id === channelId)?.videoApiStandard === "binghuo") return "binghuo";
     const explicitRoute = modelRouteForCapability(config, "video", value) as VideoRouteMode;
     if (explicitRoute !== "auto") return explicitRoute;
     if (merge) return resolvedMergeVideoRoute(merge) || "auto";
@@ -713,17 +748,18 @@ export function customVideoConfigForModel(config: Pick<AiConfig, "modelRoutes" |
 }
 
 export function modelOptionLabel(config: AiConfig, value: string) {
+    const channels = useConfigStore.getState().serverChannels;
     const mergeParsed = parseMergeModelValue(value);
     if (mergeParsed) {
-        const channel = latestServerChannels.find((item) => item.id === mergeParsed.channelId);
+        const channel = channels.find((item) => item.id === mergeParsed.channelId);
         return channel ? `${mergeParsed.groupName}（${channel.name}）` : mergeParsed.groupName;
     }
+    const autoParsed = parseAutoModelValue(value);
+    if (autoParsed) return `${autoParsed.model}（智能路由）`;
     const decoded = decodeChannelModel(value);
     if (!decoded) return value;
-    // Auto channel: always show "自动" label regardless of latestServerChannels
-    if (decoded.channelId === "0") return `${decoded.model}（自动）`;
     const channelId = toNullableChannelId(decoded.channelId);
-    const channel = latestServerChannels.find((item) => item.id === channelId);
+    const channel = channels.find((item) => item.id === channelId);
     return channel ? `${decoded.model}（${channel.name}）` : decoded.model;
 }
 
@@ -760,6 +796,7 @@ export function buildChannelModelOptions(
         );
         return (autoChannelModels || [])
             .flatMap((am): ChannelModelOption[] => {
+                if (am.capability !== capability || am.available_count < 1) return [];
                 const candidates = am.channels.filter((channel) => {
                     const model = enabledModels.get(channel.channel_model_id);
                     return (
@@ -769,17 +806,17 @@ export function buildChannelModelOptions(
                         pricing.some((price) => price.model === am.model && (!price.channel_id || price.channel_id === channel.channel_id))
                     );
                 });
-                const bestChannel = candidates.reduce<AutoChannelModelRef | null>((best, curr) => (curr.success_rate > (best?.success_rate ?? -1) ? curr : best), null);
+                const bestChannel = candidates.filter((item) => item.available).reduce<AutoChannelModelRef | null>((best, curr) => (curr.success_rate > (best?.success_rate ?? -1) ? curr : best), null);
                 if (!bestChannel) return [];
                 const bestModel = enabledModels.get(bestChannel.channel_model_id);
                 const price = pricing.find((item) => item.model === am.model && item.channel_id === bestChannel.channel_id) || pricing.find((item) => item.model === am.model && !item.channel_id);
                 if (!price) return [];
                 return [
                     {
-                        value: encodeChannelModelIdentity(0, 0, am.model),
+                        value: encodeAutoModel(am.pool_id, am.model),
                         channelId: 0,
                         channelModelId: 0,
-                        channelName: "自动",
+                        channelName: "智能路由",
                         rawModel: am.model,
                         capability,
                         price,
@@ -792,6 +829,11 @@ export function buildChannelModelOptions(
                         videoCustomizable: capability === "video" ? Boolean(bestModel?.video_customizable) : false,
                         videoCustomConfig: capability === "video" ? customVideoConfigForRoute(effectiveChannelVideoRoute(channels, bestChannel.channel_id, bestModel?.video_route), bestModel?.video_custom_config) : null,
                         sortOrder: 0,
+                        autoPoolId: am.pool_id,
+                        candidateCount: am.member_count,
+                        availableCandidateCount: am.available_count,
+                        minPrice: am.min_price,
+                        maxPrice: am.max_price,
                     },
                 ];
             })
@@ -904,10 +946,11 @@ export function normalizeModelOptionValue(value: string | undefined, _channels: 
 }
 
 export function resolveModelChannel(config: AiConfig, value: string) {
+    const channels = useConfigStore.getState().serverChannels;
     const decoded = decodeChannelModel(value);
     const decodedChannelId = toNullableChannelId(decoded?.channelId);
     const selectedId = decodedChannelId ?? selectedChannelId(config, capabilityForModel(config, value));
-    return latestServerChannels.find((channel) => channel.id === selectedId) || latestServerChannels[0] || createModelChannel({ id: selectedId || 0, name: "默认渠道", enabled: true });
+    return channels.find((channel) => channel.id === selectedId) || channels[0] || createModelChannel({ id: selectedId || 0, name: "默认渠道", enabled: true });
 }
 
 export function resolveModelRequestConfig(config: AiConfig, value: string): AiConfig {
@@ -920,12 +963,12 @@ export function resolveModelRequestConfig(config: AiConfig, value: string): AiCo
         next.channelModelId = null;
         return next;
     }
+    const autoParsed = parseAutoModelValue(selectedValue);
     const decoded = decodeChannelModel(selectedValue);
     const rawModel = modelOptionName(selectedValue);
     const capability = capabilityForModel(config, selectedValue);
 
-    // Auto channel: channel_id=0, no channel_model_id needed, backend handles routing
-    if (decoded?.channelId === "0") {
+    if (autoParsed) {
         const next = { ...config, model: rawModel };
         next[channelIdKey(capability)] = 0;
         next.channelModelId = null;
@@ -1013,17 +1056,18 @@ function resolveChannelModel(channelId: number | null, modelName: string, modelI
 }
 
 function resolvedPhysicalVideoRoute(config: Pick<AiConfig, "modelRoutes"> & Partial<Pick<AiConfig, "videoChannelId" | "channelModelId">>, value: string): VideoRouteMode | "" {
+    const channels = useConfigStore.getState().serverChannels;
     const rawModel = modelOptionName(value).trim();
     if (!rawModel) return "";
     const decoded = decodeChannelModel(value);
     const channelId = toNullableChannelId(decoded?.channelId) ?? toNullableChannelId(config.videoChannelId);
     if (!channelId) return "";
-    const channel = latestServerChannels.find((item) => item.id === channelId);
+    const channel = channels.find((item) => item.id === channelId);
     if (channel?.videoApiStandard === "binghuo") return "binghuo";
     const channelModel = resolveChannelModel(channelId, rawModel, decoded?.channelModelId) || resolveChannelModel(channelId, rawModel, config.channelModelId) || resolveChannelModel(channelId, rawModel);
     if (!channelModel) return "";
     const encoded = encodeChannelModelIdentity(channelModel.channel_id, channelModel.id, channelModel.model_name);
-    const route = (config.modelRoutes?.[modelRouteKey("video", encoded)] || effectiveChannelVideoRoute(latestServerChannels, channelModel.channel_id, channelModel.video_route)) as VideoRouteMode;
+    const route = (config.modelRoutes?.[modelRouteKey("video", encoded)] || effectiveChannelVideoRoute(channels, channelModel.channel_id, channelModel.video_route)) as VideoRouteMode;
     return route === "auto" ? "" : route;
 }
 
@@ -1062,12 +1106,12 @@ function applyChannelScopedSelections(
         const requestedChannelId = normalizeSelectedChannelId(config[channelIdKey(capability)], channels);
         const mergeGroupsForChannel = (channelId: number) => (channelId > 0 ? mergeGroupsByChannel[channelId] : undefined);
         const hasOptions = (channelId: number) => buildChannelModelOptions(channels, models, pricing, metrics, capability, channelId, autoChannelModels, mergeGroupsForChannel(channelId)).length > 0;
-        const channelId = requestedChannelId === 0 ? 0 : requestedChannelId !== null && hasOptions(requestedChannelId) ? requestedChannelId : channels.find((channel) => hasOptions(channel.id))?.id || null;
+        const channelId = requestedChannelId === 0 ? (hasOptions(0) ? 0 : null) : requestedChannelId !== null && hasOptions(requestedChannelId) ? requestedChannelId : channels.find((channel) => hasOptions(channel.id))?.id || null;
         const options = channelId !== null ? buildChannelModelOptions(channels, models, pricing, metrics, capability, channelId, autoChannelModels, mergeGroupsForChannel(channelId)).map((option) => option.value) : [];
         next[channelIdKey(capability)] = channelId;
         next[modelListKey(capability)] = options;
         const current = next[`${capability}Model`];
-        next[`${capability}Model`] = options.includes(current) ? current : options[0] || "";
+        next[`${capability}Model`] = options.includes(current) ? current : channelId === 0 && current ? "" : options[0] || "";
     }
     next.models = Array.from(
         new Set(

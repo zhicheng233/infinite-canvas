@@ -12,8 +12,7 @@ import (
 )
 
 type ChannelStatusService struct {
-	logRepo       *repository.ModelCallLogRepo
-	apiConfigRepo *repository.ApiConfigRepo
+	logRepo *repository.ModelCallLogRepo
 }
 
 type ChannelStatusResponse struct {
@@ -47,8 +46,8 @@ type RecentErrorSummary struct {
 	Count     int       `json:"count"`
 }
 
-func NewChannelStatusService(logRepo *repository.ModelCallLogRepo, apiConfigRepo *repository.ApiConfigRepo) *ChannelStatusService {
-	return &ChannelStatusService{logRepo: logRepo, apiConfigRepo: apiConfigRepo}
+func NewChannelStatusService(logRepo *repository.ModelCallLogRepo) *ChannelStatusService {
+	return &ChannelStatusService{logRepo: logRepo}
 }
 
 func (s *ChannelStatusService) GetChannelStatus(tenantID uint, days int) (*ChannelStatusResponse, error) {
@@ -65,18 +64,14 @@ func (s *ChannelStatusService) GetChannelStatus(tenantID uint, days int) (*Chann
 		return nil, err
 	}
 
-	var cfg *model.TenantApiConfig
-	if s.apiConfigRepo != nil {
-		cfg, _ = s.apiConfigRepo.FindByTenant(tenantID)
-	}
-	models := s.aggregateByModel(logs, cfg, days)
+	models := s.aggregateByModel(logs, days)
 	return &ChannelStatusResponse{
 		Models:    models,
 		UpdatedAt: time.Now(),
 	}, nil
 }
 
-func (s *ChannelStatusService) aggregateByModel(logs []model.ModelCallLog, cfg *model.TenantApiConfig, days int) []ModelChannelStatus {
+func (s *ChannelStatusService) aggregateByModel(logs []model.ModelCallLog, days int) []ModelChannelStatus {
 	modelMap := make(map[string]*modelAggregator)
 	now := time.Now()
 
@@ -84,7 +79,7 @@ func (s *ChannelStatusService) aggregateByModel(logs []model.ModelCallLog, cfg *
 		if strings.TrimSpace(log.Model) == "" {
 			continue
 		}
-		generation := resolveGenerationByApiConfig(cfg, log.Model, log.Generation)
+		generation := strings.TrimSpace(log.Generation)
 		key := fmt.Sprintf("%s|%s", generation, log.Model)
 		if modelMap[key] == nil {
 			modelMap[key] = &modelAggregator{

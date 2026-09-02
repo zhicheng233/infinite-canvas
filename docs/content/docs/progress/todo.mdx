@@ -8,3 +8,7 @@ description: 当前项目后续值得处理的事项
 - 本地 Agent 接入后续：按[本地 Agent 接入规划](/docs/progress/local-agent-integration-plan)把 Claude Code CLI Adapter 升级为 Claude Agent SDK Adapter，并完善工具队列体验。
 - 渠道运营：渠道指标告警、用量追踪、多渠道负载均衡。
 - 支付对接：支付宝/微信/Stripe 积分充值。
+- 生成架构后续：继续把 `GenerateService` 拆为路由解析、请求规划、计费预留、上游执行、结果归一化和记录告警六个可独立测试的组件，并删除迁移期 `/proxy` 与编码模型值入口。
+- 前端状态治理：拆分模型目录、用户偏好和本地凭据，继续从画布大页面提取生成编排、媒体补水、历史记录和持久化控制器。
+- 存储治理：逐表用 Goose 增量迁移替代 `AutoMigrate`，将长期媒体引用收敛为稳定资产 ID，并为关键用户流程补充 Playwright 冒烟测试。
+- 旧配置退役：提供一次性 `TenantApiConfig` 只读导入工具后删除旧表业务入口；当前不得新增对旧模型列表或路由字段的写入。

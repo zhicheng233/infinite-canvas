@@ -64,9 +64,9 @@ describe("credit estimate contract", () => {
     });
 
     it("handles Auto and merge selections explicitly", () => {
-        expect(buildCreditEstimateRequest("0::0::same-model", 1)).toEqual({
+        expect(buildCreditEstimateRequest("auto://9::same-model", 1)).toEqual({
             model: "same-model",
-            params: { count: 1, channel_id: 0 },
+            params: { count: 1, routing_pool_id: 9 },
         });
         expect(buildCreditEstimateRequest("merge://7::gpt-4o", 1)).toEqual({
             model: "gpt-4o",
@@ -93,7 +93,7 @@ describe("credit estimate contract", () => {
     });
 
     it("preserves a nonzero channel-scoped total cost", () => {
-        expect(resolveCreditEstimate({ total_cost: 12, credits_per_unit: 4, unit_type: "per_image" }, 3)).toEqual({ status: "ready", credits: 12 });
+        expect(resolveCreditEstimate({ total_cost: 12, credits_per_unit: 4, unit_type: "per_image" }, 3)).toEqual({ status: "ready", credits: 12, minCredits: 12, candidateCount: 1 });
     });
 
     it("does not display request failures as zero or missing pricing", () => {

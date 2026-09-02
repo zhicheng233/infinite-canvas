@@ -33,9 +33,6 @@ export default function nextConfig(phase: string): NextConfig {
                   ],
               }
             : {}),
-        typescript: {
-            ignoreBuildErrors: true,
-        },
         env: {
             NEXT_PUBLIC_APP_VERSION: localReleaseVersion,
             NEXT_PUBLIC_BUILD_VERSION: buildVersion,

@@ -73,6 +73,8 @@ func newLifecycleFixture(t *testing.T) *lifecycleFixture {
 		&model.CreditTransaction{},
 		&model.CanvasProject{},
 		&model.GenerationRecord{},
+		&model.GenerationJob{},
+		&model.GenerationAttempt{},
 		&model.RechargeOrder{},
 		&model.ModelCallLog{},
 	); err != nil {
@@ -99,7 +101,7 @@ func newLifecycleFixture(t *testing.T) *lifecycleFixture {
 	userHandler := handler.NewUserHandler(userService)
 	gin.SetMode(gin.TestMode)
 	engine := gin.New()
-	Setup(engine, authService, authHandler, nil, userHandler, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	Setup(engine, Dependencies{AuthService: authService, AuthHandler: authHandler, UserHandler: userHandler})
 
 	fixture.router = engine
 	fixture.actor = actor

@@ -31,6 +31,7 @@ const resourceLabels: Record<keyof ApiConfigTransferStats, string> = {
     pricing: "定价",
     merge_groups: "合并组",
     video_config_presets: "视频配置预设",
+    auto_routing_pools: "智能路由池",
 };
 
 export function ApiConfigTransfer({ disabled, onImported }: ApiConfigTransferProps) {

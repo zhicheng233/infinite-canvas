@@ -60,8 +60,8 @@ func TestUserLifecycleRoutes_resetPasswordRejectsWeakSelfForeignAndMissingTarget
 func TestUserLifecycleRoutes_deleteRemovesEveryOwnedRecordInOrder(t *testing.T) {
 	// Given
 	fixture := newLifecycleFixture(t)
-	targetAccountID := fixture.seedOwnedRecords(t, fixture.target)
-	foreignAccountID := fixture.seedOwnedRecords(t, fixture.foreign)
+	targetAccountID, targetRequestID := fixture.seedOwnedRecords(t, fixture.target)
+	foreignAccountID, foreignRequestID := fixture.seedOwnedRecords(t, fixture.foreign)
 	deletedSchemas := fixture.observeDeletes(t, "")
 
 	// When
@@ -71,14 +71,14 @@ func TestUserLifecycleRoutes_deleteRemovesEveryOwnedRecordInOrder(t *testing.T) 
 	if recorder.Code != http.StatusOK || response.Code != 0 {
 		t.Fatalf("delete account status=%d code=%d msg=%q", recorder.Code, response.Code, response.Msg)
 	}
-	wantOrder := []string{"CreditTransaction", "CreditAccount", "CanvasProject", "GenerationRecord", "RechargeOrder", "ModelCallLog", "User"}
+	wantOrder := []string{"CreditTransaction", "CreditAccount", "CanvasProject", "GenerationRecord", "GenerationAttempt", "GenerationJob", "RechargeOrder", "ModelCallLog", "User"}
 	if !reflect.DeepEqual(*deletedSchemas, wantOrder) {
 		t.Fatalf("delete order=%v, want %v", *deletedSchemas, wantOrder)
 	}
-	if got := fixture.countOwnedRecords(t, fixture.target.ID, targetAccountID); got != (lifecycleOwnedCounts{}) {
+	if got := fixture.countOwnedRecords(t, fixture.target.ID, targetAccountID, targetRequestID); got != (lifecycleOwnedCounts{}) {
 		t.Fatalf("target owned rows remain after hard delete: %+v", got)
 	}
-	if got := fixture.countOwnedRecords(t, fixture.foreign.ID, foreignAccountID); got != (lifecycleOwnedCounts{transactions: 1, accounts: 1, projects: 1, generations: 1, recharges: 1, modelLogs: 1, users: 1}) {
+	if got := fixture.countOwnedRecords(t, fixture.foreign.ID, foreignAccountID, foreignRequestID); got != (lifecycleOwnedCounts{transactions: 1, accounts: 1, projects: 1, generations: 1, jobs: 1, attempts: 1, recharges: 1, modelLogs: 1, users: 1}) {
 		t.Fatalf("foreign tenant rows changed: %+v", got)
 	}
 	fixture.login(t, lifecycleLogin{username: fixture.target.Username, password: "TargetPass1", wantCode: http.StatusBadRequest})
@@ -150,8 +150,8 @@ func TestUserLifecycleRoutes_rejectsDeletedActingAdministrator(t *testing.T) {
 	_, response := fixture.request(t, lifecycleRequest{method: http.MethodPut, path: fmt.Sprintf("/backend-api/users/%d/password", fixture.target.ID), token: fixture.actorToken, body: map[string]string{"new_password": "ResetPass2"}})
 
 	// Then
-	if response.Code != http.StatusForbidden {
-		t.Fatalf("deleted acting administrator reset code=%d, want 403", response.Code)
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("deleted acting administrator reset code=%d, want 401", response.Code)
 	}
 	fixture.login(t, lifecycleLogin{username: fixture.target.Username, password: "TargetPass1"})
 }
@@ -159,8 +159,8 @@ func TestUserLifecycleRoutes_rejectsDeletedActingAdministrator(t *testing.T) {
 func TestUserLifecycleRoutes_deleteRollsBackWhenLateStepFails(t *testing.T) {
 	// Given
 	fixture := newLifecycleFixture(t)
-	accountID := fixture.seedOwnedRecords(t, fixture.target)
-	wantCounts := fixture.countOwnedRecords(t, fixture.target.ID, accountID)
+	accountID, requestID := fixture.seedOwnedRecords(t, fixture.target)
+	wantCounts := fixture.countOwnedRecords(t, fixture.target.ID, accountID, requestID)
 	deletedSchemas := fixture.observeDeletes(t, "ModelCallLog")
 
 	// When
@@ -170,11 +170,11 @@ func TestUserLifecycleRoutes_deleteRollsBackWhenLateStepFails(t *testing.T) {
 	if response.Code == 0 {
 		t.Fatal("delete unexpectedly succeeded after forced late failure")
 	}
-	wantAttemptedOrder := []string{"CreditTransaction", "CreditAccount", "CanvasProject", "GenerationRecord", "RechargeOrder", "ModelCallLog"}
+	wantAttemptedOrder := []string{"CreditTransaction", "CreditAccount", "CanvasProject", "GenerationRecord", "GenerationAttempt", "GenerationJob", "RechargeOrder", "ModelCallLog"}
 	if !reflect.DeepEqual(*deletedSchemas, wantAttemptedOrder) {
 		t.Fatalf("attempted delete order=%v, want %v", *deletedSchemas, wantAttemptedOrder)
 	}
-	if got := fixture.countOwnedRecords(t, fixture.target.ID, accountID); got != wantCounts {
+	if got := fixture.countOwnedRecords(t, fixture.target.ID, accountID, requestID); got != wantCounts {
 		t.Fatalf("late delete failure did not roll back: got %+v want %+v", got, wantCounts)
 	}
 	fixture.login(t, lifecycleLogin{username: fixture.target.Username, password: "TargetPass1"})

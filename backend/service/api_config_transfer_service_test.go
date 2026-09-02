@@ -94,6 +94,46 @@ func TestAPIConfigTransferExportIncludesRoutesPricingPresetsAndDecryptedKey(t *t
 	}
 }
 
+func TestAPIConfigTransferRoundTripsAutoRoutingPools(t *testing.T) {
+	encryptedKey, err := crypto.Encrypt("app-key", "sk-route")
+	if err != nil {
+		t.Fatal(err)
+	}
+	channels := []model.Channel{
+		{BaseModel: model.BaseModel{ID: 1}, Name: "Channel A", BaseUrl: "https://a.example.com", ApiKey: encryptedKey, Enabled: true},
+		{BaseModel: model.BaseModel{ID: 2}, Name: "Channel B", BaseUrl: "https://b.example.com", ApiKey: encryptedKey, Enabled: true},
+	}
+	models := []model.ChannelModel{
+		{BaseModel: model.BaseModel{ID: 11}, ChannelID: 1, ModelName: "shared-image", Capabilities: `["image"]`, Enabled: true, ImageGenerateRoute: "generations", ImageEditRoute: "edits"},
+		{BaseModel: model.BaseModel{ID: 22}, ChannelID: 2, ModelName: "shared-image", Capabilities: `["image"]`, Enabled: true, ImageGenerateRoute: "generations", ImageEditRoute: "edits"},
+	}
+	contract, err := autoRoutingContract(&channels[0], &models[0], "image")
+	if err != nil {
+		t.Fatal(err)
+	}
+	data := &repository.APIConfigTransferData{
+		Channels: channels,
+		Models:   models,
+		AutoRoutingPools: []model.AutoRoutingPool{{
+			BaseModel: model.BaseModel{ID: 9}, PublicModelName: "shared-image", Capability: "image", ContractKey: contract, Enabled: true, MaxAttempts: 2,
+			Members: []model.AutoRoutingPoolMember{{BaseModel: model.BaseModel{ID: 91}, PoolID: 9, ChannelModelID: 11, Priority: 3, Enabled: true}, {BaseModel: model.BaseModel{ID: 92}, PoolID: 9, ChannelModelID: 22, Enabled: true}},
+		}},
+	}
+	service := NewAPIConfigTransferService(&apiConfigTransferRepoStub{}, "app-key")
+	snapshot, summary, warnings, err := service.buildSnapshot(data)
+	if err != nil {
+		t.Fatalf("build snapshot: %v", err)
+	}
+	if len(warnings) != 0 || summary.AutoRoutingPools.Create != 1 || len(snapshot.AutoRoutingPools) != 1 || len(snapshot.AutoRoutingPools[0].Members) != 2 {
+		t.Fatalf("unexpected exported route pools: snapshot=%#v summary=%#v warnings=%#v", snapshot.AutoRoutingPools, summary.AutoRoutingPools, warnings)
+	}
+
+	plan, result := service.buildImportPlan(1, snapshot, &repository.APIConfigTransferData{})
+	if result.Stats.AutoRoutingPools.Create != 1 || result.Stats.AutoRoutingPools.Skip != 0 || len(plan.AutoRoutingPools) != 1 || len(plan.AutoRoutingPools[0].Members) != 2 {
+		t.Fatalf("unexpected route pool import: result=%#v plan=%#v", result, plan.AutoRoutingPools)
+	}
+}
+
 func TestAPIConfigTransferImportAllowsChannelsToShareBaseURL(t *testing.T) {
 	service := NewAPIConfigTransferService(&apiConfigTransferRepoStub{}, "app-key")
 	snapshot := sharedURLTransferSnapshot()
@@ -250,5 +290,22 @@ func TestAPIConfigTransferImportReturnsApplyFailure(t *testing.T) {
 	envelope, _ := encryptAPIConfigSnapshot(snapshot, "password-123")
 	if _, err := service.Import(0, model.APIConfigTransferImportInput{Password: "password-123", Envelope: envelope}); err == nil {
 		t.Fatal("apply failure should be returned")
+	}
+}
+
+func TestAPIConfigTransferRejectsUnknownModelRoutes(t *testing.T) {
+	base := model.APIConfigTransferModel{ModelName: "route-model", Capabilities: []string{"image", "video"}, VideoDurations: []int{}}
+	for name, mutate := range map[string]func(*model.APIConfigTransferModel){
+		"image generation": func(item *model.APIConfigTransferModel) { item.ImageGenerateRoute = "unknown" },
+		"image edit":       func(item *model.APIConfigTransferModel) { item.ImageEditRoute = "unknown" },
+		"video":            func(item *model.APIConfigTransferModel) { item.VideoRoute = "unknown" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			item := base
+			mutate(&item)
+			if _, err := transferModelToRecord(&item); err == nil {
+				t.Fatal("unknown imported route was accepted")
+			}
+		})
 	}
 }

@@ -33,7 +33,6 @@ type Claims struct {
 }
 
 type RegisterInput struct {
-	TenantName    string `json:"tenant_name"`
 	Username      string `json:"username"`
 	Password      string `json:"password"`
 	CaptchaID     string `json:"captcha_id"`
@@ -294,7 +293,7 @@ func (s *AuthService) generateToken(user *model.User) (string, error) {
 func (s *AuthService) ParseToken(tokenStr string) (*Claims, error) {
 	token, err := jwt.ParseWithClaims(tokenStr, &Claims{}, func(t *jwt.Token) (interface{}, error) {
 		return []byte(s.cfg.JWTKey), nil
-	})
+	}, jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}))
 	if err != nil || !token.Valid {
 		return nil, errors.New("无效的令牌")
 	}
@@ -303,4 +302,18 @@ func (s *AuthService) ParseToken(tokenStr string) (*Claims, error) {
 		return nil, errors.New("无效的令牌声明")
 	}
 	return claims, nil
+}
+
+func (s *AuthService) ValidateClaims(claims *Claims) error {
+	if claims == nil || s.userRepo == nil {
+		return errors.New("无效的令牌声明")
+	}
+	user, err := s.userRepo.FindByID(claims.UserID)
+	if err != nil || user.Status != model.UserActive {
+		return errors.New("账号不存在或已停用")
+	}
+	if user.TenantID != claims.TenantID || user.Role != claims.Role {
+		return errors.New("账号权限已变更，请重新登录")
+	}
+	return nil
 }

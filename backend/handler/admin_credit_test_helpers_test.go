@@ -148,6 +148,7 @@ func openAdminCreditTestDB(t *testing.T) *gorm.DB {
 		&model.CreditTransaction{},
 		&model.CanvasProject{},
 		&model.GenerationRecord{},
+		&model.GenerationJob{},
 		&model.RechargeOrder{},
 		&model.ModelCallLog{},
 	); err != nil {

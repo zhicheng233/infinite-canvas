@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 
 	"infinite-canvas-server/model"
@@ -21,6 +22,8 @@ func NewCanvasHandler(repo *repository.CanvasRepo) *CanvasHandler {
 
 type canvasSaveRequest struct {
 	ID             string          `json:"id" binding:"required"`
+	SchemaVersion  int             `json:"schema_version"`
+	Revision       uint            `json:"revision"`
 	Title          string          `json:"title" binding:"required"`
 	Nodes          json.RawMessage `json:"nodes"`
 	Connections    json.RawMessage `json:"connections"`
@@ -47,6 +50,7 @@ func (h *CanvasHandler) Save(c *gin.Context) {
 		TenantID:       tenantID,
 		UserID:         userID,
 		ProjectID:      req.ID,
+		SchemaVersion:  req.SchemaVersion,
 		Title:          req.Title,
 		Nodes:          string(req.Nodes),
 		Connections:    string(req.Connections),
@@ -59,12 +63,17 @@ func (h *CanvasHandler) Save(c *gin.Context) {
 		ViewportK:      req.ViewportK,
 	}
 
-	if err := h.repo.Upsert(project); err != nil {
+	saved, err := h.repo.Save(project, req.Revision)
+	if errors.Is(err, repository.ErrCanvasRevisionConflict) {
+		c.JSON(http.StatusConflict, gin.H{"code": 409, "data": saved, "msg": "画布已在其他位置更新，本地内容未覆盖云端版本"})
+		return
+	}
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": err.Error()})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "ok"})
+	c.JSON(http.StatusOK, gin.H{"code": 0, "data": saved, "msg": "ok"})
 }
 
 func (h *CanvasHandler) Load(c *gin.Context) {

@@ -1,9 +1,12 @@
+import axios from "axios";
 import apiClient from "./client";
 import type { CanvasProject } from "@/app/(user)/canvas/stores/use-canvas-store";
 import { normalizeCanvasConnections } from "@/app/(user)/canvas/utils/canvas-connections";
 
 type CanvasProjectDTO = {
     project_id: string;
+    schema_version: number;
+    revision: number;
     title: string;
     nodes: unknown;
     connections: unknown;
@@ -38,6 +41,8 @@ function safeParse<T>(raw: unknown, fallback: T): T {
 function dtoToProject(dto: CanvasProjectDTO): CanvasProject {
     return {
         id: dto.project_id,
+        schemaVersion: dto.schema_version || 1,
+        revision: dto.revision || 0,
         title: dto.title,
         createdAt: dto.created_at,
         updatedAt: dto.updated_at,
@@ -58,6 +63,8 @@ function dtoToProject(dto: CanvasProjectDTO): CanvasProject {
 function projectToSavePayload(project: CanvasProject) {
     return {
         id: project.id,
+        schema_version: project.schemaVersion,
+        revision: project.revision,
         title: project.title,
         nodes: project.nodes,
         connections: normalizeCanvasConnections(project.connections),
@@ -71,9 +78,23 @@ function projectToSavePayload(project: CanvasProject) {
     };
 }
 
-export async function saveCanvas(project: CanvasProject): Promise<void> {
+export class CanvasConflictError extends Error {
+    constructor(readonly latest: CanvasProject) {
+        super("画布云端版本已更新，本地内容已保留为冲突副本");
+    }
+}
+
+export async function saveCanvas(project: CanvasProject, signal?: AbortSignal): Promise<CanvasProject> {
     const payload = projectToSavePayload(project);
-    await apiClient.post("/canvas/save", payload);
+    try {
+        const response = await apiClient.post<ApiResult<CanvasProjectDTO>>("/canvas/save", payload, { signal });
+        return dtoToProject(response.data.data);
+    } catch (error) {
+        if (axios.isAxiosError<ApiResult<CanvasProjectDTO>>(error) && error.response?.status === 409 && error.response.data.data) {
+            throw new CanvasConflictError(dtoToProject(error.response.data.data));
+        }
+        throw error;
+    }
 }
 
 export async function loadCanvas(id: string): Promise<CanvasProject | null> {

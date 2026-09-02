@@ -105,9 +105,9 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
             >
                 <SelectTrigger
                     className="h-8 min-w-[7rem] max-w-[10rem] justify-start rounded-full border border-input bg-transparent px-3 text-sm shadow-sm"
-                    title={channelId === 0 ? "Auto（自动路由）" : channels.find((channel) => channel.id === channelId)?.name || "选择渠道"}
+                    title={channelId === 0 ? "智能路由" : channels.find((channel) => channel.id === channelId)?.name || "选择渠道"}
                 >
-                    <span className="truncate">{channelId === 0 ? "Auto（自动路由）" : channels.find((channel) => channel.id === channelId)?.name || "选择渠道"}</span>
+                    <span className="truncate">{channelId === 0 ? "智能路由" : channels.find((channel) => channel.id === channelId)?.name || "选择渠道"}</span>
                 </SelectTrigger>
                 <SelectContent className="z-[1200] max-w-[calc(100vw-24px)]" position="popper" align="start" side="bottom" sideOffset={6}>
                     {channels.length || hasAutoOptions ? (
@@ -116,7 +116,7 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
                                 <SelectItem key="auto" value="0">
                                     <span className="flex items-center gap-2">
                                         <SwapOutlined style={{ color: "#1677ff" }} />
-                                        <span>Auto（自动路由）</span>
+                                        <span>智能路由</span>
                                     </span>
                                 </SelectItem>
                             ) : null}
@@ -151,7 +151,12 @@ function ModelLabel({ config, model, capability }: { config: AiConfig; model: st
         <span className="flex min-w-0 items-center gap-2" data-channel-model-id={option?.channelModelId}>
             <ModelIcon model={model} />
             <span className="min-w-0 flex-1 truncate">{modelOptionLabel(config, model)}</span>
-            {isMerge ? (
+            {option?.autoPoolId ? (
+                <span className="shrink-0 text-right text-xs text-muted-foreground">
+                    <span className="block">{Math.round(option.successRate || 0)}% · {option.availableCandidateCount === 1 ? "仅 1 条可用" : `${option.availableCandidateCount}/${option.candidateCount} 条可用`}</span>
+                    {option.maxPrice ? <span className="block">{option.minPrice && option.minPrice !== option.maxPrice ? `${option.minPrice}-${option.maxPrice}` : option.maxPrice} 积分</span> : null}
+                </span>
+            ) : isMerge ? (
                 <span className="shrink-0 rounded border border-border/50 px-1.5 py-0.5 text-[10px] font-medium leading-none text-muted-foreground">合并</span>
             ) : option && option.successRate !== null ? (
                 <span className="shrink-0 text-xs font-medium" style={{ color: `hsl(${option.successRate * 1.2}, 80%, 45%)` }}>

@@ -1,0 +1,43 @@
+---
+title: 接口响应约定
+description: 后端业务响应、生成请求标识和冲突响应约定
+---
+
+# 接口响应约定
+
+业务接口统一返回：
+
+```json
+{
+  "code": 0,
+  "data": {},
+  "msg": "ok"
+}
+```
+
+- `code = 0` 表示成功；失败时使用稳定的业务或 HTTP 对应代码。
+- `data` 保存结构化结果；列表为空时返回空数组，不返回 `null`。
+- `msg` 是面向用户的简短中文消息。供应商原始响应只进入脱敏日志，不作为成功结果结构。
+- HTTP 状态码仍表达传输语义，例如参数错误 400、未认证 401、无权限 403、冲突 409、旧入口停用 410、请求过大 413。
+
+生成代理成功响应可附带以下响应头：
+
+- `X-Generation-Request-ID`：关联 `generation_jobs`、积分流水、尝试审计和异步退款。
+- `X-Resolved-Channel-ID` / `X-Resolved-Channel-Model-ID` / `X-Resolved-Channel-Name`：本次实际命中的物理渠道快照。
+- `X-Credits-Cost` / `X-Credits-Balance` / `X-Credits-Refund`：实际结算费用、结算后余额和本次退回的预留差额。
+
+智能路由或合并组解析后也只返回实际物理渠道，不返回下一次可重新推断的虚拟渠道。异步任务客户端必须保存创建响应中的物理渠道标识，后续轮询和下载使用该标识。
+
+`GET /credits/estimate` 对智能路由返回 `pricing_mode = "actual_channel"`、`min_cost`、`max_cost` 和 `candidate_count`；`total_cost` 等于请求开始时需要预留的 `max_cost`。普通物理渠道的最小、最大和总费用相同，候选数为 1。
+
+画布保存发生乐观锁冲突时返回 HTTP 409：
+
+```json
+{
+  "code": 409,
+  "data": { "project_id": "...", "revision": 3 },
+  "msg": "画布已在其他位置更新，本地内容未覆盖云端版本"
+}
+```
+
+客户端必须保留本地内容并让用户看到冲突状态，不得用响应中的云端项目静默覆盖未保存修改。

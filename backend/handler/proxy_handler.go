@@ -3,6 +3,7 @@ package handler
 import (
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -13,6 +14,8 @@ type ProxyHandler struct {
 	generateService *service.GenerateService
 }
 
+const proxyMaxRequestBytes = 64 << 20
+
 func NewProxyHandler(generateService *service.GenerateService) *ProxyHandler {
 	return &ProxyHandler{generateService: generateService}
 }
@@ -20,14 +23,19 @@ func NewProxyHandler(generateService *service.GenerateService) *ProxyHandler {
 func (h *ProxyHandler) Proxy(c *gin.Context) {
 	claims := c.MustGet("claims").(*service.Claims)
 	targetPath := c.Query("path")
-	if targetPath == "" {
+	if !validProxyPath(targetPath) {
 		c.JSON(http.StatusOK, gin.H{"code": 400, "msg": "path is required"})
 		return
 	}
 
 	method := c.Request.Method
 	contentType := c.GetHeader("Content-Type")
-	body, _ := io.ReadAll(c.Request.Body)
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, proxyMaxRequestBytes)
+	body, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		c.JSON(http.StatusRequestEntityTooLarge, gin.H{"code": 413, "msg": "请求内容过大"})
+		return
+	}
 
 	result, err := h.generateService.ProxyRawWithRepair(claims.TenantID, claims.UserID, method, targetPath, contentType, body, channelSelectionFromRequest(c))
 	if err != nil {
@@ -57,7 +65,7 @@ func (h *ProxyHandler) Proxy(c *gin.Context) {
 func (h *ProxyHandler) ProxyGet(c *gin.Context) {
 	claims := c.MustGet("claims").(*service.Claims)
 	targetPath := c.Query("path")
-	if targetPath == "" {
+	if !validProxyPath(targetPath) {
 		c.JSON(http.StatusOK, gin.H{"code": 400, "msg": "path is required"})
 		return
 	}
@@ -84,6 +92,23 @@ func (h *ProxyHandler) ProxyGet(c *gin.Context) {
 	respContentType = proxyResponseContentType(respContentType, result.Body)
 	c.Header("Content-Type", respContentType)
 	c.Data(result.StatusCode, respContentType, result.Body)
+}
+
+func validProxyPath(value string) bool {
+	value = strings.TrimSpace(value)
+	if value == "" || strings.Contains(value, "\\") || strings.Contains(value, "://") {
+		return false
+	}
+	parsed, err := url.ParseRequestURI(value)
+	if err != nil || parsed.IsAbs() || parsed.Host != "" {
+		return false
+	}
+	for _, part := range strings.Split(parsed.Path, "/") {
+		if part == ".." {
+			return false
+		}
+	}
+	return strings.HasPrefix(parsed.Path, "/")
 }
 
 func (h *ProxyHandler) ProxyGetPath(c *gin.Context) {

@@ -47,7 +47,7 @@ func TestEstimateCostPricesResolvedChannelAndPrefersExactPricing(t *testing.T) {
 		},
 	}}
 	handler := &CreditHandler{estimatePricingRepo: pricing, estimateRouteResolver: fakeEstimateRouteResolver{resolved: service.ResolvedEstimateRoute{Selection: service.ChannelSelection{ChannelID: 2, ChannelModelID: 22}, PricingModel: "same-model"}}}
-	ctx, recorder := estimateContext("/credits/estimate?model=same-model&type=image&count=2&channel_id=0")
+	ctx, recorder := estimateContext("/credits/estimate?model=same-model&type=image&count=2&channel_id=2&channel_model_id=22")
 
 	handler.EstimateCost(ctx)
 
@@ -106,6 +106,39 @@ func TestEstimateCostMissingPricingReturnsStructuredError(t *testing.T) {
 	}
 	if response.Code != 403 || response.Msg != "该模型未配置计费，暂不可用" {
 		t.Fatalf("unexpected response: %s", recorder.Body.String())
+	}
+}
+
+func TestEstimateCostAutoReturnsPriceRangeAndMaximumReservation(t *testing.T) {
+	pricing := &fakeEstimatePricingReader{items: map[string]map[uint]*model.CreditPricing{
+		"same-model": {
+			1: {Model: "same-model", ChannelID: 1, CreditsPerUnit: 3, UnitType: model.UnitPerImage},
+			2: {Model: "same-model", ChannelID: 2, CreditsPerUnit: 7, UnitType: model.UnitPerImage},
+		},
+	}}
+	handler := &CreditHandler{estimatePricingRepo: pricing, estimateRouteResolver: fakeEstimateRouteResolver{resolved: service.ResolvedEstimateRoute{
+		Selection: service.ChannelSelection{Kind: service.ModelSelectionAuto, AutoRoutingPoolID: 9}, PricingModel: "same-model",
+		Candidates: []service.ChannelSelection{{ChannelID: 1, ChannelModelID: 11}, {ChannelID: 2, ChannelModelID: 22}},
+	}}}
+	ctx, recorder := estimateContext("/credits/estimate?model=same-model&type=image&count=2&routing_pool_id=9")
+
+	handler.EstimateCost(ctx)
+
+	var response struct {
+		Code int `json:"code"`
+		Data struct {
+			PricingMode    string `json:"pricing_mode"`
+			TotalCost      int    `json:"total_cost"`
+			MinCost        int    `json:"min_cost"`
+			MaxCost        int    `json:"max_cost"`
+			CandidateCount int    `json:"candidate_count"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response.Code != 0 || response.Data.PricingMode != "actual_channel" || response.Data.MinCost != 6 || response.Data.MaxCost != 14 || response.Data.TotalCost != 14 || response.Data.CandidateCount != 2 {
+		t.Fatalf("unexpected Auto estimate: %s", recorder.Body.String())
 	}
 }
 

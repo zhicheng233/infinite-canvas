@@ -14,6 +14,8 @@ type GenerateHandler struct {
 	generateService *service.GenerateService
 }
 
+const generationMaxRequestBytes = 64 << 20
+
 func NewGenerateHandler(generateService *service.GenerateService) *GenerateHandler {
 	return &GenerateHandler{generateService: generateService}
 }
@@ -39,9 +41,10 @@ type proxyFunc func(tenantID, userID uint, contentType string, body []byte, sele
 func (h *GenerateHandler) handleProxy(c *gin.Context, fn proxyFunc) {
 	claims := c.MustGet("claims").(*service.Claims)
 	contentType := c.GetHeader("Content-Type")
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, generationMaxRequestBytes)
 	body, err := io.ReadAll(c.Request.Body)
 	if err != nil {
-		c.JSON(http.StatusOK, gin.H{"code": 500, "msg": "failed to read body"})
+		c.JSON(http.StatusRequestEntityTooLarge, gin.H{"code": 413, "msg": "请求内容过大"})
 		return
 	}
 
@@ -91,20 +94,37 @@ func itoa(n int) string {
 }
 
 func channelSelectionFromRequest(c *gin.Context) service.ChannelSelection {
-	return service.ChannelSelection{
-		ChannelID:      uintQuery(c, "channel_id"),
-		ChannelModelID: uintQuery(c, "channel_model_id"),
-		ModelName:      strings.TrimSpace(c.Query("routing_model")),
-		VideoRoute:     strings.TrimSpace(c.Query("routing_video_route")),
+	selection := service.ChannelSelection{
+		ChannelID:         uintQuery(c, "channel_id"),
+		ChannelModelID:    uintQuery(c, "channel_model_id"),
+		ModelName:         strings.TrimSpace(c.Query("routing_model")),
+		VideoRoute:        strings.TrimSpace(c.Query("routing_video_route")),
+		MergeGroupName:    strings.TrimSpace(c.Query("fuzzy_group_name")),
+		Capability:        strings.TrimSpace(c.Query("routing_capability")),
+		AutoRoutingPoolID: uintQuery(c, "routing_pool_id"),
 	}
+	if selection.MergeGroupName != "" {
+		selection.Kind = service.ModelSelectionMerge
+	} else if selection.AutoRoutingPoolID > 0 {
+		selection.Kind = service.ModelSelectionAuto
+	} else if selection.ChannelID > 0 || selection.ChannelModelID > 0 {
+		selection.Kind = service.ModelSelectionPhysical
+	}
+	return selection
 }
 
 func writeResolvedChannelHeaders(c *gin.Context, result *service.ProxyResult) {
+	if result.RequestID != "" {
+		c.Header("X-Generation-Request-ID", result.RequestID)
+	}
 	if result.ResolvedChannelID > 0 {
 		c.Header("X-Resolved-Channel-ID", itoa(int(result.ResolvedChannelID)))
 	}
 	if result.ResolvedChannelModelID > 0 {
 		c.Header("X-Resolved-Channel-Model-ID", itoa(int(result.ResolvedChannelModelID)))
+	}
+	if result.ResolvedChannelName != "" {
+		c.Header("X-Resolved-Channel-Name", result.ResolvedChannelName)
 	}
 }
 
@@ -123,6 +143,8 @@ func shouldCopyProxyHeader(key string) bool {
 	switch http.CanonicalHeaderKey(key) {
 	case "Connection", "Keep-Alive", "Proxy-Authenticate", "Proxy-Authorization", "Te", "Trailer", "Transfer-Encoding", "Upgrade",
 		"Content-Length", "Content-Encoding",
+		"X-Credits-Cost", "X-Credits-Balance", "X-Credits-Refund", "X-Generation-Request-Id",
+		"X-Resolved-Channel-Id", "X-Resolved-Channel-Model-Id", "X-Resolved-Channel-Name",
 		"Access-Control-Allow-Origin", "Access-Control-Allow-Methods", "Access-Control-Allow-Headers", "Access-Control-Expose-Headers",
 		"Access-Control-Allow-Credentials", "Access-Control-Max-Age":
 		return false

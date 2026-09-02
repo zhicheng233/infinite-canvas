@@ -4,11 +4,9 @@ import type { ReactTestRenderer } from "react-test-renderer";
 import { act, create } from "react-test-renderer";
 
 import type { UserWithBalance } from "@/services/api/admin";
-import { deleteUser, form, listUsersWithBalance, message, MockButton, MockModalComponent, MockSearch, MockTable, resetAdminPageMocks, resetUserPassword, setCurrentUser, takeConfirmation } from "../admin-page-test-mocks";
+import { deleteUser, form, listUsersWithBalance, message, MockButton, MockModalComponent, MockSearch, MockTable, resetAdminPageMocks, resetUserPassword, setCurrentUser, takeConfirmation, type MockUserListResult } from "../admin-page-test-mocks";
 
 Object.defineProperty(globalThis, "IS_REACT_ACT_ENVIRONMENT", { configurable: true, value: true });
-
-type UserListResult = { readonly items: readonly UserWithBalance[]; readonly total: number; readonly page: number; readonly page_size: number; readonly keyword: string };
 
 function deferred<T>() {
     let resolve: (value: T) => void = () => undefined;
@@ -124,8 +122,8 @@ test("user list returns to the previous server-filtered page after deleting its 
 
 test("user list keeps the latest search after an older page response arrives", async () => {
     const renderer = await renderUsersPage();
-    const older = deferred<UserListResult>();
-    const newer = deferred<UserListResult>();
+    const older = deferred<MockUserListResult>();
+    const newer = deferred<MockUserListResult>();
     listUsersWithBalance.mockReset();
     listUsersWithBalance.mockImplementationOnce(() => older.promise).mockImplementationOnce(() => newer.promise);
 
@@ -152,8 +150,8 @@ test("user list keeps the latest search after an older page response arrives", a
 
 test("user list keeps loading until the newest request settles", async () => {
     const renderer = await renderUsersPage();
-    const older = deferred<UserListResult>();
-    const newer = deferred<UserListResult>();
+    const older = deferred<MockUserListResult>();
+    const newer = deferred<MockUserListResult>();
     listUsersWithBalance.mockReset();
     listUsersWithBalance.mockImplementationOnce(() => older.promise).mockImplementationOnce(() => newer.promise);
 
@@ -177,8 +175,8 @@ test("user list keeps loading until the newest request settles", async () => {
 
 test("user list ignores errors from an older request", async () => {
     const renderer = await renderUsersPage();
-    const older = deferred<UserListResult>();
-    const newer = deferred<UserListResult>();
+    const older = deferred<MockUserListResult>();
+    const newer = deferred<MockUserListResult>();
     listUsersWithBalance.mockReset();
     listUsersWithBalance.mockImplementationOnce(() => older.promise).mockImplementationOnce(() => newer.promise);
 

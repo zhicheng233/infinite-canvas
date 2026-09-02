@@ -8,6 +8,7 @@ import { canvasThemes } from "@/lib/canvas-theme";
 import type { CustomVideoConfig } from "@/lib/custom-video-config";
 import { createEmptyCustomVideoMediaState } from "@/lib/custom-video-runtime";
 import { useConfigStore } from "@/stores/use-config-store";
+import type { AiConfig } from "@/stores/use-config-store";
 
 const rangeConfig: CustomVideoConfig = {
     seconds: { enabled: true, key: "seconds", mode: "range", min: 3, max: 10, step: 1, default: 6 },
@@ -117,7 +118,7 @@ describe("custom video settings panel state", () => {
     });
 
     test("routes a custom model without catalog config to the blocking panel", () => {
-        const config = {
+        const config: AiConfig = {
             ...useConfigStore.getState().config,
             model: "custom-video",
             videoModel: "custom-video",
@@ -131,7 +132,7 @@ describe("custom video settings panel state", () => {
     });
 
     test("routes a custom model with catalog config to the dedicated controls", () => {
-        const config = {
+        const config: AiConfig = {
             ...useConfigStore.getState().config,
             model: "custom-video",
             videoModel: "custom-video",

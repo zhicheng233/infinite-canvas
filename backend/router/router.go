@@ -9,7 +9,56 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func Setup(r *gin.Engine, authService *service.AuthService, authHandler *handler.AuthHandler, adminHandler *handler.AdminHandler, userHandler *handler.UserHandler, creditHandler *handler.CreditHandler, generateHandler *handler.GenerateHandler, apiConfigHandler *handler.ApiConfigHandler, videoConfigPresetHandler *handler.VideoConfigPresetHandler, proxyHandler *handler.ProxyHandler, canvasHandler *handler.CanvasHandler, generationRecordHandler *handler.GenerationRecordHandler, rechargeHandler *handler.RechargeHandler, captchaHandler *handler.CaptchaHandler, tempMediaHandler *handler.TempMediaHandler, channelStatusHandler *handler.ChannelStatusHandler, channelHandler *handler.ChannelHandler, channelModelHandler *handler.ChannelModelHandler, metricsHandler *handler.MetricsHandler, webhookHandler *handler.WebhookHandler, mergeGroupHandler *handler.MergeGroupHandler, apiConfigTransferHandler *handler.APIConfigTransferHandler, siteAnnouncementHandler *handler.SiteAnnouncementHandler) {
+type Dependencies struct {
+	AuthService              *service.AuthService
+	AuthHandler              *handler.AuthHandler
+	AdminHandler             *handler.AdminHandler
+	UserHandler              *handler.UserHandler
+	CreditHandler            *handler.CreditHandler
+	GenerateHandler          *handler.GenerateHandler
+	APIConfigHandler         *handler.ApiConfigHandler
+	VideoConfigPresetHandler *handler.VideoConfigPresetHandler
+	ProxyHandler             *handler.ProxyHandler
+	CanvasHandler            *handler.CanvasHandler
+	GenerationRecordHandler  *handler.GenerationRecordHandler
+	RechargeHandler          *handler.RechargeHandler
+	CaptchaHandler           *handler.CaptchaHandler
+	TempMediaHandler         *handler.TempMediaHandler
+	ChannelStatusHandler     *handler.ChannelStatusHandler
+	ChannelHandler           *handler.ChannelHandler
+	ChannelModelHandler      *handler.ChannelModelHandler
+	MetricsHandler           *handler.MetricsHandler
+	WebhookHandler           *handler.WebhookHandler
+	MergeGroupHandler        *handler.MergeGroupHandler
+	APIConfigTransferHandler *handler.APIConfigTransferHandler
+	AutoRoutingHandler       *handler.AutoRoutingHandler
+	SiteAnnouncementHandler  *handler.SiteAnnouncementHandler
+}
+
+func Setup(r *gin.Engine, deps Dependencies) {
+	authService := deps.AuthService
+	authHandler := deps.AuthHandler
+	adminHandler := deps.AdminHandler
+	userHandler := deps.UserHandler
+	creditHandler := deps.CreditHandler
+	generateHandler := deps.GenerateHandler
+	apiConfigHandler := deps.APIConfigHandler
+	videoConfigPresetHandler := deps.VideoConfigPresetHandler
+	proxyHandler := deps.ProxyHandler
+	canvasHandler := deps.CanvasHandler
+	generationRecordHandler := deps.GenerationRecordHandler
+	rechargeHandler := deps.RechargeHandler
+	captchaHandler := deps.CaptchaHandler
+	tempMediaHandler := deps.TempMediaHandler
+	channelStatusHandler := deps.ChannelStatusHandler
+	channelHandler := deps.ChannelHandler
+	channelModelHandler := deps.ChannelModelHandler
+	metricsHandler := deps.MetricsHandler
+	webhookHandler := deps.WebhookHandler
+	mergeGroupHandler := deps.MergeGroupHandler
+	apiConfigTransferHandler := deps.APIConfigTransferHandler
+	autoRoutingHandler := deps.AutoRoutingHandler
+	siteAnnouncementHandler := deps.SiteAnnouncementHandler
 	r.Use(middleware.Cors())
 	healthHandler := handler.NewHealthHandler(config.BuildVersion)
 
@@ -114,6 +163,14 @@ func Setup(r *gin.Engine, authService *service.AuthService, authHandler *handler
 			superAdmin.POST("/admin/api-config/export", apiConfigTransferHandler.Export)
 			superAdmin.POST("/admin/api-config/import/preview", apiConfigTransferHandler.Preview)
 			superAdmin.POST("/admin/api-config/import", apiConfigTransferHandler.Import)
+			if autoRoutingHandler != nil {
+				superAdmin.GET("/admin/auto-routing/suggestions", autoRoutingHandler.Suggestions)
+				superAdmin.GET("/admin/auto-routing/pools", autoRoutingHandler.List)
+				superAdmin.POST("/admin/auto-routing/pools", autoRoutingHandler.Create)
+				superAdmin.PUT("/admin/auto-routing/pools/:id", autoRoutingHandler.Update)
+				superAdmin.PUT("/admin/auto-routing/pools/:id/members/:memberId", autoRoutingHandler.UpdateMember)
+				superAdmin.DELETE("/admin/auto-routing/pools/:id", autoRoutingHandler.Delete)
+			}
 			superAdmin.GET("/admin/metrics-config", metricsHandler.GetConfig)
 			superAdmin.POST("/admin/metrics-config", metricsHandler.SaveConfig)
 			superAdmin.GET("/admin/announcement", siteAnnouncementHandler.AdminGet)
