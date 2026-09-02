@@ -38,6 +38,7 @@ type APIConfigTransferSnapshot struct {
 	ExportedAt       time.Time                          `json:"exported_at"`
 	Channels         []APIConfigTransferChannel         `json:"channels"`
 	Pricing          []APIConfigTransferPricing         `json:"pricing"`
+	PricingRules     []APIConfigTransferPricingRule     `json:"model_pricing_rules,omitempty"`
 	VideoPresets     []APIConfigTransferVideoPreset     `json:"video_config_presets"`
 	AutoRoutingPools []APIConfigTransferAutoRoutingPool `json:"auto_routing_pools,omitempty"`
 }
@@ -52,21 +53,50 @@ type APIConfigTransferChannel struct {
 	NewAPIChannelID  *int                          `json:"new_api_channel_id,omitempty"`
 	MetricsBaseURL   *string                       `json:"metrics_base_url,omitempty"`
 	Remark           string                        `json:"remark,omitempty"`
+	ConfigRevision   uint                          `json:"config_revision,omitempty"`
+	ProtocolDefaults []APIConfigTransferProtocol   `json:"protocol_defaults,omitempty"`
 	Models           []APIConfigTransferModel      `json:"models"`
 	MergeGroups      []APIConfigTransferMergeGroup `json:"merge_groups"`
 }
 
 type APIConfigTransferModel struct {
-	ModelName          string             `json:"model_name"`
-	Capabilities       []string           `json:"capabilities"`
-	Enabled            bool               `json:"enabled"`
-	ImageGenerateRoute string             `json:"image_generate_route"`
-	ImageEditRoute     string             `json:"image_edit_route"`
-	VideoRoute         string             `json:"video_route"`
-	VideoDurations     []int              `json:"video_durations"`
-	VideoCustomizable  bool               `json:"video_customizable"`
-	VideoCustomConfig  *CustomVideoConfig `json:"video_custom_config,omitempty"`
-	SortOrder          int                `json:"sort_order"`
+	ModelName          string                       `json:"model_name"`
+	PublicKey          string                       `json:"public_key,omitempty"`
+	DisplayName        string                       `json:"display_name,omitempty"`
+	UpstreamModelID    string                       `json:"upstream_model_id,omitempty"`
+	Status             string                       `json:"status,omitempty"`
+	DiscoveryStatus    string                       `json:"discovery_status,omitempty"`
+	ConfigRevision     uint                         `json:"config_revision,omitempty"`
+	LegacyUnreviewed   bool                         `json:"legacy_unreviewed,omitempty"`
+	Operations         []APIConfigTransferOperation `json:"operations,omitempty"`
+	Capabilities       []string                     `json:"capabilities"`
+	Enabled            bool                         `json:"enabled"`
+	ImageGenerateRoute string                       `json:"image_generate_route"`
+	ImageEditRoute     string                       `json:"image_edit_route"`
+	VideoRoute         string                       `json:"video_route"`
+	VideoDurations     []int                        `json:"video_durations"`
+	VideoCustomizable  bool                         `json:"video_customizable"`
+	VideoCustomConfig  *CustomVideoConfig           `json:"video_custom_config,omitempty"`
+	SortOrder          int                          `json:"sort_order"`
+}
+
+type APIConfigTransferProtocol struct {
+	Capability    string         `json:"capability"`
+	Operation     string         `json:"operation"`
+	Adapter       string         `json:"adapter"`
+	Config        map[string]any `json:"config,omitempty"`
+	ConfigVersion int            `json:"config_version,omitempty"`
+}
+
+type APIConfigTransferOperation struct {
+	Capability    string         `json:"capability"`
+	Operation     string         `json:"operation"`
+	Enabled       bool           `json:"enabled"`
+	ProtocolMode  string         `json:"protocol_mode"`
+	Adapter       string         `json:"adapter,omitempty"`
+	Config        map[string]any `json:"config,omitempty"`
+	ConfigVersion int            `json:"config_version,omitempty"`
+	ContractKey   string         `json:"contract_key,omitempty"`
 }
 
 type APIConfigTransferPricing struct {
@@ -76,6 +106,19 @@ type APIConfigTransferPricing struct {
 	UnitType       CreditPricingUnit `json:"unit_type"`
 	PricingMode    CreditPricingMode `json:"pricing_mode"`
 	PricingRule    string            `json:"pricing_rule,omitempty"`
+}
+
+type APIConfigTransferPricingRule struct {
+	PublicKey       string            `json:"public_key"`
+	Capability      string            `json:"capability"`
+	Scope           string            `json:"scope"`
+	ChannelRef      string            `json:"channel_ref,omitempty"`
+	UpstreamModelID string            `json:"upstream_model_id,omitempty"`
+	CreditsPerUnit  int               `json:"credits_per_unit"`
+	UnitType        CreditPricingUnit `json:"unit_type"`
+	PricingMode     CreditPricingMode `json:"pricing_mode"`
+	PricingRule     string            `json:"pricing_rule,omitempty"`
+	ConfigRevision  uint              `json:"config_revision,omitempty"`
 }
 
 type APIConfigTransferMergeGroup struct {

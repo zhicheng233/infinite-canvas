@@ -102,12 +102,17 @@ func (s *APIConfigTransferService) prepareImport(tenantID uint, input model.APIC
 }
 
 func (s *APIConfigTransferService) buildSnapshot(data *repository.APIConfigTransferData) (*model.APIConfigTransferSnapshot, model.APIConfigTransferStats, []model.APIConfigTransferConflict, error) {
-	snapshot := &model.APIConfigTransferSnapshot{SchemaVersion: 1, ExportedAt: time.Now().UTC(), Channels: make([]model.APIConfigTransferChannel, 0, len(data.Channels)), Pricing: []model.APIConfigTransferPricing{}, VideoPresets: []model.APIConfigTransferVideoPreset{}, AutoRoutingPools: []model.APIConfigTransferAutoRoutingPool{}}
+	snapshot := &model.APIConfigTransferSnapshot{SchemaVersion: 2, ExportedAt: time.Now().UTC(), Channels: make([]model.APIConfigTransferChannel, 0, len(data.Channels)), Pricing: []model.APIConfigTransferPricing{}, PricingRules: []model.APIConfigTransferPricingRule{}, VideoPresets: []model.APIConfigTransferVideoPreset{}, AutoRoutingPools: []model.APIConfigTransferAutoRoutingPool{}}
 	stats := model.APIConfigTransferStats{}
 	warnings := make([]model.APIConfigTransferConflict, 0)
 	refs := make(map[uint]string, len(data.Channels))
 	channelsByID := make(map[uint]*model.Channel, len(data.Channels))
 	channelIndexes := make(map[uint]int, len(data.Channels))
+	defaultsByChannel := make(map[uint][]model.ChannelProtocolDefault)
+	for index := range data.ProtocolDefaults {
+		item := data.ProtocolDefaults[index]
+		defaultsByChannel[item.ChannelID] = append(defaultsByChannel[item.ChannelID], item)
+	}
 	for index := range data.Channels {
 		item := &data.Channels[index]
 		ref := fmt.Sprintf("channel_%d", index+1)
@@ -125,11 +130,21 @@ func (s *APIConfigTransferService) buildSnapshot(data *repository.APIConfigTrans
 		snapshot.Channels = append(snapshot.Channels, model.APIConfigTransferChannel{
 			Ref: ref, Name: item.Name, BaseURL: item.BaseUrl, APIKey: apiKey, Enabled: item.Enabled,
 			VideoAPIStandard: normalizeChannelVideoAPIStandard(item.VideoAPIStandard), NewAPIChannelID: item.NewApiChannelID,
-			MetricsBaseURL: item.MetricsBaseUrl, Remark: item.Remark, Models: []model.APIConfigTransferModel{}, MergeGroups: []model.APIConfigTransferMergeGroup{},
+			MetricsBaseURL: item.MetricsBaseUrl, Remark: item.Remark, ConfigRevision: item.ConfigRevision,
+			ProtocolDefaults: transferProtocolDefaults(defaultsByChannel[item.ID]), Models: []model.APIConfigTransferModel{}, MergeGroups: []model.APIConfigTransferMergeGroup{},
 		})
 		stats.Channels.Create++
 	}
 	modelsByID := make(map[uint]*model.ChannelModel, len(data.Models))
+	catalogsByID := make(map[uint]*model.CatalogModel, len(data.Catalogs))
+	for index := range data.Catalogs {
+		catalogsByID[data.Catalogs[index].ID] = &data.Catalogs[index]
+	}
+	operationsByModel := make(map[uint][]model.ChannelModelOperation)
+	for index := range data.Operations {
+		item := data.Operations[index]
+		operationsByModel[item.ChannelModelID] = append(operationsByModel[item.ChannelModelID], item)
+	}
 	for index := range data.Models {
 		item := &data.Models[index]
 		if item.DeletedAt.Valid {
@@ -146,8 +161,20 @@ func (s *APIConfigTransferService) buildSnapshot(data *repository.APIConfigTrans
 		if err != nil {
 			return nil, stats, nil, fmt.Errorf("导出模型 %q 失败: %w", item.ModelName, err)
 		}
+		catalog := catalogsByID[item.CatalogModelID]
+		publicKey, displayName := item.ModelName, item.ModelName
+		if catalog != nil {
+			publicKey, displayName = catalog.PublicKey, catalog.DisplayName
+		}
+		upstreamModelID := item.UpstreamModelID
+		if upstreamModelID == "" {
+			upstreamModelID = item.ModelName
+		}
 		snapshot.Channels[channelIndex].Models = append(snapshot.Channels[channelIndex].Models, model.APIConfigTransferModel{
 			ModelName: info.ModelName, Capabilities: info.Capabilities, Enabled: info.Enabled,
+			PublicKey: publicKey, DisplayName: displayName, UpstreamModelID: upstreamModelID, Status: item.Status,
+			DiscoveryStatus: item.DiscoveryStatus, ConfigRevision: item.ConfigRevision, LegacyUnreviewed: item.LegacyUnreviewed,
+			Operations:         transferModelOperations(operationsByModel[item.ID]),
 			ImageGenerateRoute: info.ImageGenerateRoute, ImageEditRoute: info.ImageEditRoute, VideoRoute: info.VideoRoute,
 			VideoDurations: info.VideoDurations, VideoCustomizable: info.VideoCustomizable, VideoCustomConfig: info.VideoCustomConfig, SortOrder: info.SortOrder,
 		})
@@ -177,6 +204,38 @@ func (s *APIConfigTransferService) buildSnapshot(data *repository.APIConfigTrans
 			}
 		}
 		snapshot.Pricing = append(snapshot.Pricing, model.APIConfigTransferPricing{Model: item.Model, ChannelRef: channelRef, CreditsPerUnit: item.CreditsPerUnit, UnitType: item.UnitType, PricingMode: item.PricingMode, PricingRule: item.PricingRule})
+		if len(data.PricingRules) == 0 {
+			stats.Pricing.Create++
+		}
+	}
+	for index := range data.PricingRules {
+		item := &data.PricingRules[index]
+		catalog := catalogsByID[item.CatalogModelID]
+		if catalog == nil {
+			stats.Pricing.Skip++
+			warnings = append(warnings, transferConflict("pricing", fmt.Sprintf("catalog:%d/%s", item.CatalogModelID, item.Capability), "公开模型不存在，已跳过"))
+			continue
+		}
+		output := model.APIConfigTransferPricingRule{PublicKey: catalog.PublicKey, Capability: item.Capability, Scope: item.Scope, CreditsPerUnit: item.CreditsPerUnit, UnitType: item.UnitType, PricingMode: item.PricingMode, PricingRule: item.PricingRule, ConfigRevision: item.ConfigRevision}
+		if item.Scope == model.PricingScopeImplementation {
+			channelModel := modelsByID[item.ScopeID]
+			if channelModel == nil {
+				stats.Pricing.Skip++
+				warnings = append(warnings, transferConflict("pricing", catalog.PublicKey+"/"+item.Capability, "渠道模型覆盖引用无效，已跳过"))
+				continue
+			}
+			output.ChannelRef = refs[channelModel.ChannelID]
+			output.UpstreamModelID = channelModel.UpstreamModelID
+			if output.UpstreamModelID == "" {
+				output.UpstreamModelID = channelModel.ModelName
+			}
+			if output.ChannelRef == "" {
+				stats.Pricing.Skip++
+				warnings = append(warnings, transferConflict("pricing", catalog.PublicKey+"/"+item.Capability, "渠道模型覆盖所属渠道无效，已跳过"))
+				continue
+			}
+		}
+		snapshot.PricingRules = append(snapshot.PricingRules, output)
 		stats.Pricing.Create++
 	}
 	for index := range data.VideoPresets {
@@ -224,7 +283,7 @@ type transferChannelState struct {
 }
 
 func (s *APIConfigTransferService) buildImportPlan(tenantID uint, snapshot *model.APIConfigTransferSnapshot, data *repository.APIConfigTransferData) (*repository.APIConfigTransferApplyPlan, *model.APIConfigTransferResult) {
-	plan := &repository.APIConfigTransferApplyPlan{}
+	plan := &repository.APIConfigTransferApplyPlan{SchemaVersion: snapshot.SchemaVersion}
 	result := &model.APIConfigTransferResult{Conflicts: []model.APIConfigTransferConflict{}}
 	states := make(map[string]transferChannelState, len(snapshot.Channels))
 	targetByKey, targetByName := indexTransferChannels(data.Channels)
@@ -279,6 +338,12 @@ func (s *APIConfigTransferService) buildImportPlan(tenantID uint, snapshot *mode
 		}
 		item.Name, item.BaseUrl, item.Enabled, item.VideoAPIStandard = name, baseURL, input.Enabled, standard
 		item.NewApiChannelID, item.MetricsBaseUrl, item.Remark = input.NewAPIChannelID, input.MetricsBaseURL, input.Remark
+		if !updating && input.ConfigRevision > 0 {
+			item.ConfigRevision = input.ConfigRevision
+		}
+		if item.ConfigRevision == 0 {
+			item.ConfigRevision = 1
+		}
 		if strings.TrimSpace(input.APIKey) != "" {
 			encrypted, encryptErr := crypto.Encrypt(s.encryptKey, strings.TrimSpace(input.APIKey))
 			if encryptErr != nil || len(encrypted) > 500 {
@@ -289,7 +354,17 @@ func (s *APIConfigTransferService) buildImportPlan(tenantID uint, snapshot *mode
 			}
 			item.ApiKey = encrypted
 		}
-		operation := repository.APIConfigTransferChannelOperation{Ref: input.Ref, ExistingID: existingID, Item: item}
+		defaults, defaultsErr := importProtocolDefaults(input.ProtocolDefaults)
+		if defaultsErr != nil {
+			result.Stats.Channels.Skip++
+			result.Conflicts = append(result.Conflicts, transferConflict("channel", identifier, defaultsErr.Error()))
+			states[input.Ref] = transferChannelState{conflict: true}
+			continue
+		}
+		if len(defaults) == 0 {
+			defaults = defaultTransferProtocols()
+		}
+		operation := repository.APIConfigTransferChannelOperation{Ref: input.Ref, ExistingID: existingID, Item: item, Defaults: defaults}
 		plan.Channels = append(plan.Channels, operation)
 		states[input.Ref] = transferChannelState{targetID: existingID}
 		if updating {
@@ -334,7 +409,26 @@ func (s *APIConfigTransferService) buildImportPlan(tenantID uint, snapshot *mode
 			if state.targetID > 0 {
 				existing = currentModels[transferModelKey(state.targetID, item.ModelName)]
 			}
-			operation := repository.APIConfigTransferModelOperation{ChannelRef: channel.Ref, Item: item}
+			publicKey := strings.TrimSpace(input.PublicKey)
+			if publicKey == "" {
+				publicKey = item.ModelName
+			}
+			displayName := strings.TrimSpace(input.DisplayName)
+			if displayName == "" {
+				displayName = publicKey
+			}
+			if len([]rune(publicKey)) > 191 || len([]rune(displayName)) > 200 {
+				result.Stats.Models.Skip++
+				result.Conflicts = append(result.Conflicts, transferConflict("model", identifier, "公开调用键或显示名称超过长度限制"))
+				continue
+			}
+			operations, operationErr := importModelOperations(input.Operations, item)
+			if operationErr != nil {
+				result.Stats.Models.Skip++
+				result.Conflicts = append(result.Conflicts, transferConflict("model", identifier, operationErr.Error()))
+				continue
+			}
+			operation := repository.APIConfigTransferModelOperation{ChannelRef: channel.Ref, Item: item, PublicKey: publicKey, DisplayName: displayName, Operations: operations}
 			if len(existing) > 1 {
 				result.Stats.Models.Skip++
 				result.Conflicts = append(result.Conflicts, transferConflict("model", identifier, "目标环境存在重复模型"))
@@ -387,7 +481,11 @@ func (s *APIConfigTransferService) buildImportPlan(tenantID uint, snapshot *mode
 		}
 	}
 
-	s.addPricingPlan(tenantID, snapshot, data, states, plan, result)
+	if snapshot.SchemaVersion == 1 || len(snapshot.PricingRules) == 0 {
+		s.addPricingPlan(tenantID, snapshot, data, states, plan, result)
+	} else {
+		s.addPricingRulePlan(tenantID, snapshot, data, states, plan, result)
+	}
 	s.addPresetPlan(tenantID, snapshot, data, plan, result)
 	s.addAutoRoutingPlan(snapshot, data, states, plan, result)
 	return plan, result
@@ -538,6 +636,89 @@ func (s *APIConfigTransferService) addPricingPlan(tenantID uint, snapshot *model
 	}
 }
 
+func (s *APIConfigTransferService) addPricingRulePlan(tenantID uint, snapshot *model.APIConfigTransferSnapshot, data *repository.APIConfigTransferData, states map[string]transferChannelState, plan *repository.APIConfigTransferApplyPlan, result *model.APIConfigTransferResult) {
+	counts := make(map[string]int, len(snapshot.PricingRules))
+	for _, item := range snapshot.PricingRules {
+		counts[transferPricingRuleKey(item)]++
+	}
+	currentCatalogs := make(map[string]uint, len(data.Catalogs))
+	for _, item := range data.Catalogs {
+		currentCatalogs[item.PublicKey] = item.ID
+	}
+	currentRules := make(map[string]model.ModelPricingRule, len(data.PricingRules))
+	for _, item := range data.PricingRules {
+		currentRules[fmt.Sprintf("%d\x00%s\x00%s\x00%d", item.CatalogModelID, item.Capability, item.Scope, item.ScopeID)] = item
+	}
+	plannedModels := make(map[string]struct{}, len(plan.Models))
+	for _, item := range plan.Models {
+		upstream := item.Item.UpstreamModelID
+		if upstream == "" {
+			upstream = item.Item.ModelName
+		}
+		plannedModels[item.ChannelRef+"\x00"+upstream] = struct{}{}
+	}
+	for index := range snapshot.PricingRules {
+		input := &snapshot.PricingRules[index]
+		identifier := strings.TrimSpace(input.PublicKey) + "/" + strings.TrimSpace(input.Capability)
+		if counts[transferPricingRuleKey(*input)] > 1 {
+			result.Stats.Pricing.Skip++
+			result.Conflicts = append(result.Conflicts, transferConflict("pricing", identifier, "导入文件内规范化定价重复"))
+			continue
+		}
+		publicKey, capability, scope := strings.TrimSpace(input.PublicKey), strings.TrimSpace(input.Capability), strings.TrimSpace(input.Scope)
+		if publicKey == "" || len([]rune(publicKey)) > 191 || !validAutoCapability(capability) || scope != model.PricingScopeDefault && scope != model.PricingScopeImplementation {
+			result.Stats.Pricing.Skip++
+			result.Conflicts = append(result.Conflicts, transferConflict("pricing", identifier, "公开模型、能力或定价范围无效"))
+			continue
+		}
+		state := transferChannelState{}
+		if scope == model.PricingScopeImplementation {
+			var ok bool
+			state, ok = states[input.ChannelRef]
+			_, modelPlanned := plannedModels[input.ChannelRef+"\x00"+strings.TrimSpace(input.UpstreamModelID)]
+			if !ok || state.conflict || strings.TrimSpace(input.UpstreamModelID) == "" || !modelPlanned {
+				result.Stats.Pricing.Skip++
+				result.Conflicts = append(result.Conflicts, transferConflict("pricing", identifier, "渠道模型覆盖引用不存在或已冲突"))
+				continue
+			}
+		}
+		legacy, err := transferPricingToRecord(tenantID, &model.APIConfigTransferPricing{Model: publicKey, CreditsPerUnit: input.CreditsPerUnit, UnitType: input.UnitType, PricingMode: input.PricingMode, PricingRule: input.PricingRule})
+		if err != nil {
+			result.Stats.Pricing.Skip++
+			result.Conflicts = append(result.Conflicts, transferConflict("pricing", identifier, err.Error()))
+			continue
+		}
+		item := model.ModelPricingRule{TenantID: tenantID, Capability: capability, Scope: scope, CreditsPerUnit: legacy.CreditsPerUnit, UnitType: legacy.UnitType, PricingMode: legacy.PricingMode, PricingRule: legacy.PricingRule, ConfigRevision: input.ConfigRevision}
+		if item.ConfigRevision == 0 {
+			item.ConfigRevision = 1
+		}
+		existing := false
+		catalogID := currentCatalogs[publicKey]
+		if catalogID > 0 {
+			scopeID := uint(0)
+			if scope == model.PricingScopeImplementation && state.targetID > 0 {
+				for _, candidate := range data.Models {
+					upstream := candidate.UpstreamModelID
+					if upstream == "" {
+						upstream = candidate.ModelName
+					}
+					if candidate.ChannelID == state.targetID && upstream == strings.TrimSpace(input.UpstreamModelID) {
+						scopeID = candidate.ID
+						break
+					}
+				}
+			}
+			_, existing = currentRules[fmt.Sprintf("%d\x00%s\x00%s\x00%d", catalogID, capability, scope, scopeID)]
+		}
+		if existing {
+			result.Stats.Pricing.Update++
+		} else {
+			result.Stats.Pricing.Create++
+		}
+		plan.PricingRules = append(plan.PricingRules, repository.APIConfigTransferPricingRuleOperation{ChannelRef: input.ChannelRef, UpstreamModelID: strings.TrimSpace(input.UpstreamModelID), PublicKey: publicKey, Item: item})
+	}
+}
+
 func (s *APIConfigTransferService) addPresetPlan(tenantID uint, snapshot *model.APIConfigTransferSnapshot, data *repository.APIConfigTransferData, plan *repository.APIConfigTransferApplyPlan, result *model.APIConfigTransferResult) {
 	current := make(map[string][]*model.VideoConfigPreset, len(data.VideoPresets))
 	for index := range data.VideoPresets {
@@ -583,7 +764,10 @@ func (s *APIConfigTransferService) addPresetPlan(tenantID uint, snapshot *model.
 }
 
 func transferModelToRecord(input *model.APIConfigTransferModel) (model.ChannelModel, error) {
-	name := strings.TrimSpace(input.ModelName)
+	name := strings.TrimSpace(input.UpstreamModelID)
+	if name == "" {
+		name = strings.TrimSpace(input.ModelName)
+	}
 	if name == "" || len([]rune(name)) > 200 {
 		return model.ChannelModel{}, errors.New("模型名称无效")
 	}
@@ -616,7 +800,29 @@ func transferModelToRecord(input *model.APIConfigTransferModel) (model.ChannelMo
 	if err != nil {
 		return model.ChannelModel{}, err
 	}
-	item := model.ChannelModel{ModelName: name, Capabilities: string(capabilities), Enabled: input.Enabled, ImageGenerateRoute: imageGenerateRoute, ImageEditRoute: imageEditRoute, VideoRoute: videoRoute, VideoDurations: string(durations), VideoCustomizable: input.VideoCustomizable, SortOrder: input.SortOrder}
+	status := strings.TrimSpace(input.Status)
+	if status == "" {
+		if input.Enabled {
+			status = model.ModelStatusActive
+		} else {
+			status = model.ModelStatusDisabled
+		}
+	}
+	if status != model.ModelStatusDraft && status != model.ModelStatusActive && status != model.ModelStatusDisabled {
+		return model.ChannelModel{}, errors.New("模型状态无效")
+	}
+	discoveryStatus := strings.TrimSpace(input.DiscoveryStatus)
+	if discoveryStatus == "" {
+		discoveryStatus = model.DiscoveryStatusPresent
+	}
+	if discoveryStatus != model.DiscoveryStatusPresent && discoveryStatus != model.DiscoveryStatusMissing {
+		return model.ChannelModel{}, errors.New("模型同步状态无效")
+	}
+	revision := input.ConfigRevision
+	if revision == 0 {
+		revision = 1
+	}
+	item := model.ChannelModel{ModelName: name, UpstreamModelID: name, Status: status, DiscoveryStatus: discoveryStatus, ConfigRevision: revision, LegacyUnreviewed: input.LegacyUnreviewed, Capabilities: string(capabilities), Enabled: status == model.ModelStatusActive, ImageGenerateRoute: imageGenerateRoute, ImageEditRoute: imageEditRoute, VideoRoute: videoRoute, VideoDurations: string(durations), VideoCustomizable: input.VideoCustomizable, SortOrder: input.SortOrder}
 	if item.VideoRoute == "custom" {
 		if input.VideoCustomConfig == nil {
 			return model.ChannelModel{}, errors.New("自定义视频路由必须提供配置")
@@ -737,10 +943,128 @@ func decryptAPIConfigSnapshot(envelope model.APIConfigTransferEnvelope, password
 	if err := decoder.Decode(&struct{}{}); err != io.EOF {
 		return nil, errors.New("配置内容格式无效")
 	}
-	if snapshot.SchemaVersion != 1 {
+	if snapshot.SchemaVersion != 1 && snapshot.SchemaVersion != 2 {
 		return nil, errors.New("不支持的配置内容版本")
 	}
 	return &snapshot, nil
+}
+
+func transferProtocolDefaults(items []model.ChannelProtocolDefault) []model.APIConfigTransferProtocol {
+	result := make([]model.APIConfigTransferProtocol, 0, len(items))
+	for _, item := range items {
+		result = append(result, model.APIConfigTransferProtocol{Capability: item.Capability, Operation: item.Operation, Adapter: item.Adapter, Config: decodeConfigMap(item.ConfigJSON), ConfigVersion: item.ConfigVersion})
+	}
+	return result
+}
+
+func transferModelOperations(items []model.ChannelModelOperation) []model.APIConfigTransferOperation {
+	result := make([]model.APIConfigTransferOperation, 0, len(items))
+	for _, item := range items {
+		result = append(result, model.APIConfigTransferOperation{Capability: item.Capability, Operation: item.Operation, Enabled: item.Enabled, ProtocolMode: item.ProtocolMode, Adapter: item.Adapter, Config: decodeConfigMap(item.ConfigJSON), ConfigVersion: item.ConfigVersion, ContractKey: item.ContractKey})
+	}
+	return result
+}
+
+func importProtocolDefaults(items []model.APIConfigTransferProtocol) ([]model.ChannelProtocolDefault, error) {
+	result := make([]model.ChannelProtocolDefault, 0, len(items))
+	seen := make(map[string]struct{}, len(items))
+	for _, item := range items {
+		capability, operation, adapter := strings.TrimSpace(item.Capability), strings.TrimSpace(item.Operation), strings.TrimSpace(item.Adapter)
+		key := capability + "\x00" + operation
+		if !validTransferOperation(capability, operation) || adapter == "" || len([]rune(adapter)) > 50 {
+			return nil, errors.New("渠道协议默认值无效")
+		}
+		if _, ok := seen[key]; ok {
+			return nil, errors.New("渠道协议默认值重复")
+		}
+		seen[key] = struct{}{}
+		encoded, err := json.Marshal(item.Config)
+		if err != nil {
+			return nil, errors.New("渠道协议参数无效")
+		}
+		version := item.ConfigVersion
+		if version <= 0 {
+			version = 1
+		}
+		result = append(result, model.ChannelProtocolDefault{Capability: capability, Operation: operation, Adapter: adapter, ConfigJSON: string(encoded), ConfigVersion: version})
+	}
+	return result, nil
+}
+
+func importModelOperations(items []model.APIConfigTransferOperation, legacy model.ChannelModel) ([]model.ChannelModelOperation, error) {
+	if len(items) == 0 {
+		return legacyTransferOperations(legacy), nil
+	}
+	result := make([]model.ChannelModelOperation, 0, len(items))
+	seen := make(map[string]struct{}, len(items))
+	for _, item := range items {
+		capability, operation, mode := strings.TrimSpace(item.Capability), strings.TrimSpace(item.Operation), strings.TrimSpace(item.ProtocolMode)
+		key := capability + "\x00" + operation
+		if !validTransferOperation(capability, operation) || mode != model.ProtocolModeInherit && mode != model.ProtocolModeOverride {
+			return nil, errors.New("模型操作合同无效")
+		}
+		if _, ok := seen[key]; ok {
+			return nil, errors.New("模型操作合同重复")
+		}
+		seen[key] = struct{}{}
+		adapter := strings.TrimSpace(item.Adapter)
+		if mode == model.ProtocolModeOverride && adapter == "" || len([]rune(adapter)) > 50 {
+			return nil, errors.New("模型覆盖协议无效")
+		}
+		encoded, err := json.Marshal(item.Config)
+		if err != nil {
+			return nil, errors.New("模型协议参数无效")
+		}
+		version := item.ConfigVersion
+		if version <= 0 {
+			version = 1
+		}
+		result = append(result, model.ChannelModelOperation{Capability: capability, Operation: operation, Enabled: item.Enabled, ProtocolMode: mode, Adapter: adapter, ConfigJSON: string(encoded), ConfigVersion: version, ContractKey: strings.TrimSpace(item.ContractKey)})
+	}
+	return result, nil
+}
+
+func defaultTransferProtocols() []model.ChannelProtocolDefault {
+	return []model.ChannelProtocolDefault{
+		{Capability: "image", Operation: "generate", Adapter: "auto", ConfigJSON: "{}", ConfigVersion: 1},
+		{Capability: "image", Operation: "edit", Adapter: "auto", ConfigJSON: "{}", ConfigVersion: 1},
+		{Capability: "video", Operation: "generate", Adapter: "auto", ConfigJSON: "{}", ConfigVersion: 1},
+		{Capability: "text", Operation: "generate", Adapter: "openai", ConfigJSON: "{}", ConfigVersion: 1},
+		{Capability: "audio", Operation: "generate", Adapter: "openai", ConfigJSON: "{}", ConfigVersion: 1},
+	}
+}
+
+func legacyTransferOperations(item model.ChannelModel) []model.ChannelModelOperation {
+	capabilities := channelModelCapabilities(&item)
+	result := make([]model.ChannelModelOperation, 0, len(capabilities)+1)
+	for _, capability := range capabilities {
+		adapters := []struct{ operation, adapter string }{{"generate", ""}}
+		switch capability {
+		case "image":
+			adapters = []struct{ operation, adapter string }{{"generate", item.ImageGenerateRoute}, {"edit", item.ImageEditRoute}}
+		case "video":
+			adapters[0].adapter = item.VideoRoute
+		}
+		for _, adapter := range adapters {
+			entry := model.ChannelModelOperation{Capability: capability, Operation: adapter.operation, Enabled: true, ProtocolMode: model.ProtocolModeInherit, ConfigJSON: "{}", ConfigVersion: 1}
+			if adapter.adapter != "" && adapter.adapter != "auto" {
+				entry.ProtocolMode, entry.Adapter = model.ProtocolModeOverride, adapter.adapter
+			}
+			result = append(result, entry)
+		}
+	}
+	return result
+}
+
+func validTransferOperation(capability, operation string) bool {
+	if capability == "image" {
+		return operation == "generate" || operation == "edit"
+	}
+	return validAutoCapability(capability) && operation == "generate"
+}
+
+func transferPricingRuleKey(item model.APIConfigTransferPricingRule) string {
+	return strings.Join([]string{strings.TrimSpace(item.PublicKey), strings.TrimSpace(item.Capability), strings.TrimSpace(item.Scope), item.ChannelRef, strings.TrimSpace(item.UpstreamModelID)}, "\x00")
 }
 
 func validateTransferPassword(password string) error {

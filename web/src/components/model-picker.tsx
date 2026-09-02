@@ -31,6 +31,7 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
     const serverMetrics = useConfigStore((state) => state.serverMetrics);
     const serverCatalogLoading = useConfigStore((state) => state.serverCatalogLoading);
     const serverCatalogError = useConfigStore((state) => state.serverCatalogError);
+    const modelSelectionMigrationNotice = useConfigStore((state) => state.modelSelectionMigrationNotice);
     const selectCapabilityChannel = useConfigStore((state) => state.selectCapabilityChannel);
 
     useEffect(() => {
@@ -64,7 +65,7 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
                 title={current ? modelOptionLabel(config, current) : placeholder}
             >
                 <ModelIcon model={current} />
-                <span className="canvas-model-picker-text min-w-0 flex-1 truncate text-left">{current ? modelOptionLabel(config, current) : placeholder}</span>
+                <span className="canvas-model-picker-text min-w-0 flex-1 truncate text-left">{current ? modelOptionLabel(config, current) : modelSelectionMigrationNotice || placeholder}</span>
             </SelectTrigger>
             <SelectContent
                 data-canvas-no-zoom
@@ -84,7 +85,7 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
                     ))
                 ) : (
                     <SelectItem value="__empty__" disabled>
-                        {serverCatalogLoading ? "正在加载模型…" : serverCatalogError ? "模型列表加载失败，请稍后重试" : emptyModelLabel(config, capability)}
+                        {serverCatalogLoading ? "正在加载模型…" : serverCatalogError ? "模型列表加载失败，请稍后重试" : modelSelectionMigrationNotice || emptyModelLabel(config, capability)}
                     </SelectItem>
                 )}
             </SelectContent>

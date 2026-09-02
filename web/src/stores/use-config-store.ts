@@ -170,6 +170,7 @@ type ConfigStore = {
     serverMetrics: MetricsResponse | null;
     serverCatalogLoading: boolean;
     serverCatalogError: string | null;
+    modelSelectionMigrationNotice: string | null;
     serverCatalogRequestId: number;
     autoChannelModels: AutoChannelModelInfo[];
     serverMergeGroups: Record<number, MergeGroup[]>;
@@ -377,6 +378,7 @@ export const useConfigStore = create<ConfigStore>()(
             serverMetrics: null,
             serverCatalogLoading: false,
             serverCatalogError: null,
+            modelSelectionMigrationNotice: null,
             serverCatalogRequestId: 0,
             autoChannelModels: [] as AutoChannelModelInfo[],
             serverMergeGroups: {} as Record<number, MergeGroup[]>,
@@ -388,6 +390,7 @@ export const useConfigStore = create<ConfigStore>()(
                         ...state.config,
                         [key]: value,
                     },
+                    modelSelectionMigrationNotice: key === "imageModel" || key === "videoModel" || key === "textModel" || key === "audioModel" ? null : state.modelSelectionMigrationNotice,
                 })),
             updateWebdavConfig: (key, value) =>
                 set((state) => ({
@@ -420,6 +423,7 @@ export const useConfigStore = create<ConfigStore>()(
                         serverMetrics: null,
                         serverCatalogLoading: false,
                         serverCatalogError: null,
+                        modelSelectionMigrationNotice: null,
                         config: clearChannelScopedSelections(state.config),
                     };
                 }),
@@ -428,6 +432,8 @@ export const useConfigStore = create<ConfigStore>()(
                     if (requestId !== state.serverCatalogRequestId) return state;
                     const serverChannels = normalizeServerChannels(snapshot.channels.map((channel) => ({ ...channel, videoApiStandard: channel.video_api_standard })));
                     const serverChannelModels = normalizeServerChannelModels(snapshot.channelModels, serverChannels);
+                    const config = applyChannelScopedSelections(state.config, serverChannels, serverChannelModels, snapshot.pricing, snapshot.metrics, snapshot.autoChannelModels, state.serverMergeGroups);
+                    const invalidSelections = (["image", "video", "text", "audio"] as ModelCapability[]).filter((capability) => Boolean(state.config[`${capability}Model`]) && !config[`${capability}Model`]);
                     return {
                         serverChannels,
                         serverChannelModels,
@@ -436,7 +442,8 @@ export const useConfigStore = create<ConfigStore>()(
                         serverMetrics: snapshot.metrics,
                         serverCatalogLoading: false,
                         serverCatalogError: null,
-                        config: applyChannelScopedSelections(state.config, serverChannels, serverChannelModels, snapshot.pricing, snapshot.metrics, snapshot.autoChannelModels, state.serverMergeGroups),
+                        modelSelectionMigrationNotice: invalidSelections.length ? "部分旧版模型选择无法唯一匹配，请重新选择" : null,
+                        config,
                     };
                 }),
             failServerCatalogRefresh: (requestId, serverCatalogError) => set((state) => (requestId === state.serverCatalogRequestId ? { serverCatalogLoading: false, serverCatalogError } : state)),
@@ -525,7 +532,7 @@ export const useConfigStore = create<ConfigStore>()(
                         next[modelListKey(capability)] = [];
                         next[`${capability}Model`] = "";
                     }
-                    return { config: next };
+                    return { config: next, modelSelectionMigrationNotice: null };
                 }),
             openConfigDialog: (shouldPromptContinue = false) => set({ isConfigOpen: true, shouldPromptContinue }),
             setConfigDialogOpen: (isConfigOpen) => set({ isConfigOpen }),
@@ -1106,12 +1113,14 @@ function applyChannelScopedSelections(
         const requestedChannelId = normalizeSelectedChannelId(config[channelIdKey(capability)], channels);
         const mergeGroupsForChannel = (channelId: number) => (channelId > 0 ? mergeGroupsByChannel[channelId] : undefined);
         const hasOptions = (channelId: number) => buildChannelModelOptions(channels, models, pricing, metrics, capability, channelId, autoChannelModels, mergeGroupsForChannel(channelId)).length > 0;
-        const channelId = requestedChannelId === 0 ? (hasOptions(0) ? 0 : null) : requestedChannelId !== null && hasOptions(requestedChannelId) ? requestedChannelId : channels.find((channel) => hasOptions(channel.id))?.id || null;
+        const current = config[`${capability}Model`];
+        const migrated = resolveCompatibleModelSelection(current, capability, channels, models, pricing, metrics, autoChannelModels, mergeGroupsByChannel);
+        const fallbackChannelId = requestedChannelId === 0 ? (hasOptions(0) ? 0 : null) : requestedChannelId !== null && hasOptions(requestedChannelId) ? requestedChannelId : channels.find((channel) => hasOptions(channel.id))?.id || null;
+        const channelId = migrated?.channelId ?? (current ? requestedChannelId !== null && hasOptions(requestedChannelId) ? requestedChannelId : null : fallbackChannelId);
         const options = channelId !== null ? buildChannelModelOptions(channels, models, pricing, metrics, capability, channelId, autoChannelModels, mergeGroupsForChannel(channelId)).map((option) => option.value) : [];
         next[channelIdKey(capability)] = channelId;
         next[modelListKey(capability)] = options;
-        const current = next[`${capability}Model`];
-        next[`${capability}Model`] = options.includes(current) ? current : channelId === 0 && current ? "" : options[0] || "";
+        next[`${capability}Model`] = migrated && options.includes(migrated.value) ? migrated.value : current ? "" : options[0] || "";
     }
     next.models = Array.from(
         new Set(
@@ -1154,6 +1163,43 @@ function applyChannelScopedSelections(
     }
     next.model = next.imageModel || next.videoModel || next.textModel || next.audioModel || "";
     return next;
+}
+
+export function resolveCompatibleModelSelection(
+    value: string,
+    capability: ModelCapability,
+    channels: ModelChannel[],
+    models: Record<number, ServerChannelModel[]>,
+    pricing: PricingItem[],
+    metrics: MetricsResponse | null,
+    autoChannelModels: AutoChannelModelInfo[],
+    mergeGroupsByChannel: Record<number, MergeGroup[]> = {},
+): { value: string; channelId: number } | null {
+    const current = value.trim();
+    if (!current) return null;
+    const auto = parseAutoModelValue(current);
+    if (auto) {
+        const options = buildChannelModelOptions(channels, models, pricing, metrics, capability, 0, autoChannelModels);
+        return options.some((option) => option.value === current) ? { value: current, channelId: 0 } : null;
+    }
+    const merge = parseMergeModelValue(current);
+    if (merge) {
+        const options = buildChannelModelOptions(channels, models, pricing, metrics, capability, merge.channelId, autoChannelModels, mergeGroupsByChannel[merge.channelId]);
+        return options.some((option) => option.value === current) ? { value: current, channelId: merge.channelId } : null;
+    }
+    const decoded = decodeChannelModel(current);
+    if (decoded) {
+        const channelId = toNullableChannelId(decoded.channelId);
+        if (!channelId) return null;
+        const options = buildChannelModelOptions(channels, models, pricing, metrics, capability, channelId, autoChannelModels, mergeGroupsByChannel[channelId]).filter((option) => !option.autoPoolId && option.rawModel === decoded.model);
+        if (decoded.channelModelId) {
+            const exact = options.find((option) => option.channelModelId === decoded.channelModelId);
+            return exact ? { value: exact.value, channelId } : null;
+        }
+        return options.length === 1 ? { value: options[0].value, channelId } : null;
+    }
+    const matches = channels.flatMap((channel) => buildChannelModelOptions(channels, models, pricing, metrics, capability, channel.id, autoChannelModels, mergeGroupsByChannel[channel.id]).filter((option) => !isMergeModelValue(option.value) && option.rawModel === current));
+    return matches.length === 1 ? { value: matches[0].value, channelId: matches[0].channelId } : null;
 }
 
 function clearChannelScopedSelections(config: AiConfig) {

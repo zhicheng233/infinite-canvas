@@ -71,6 +71,7 @@ func main() {
 	apiConfigTransferRepo := repository.NewAPIConfigTransferRepo(db)
 	siteAnnouncementRepo := repository.NewSiteAnnouncementRepo(db)
 	modelConfigRepo := repository.NewModelConfigRepo(db)
+	apiConfigRepo := repository.NewApiConfigRepo(db)
 
 	captchaService := service.NewCaptchaService()
 
@@ -97,13 +98,17 @@ func main() {
 	mergeGroupService := service.NewMergeGroupService(mergeGroupRepo)
 	apiConfigTransferService := service.NewAPIConfigTransferService(apiConfigTransferRepo, cfg.ApiKeyEncryptKey)
 	modelConfigService := service.NewModelConfigService(modelConfigRepo, channelService, generateService)
+	legacyAPIConfigService := service.NewLegacyAPIConfigService(db)
+	if err := legacyAPIConfigService.MigrateAll(); err != nil {
+		log.Fatalf("failed to migrate legacy API config: %v", err)
+	}
 
 	authHandler := handler.NewAuthHandler(authService, userService)
 	adminHandler := handler.NewAdminHandler(tenantRepo, userRepo, creditService, creditRepo, rechargeRepo, modelCallLogRepo, modelCallLogService)
 	userHandler := handler.NewUserHandler(userService)
 	creditHandler := handler.NewCreditHandler(creditService, creditRepo, generateService, channelModelRepo, channelRepo)
 	generateHandler := handler.NewGenerateHandler(generateService)
-	apiConfigHandler := handler.NewApiConfigHandler(creditRepo, channelModelService, generateService)
+	apiConfigHandler := handler.NewApiConfigHandler(apiConfigRepo, creditRepo, channelModelService, generateService, legacyAPIConfigService, cfg)
 	proxyHandler := handler.NewProxyHandler(generateService)
 	canvasHandler := handler.NewCanvasHandler(canvasRepo)
 	generationRecordHandler := handler.NewGenerationRecordHandler(generationRecordRepo)

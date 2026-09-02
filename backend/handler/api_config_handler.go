@@ -2,18 +2,34 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"sort"
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
+	"infinite-canvas-server/config"
+	"infinite-canvas-server/crypto"
 	"infinite-canvas-server/model"
+	"infinite-canvas-server/repository"
 	"infinite-canvas-server/service"
 )
 
 type ApiConfigHandler struct {
+	apiConfigRepo  apiConfigRepository
 	creditRepo     apiConfigPricingReader
 	channelCatalog apiConfigChannelCatalog
 	generateSvc    *service.GenerateService
+	legacyConfig   legacyAPIConfigWriter
+	cfg            *config.Config
+}
+
+type apiConfigRepository interface {
+	FindByTenant(tenantID uint) (*model.TenantApiConfig, error)
+}
+
+type legacyAPIConfigWriter interface {
+	Save(config *model.TenantApiConfig, actorUserID uint) error
 }
 
 type apiConfigPricingReader interface {
@@ -24,8 +40,8 @@ type apiConfigChannelCatalog interface {
 	ListTenantCatalog(tenantID uint) ([]model.ChannelCatalogItem, error)
 }
 
-func NewApiConfigHandler(creditRepo apiConfigPricingReader, channelCatalog apiConfigChannelCatalog, generateSvc *service.GenerateService) *ApiConfigHandler {
-	return &ApiConfigHandler{creditRepo: creditRepo, channelCatalog: channelCatalog, generateSvc: generateSvc}
+func NewApiConfigHandler(apiConfigRepo *repository.ApiConfigRepo, creditRepo apiConfigPricingReader, channelCatalog apiConfigChannelCatalog, generateSvc *service.GenerateService, legacyConfig *service.LegacyAPIConfigService, cfg *config.Config) *ApiConfigHandler {
+	return &ApiConfigHandler{apiConfigRepo: apiConfigRepo, creditRepo: creditRepo, channelCatalog: channelCatalog, generateSvc: generateSvc, legacyConfig: legacyConfig, cfg: cfg}
 }
 
 type SaveApiConfigInput struct {
@@ -43,6 +59,31 @@ type SaveApiConfigInput struct {
 
 func (h *ApiConfigHandler) Get(c *gin.Context) {
 	claims := c.MustGet("claims").(*service.Claims)
+	if h.apiConfigRepo != nil {
+		cfg, err := h.apiConfigRepo.FindByTenant(claims.TenantID)
+		if err == nil {
+			models, _ := decodeStringList(cfg.Models)
+			imageModels, _ := decodeStringList(cfg.ImageModels)
+			videoModels, _ := decodeStringList(cfg.VideoModels)
+			textModels, _ := decodeStringList(cfg.TextModels)
+			audioModels, _ := decodeStringList(cfg.AudioModels)
+			modelRoutes, _ := decodeStringMap(cfg.ModelRoutes)
+			modelVideoDurations, _ := decodeIntListMap(cfg.ModelVideoDurations)
+			modelVideoCustomizable, _ := decodeBoolMap(cfg.ModelVideoCustomizable)
+			model.OK(c, gin.H{
+				"base_url": cfg.BaseUrl, "has_key": len(cfg.ApiKey) > 0,
+				"models": models, "image_models": imageModels, "video_models": videoModels,
+				"text_models": textModels, "audio_models": audioModels, "model_routes": modelRoutes,
+				"model_video_durations": modelVideoDurations, "model_video_customizable": modelVideoCustomizable,
+				"deprecated": true, "deprecation": "旧版 API 配置将在 v0.6 变为只读，请迁移到模型服务",
+			})
+			return
+		}
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			model.Fail(c, 500, "读取旧版 API 配置失败")
+			return
+		}
+	}
 	channels, err := h.channelCatalog.ListTenantCatalog(claims.TenantID)
 	if err != nil {
 		model.Fail(c, 500, "读取渠道模型失败")
@@ -55,6 +96,7 @@ func (h *ApiConfigHandler) Get(c *gin.Context) {
 		"video_models": summary.byCapability["video"], "text_models": summary.byCapability["text"],
 		"audio_models": summary.byCapability["audio"], "model_routes": map[string]string{},
 		"model_video_durations": map[string][]int{}, "model_video_customizable": map[string]bool{},
+		"deprecated": true, "deprecation": "旧版 API 配置将在 v0.6 变为只读，请迁移到模型服务",
 	})
 }
 
@@ -86,11 +128,92 @@ func (h *ApiConfigHandler) Catalog(c *gin.Context) {
 		"enabled_count":            len(summary.models),
 		"disabled_models":          []string{},
 		"channels":                 channels,
+		"deprecated":               true,
+		"deprecation":              "旧版模型目录读取接口将在后续版本移除",
 	})
 }
 
 func (h *ApiConfigHandler) Save(c *gin.Context) {
-	model.Fail(c, 410, "旧版 API 配置入口已停用，请使用渠道与模型配置")
+	claims := c.MustGet("claims").(*service.Claims)
+	var input SaveApiConfigInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		model.Fail(c, 400, "无效的请求参数")
+		return
+	}
+	if h.apiConfigRepo == nil || h.legacyConfig == nil || h.cfg == nil {
+		model.Fail(c, 500, "旧版 API 配置兼容服务不可用")
+		return
+	}
+	models, err := encodeStringList(input.Models)
+	if err != nil {
+		model.Fail(c, 400, "模型列表格式错误")
+		return
+	}
+	imageModels, err := encodeStringList(input.ImageModels)
+	if err != nil {
+		model.Fail(c, 400, "图片模型列表格式错误")
+		return
+	}
+	videoModels, err := encodeStringList(input.VideoModels)
+	if err != nil {
+		model.Fail(c, 400, "视频模型列表格式错误")
+		return
+	}
+	textModels, err := encodeStringList(input.TextModels)
+	if err != nil {
+		model.Fail(c, 400, "文本模型列表格式错误")
+		return
+	}
+	audioModels, err := encodeStringList(input.AudioModels)
+	if err != nil {
+		model.Fail(c, 400, "音频模型列表格式错误")
+		return
+	}
+	modelRoutes, err := encodeStringMap(input.ModelRoutes)
+	if err != nil {
+		model.Fail(c, 400, "模型路由配置格式错误")
+		return
+	}
+	modelVideoDurations, err := encodeIntListMap(input.ModelVideoDurations)
+	if err != nil {
+		model.Fail(c, 400, "视频时长配置格式错误")
+		return
+	}
+	modelVideoCustomizable, err := encodeBoolMap(input.ModelVideoCustomizable)
+	if err != nil {
+		model.Fail(c, 400, "视频自定义配置格式错误")
+		return
+	}
+
+	existing, _ := h.apiConfigRepo.FindByTenant(claims.TenantID)
+	encryptedKey := ""
+	if strings.TrimSpace(input.ApiKey) == "" {
+		if existing == nil || strings.TrimSpace(existing.ApiKey) == "" {
+			model.Fail(c, 400, "请填写 API Key")
+			return
+		}
+		encryptedKey = existing.ApiKey
+	} else {
+		encryptedKey, err = crypto.Encrypt(h.cfg.ApiKeyEncryptKey, input.ApiKey)
+		if err != nil {
+			model.Fail(c, 500, "加密 API Key 失败")
+			return
+		}
+	}
+	if strings.TrimSpace(input.BaseUrl) == "" {
+		model.Fail(c, 400, "请填写 Base URL")
+		return
+	}
+	cfg := &model.TenantApiConfig{
+		TenantID: claims.TenantID, BaseUrl: strings.TrimRight(strings.TrimSpace(input.BaseUrl), "/"), ApiKey: encryptedKey,
+		Models: models, ImageModels: imageModels, VideoModels: videoModels, TextModels: textModels, AudioModels: audioModels,
+		ModelRoutes: modelRoutes, ModelVideoDurations: modelVideoDurations, ModelVideoCustomizable: modelVideoCustomizable,
+	}
+	if err := h.legacyConfig.Save(cfg, claims.UserID); err != nil {
+		model.Fail(c, 500, err.Error())
+		return
+	}
+	model.OK(c, gin.H{"saved": true, "deprecated": true, "deprecation": "旧版 API 配置将在 v0.6 变为只读，请迁移到模型服务"})
 }
 
 type channelCatalogSummary struct {

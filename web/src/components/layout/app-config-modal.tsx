@@ -26,6 +26,7 @@ export function AppConfigModal() {
     const updateConfig = useConfigStore((state) => state.updateConfig);
     const serverCatalogLoading = useConfigStore((state) => state.serverCatalogLoading);
     const serverCatalogError = useConfigStore((state) => state.serverCatalogError);
+    const modelSelectionMigrationNotice = useConfigStore((state) => state.modelSelectionMigrationNotice);
     const isConfigOpen = useConfigStore((state) => state.isConfigOpen);
     const shouldPromptContinue = useConfigStore((state) => state.shouldPromptContinue);
     const setConfigDialogOpen = useConfigStore((state) => state.setConfigDialogOpen);
@@ -82,7 +83,7 @@ export function AppConfigModal() {
                                         <Form.Item key={group.modelKey} label={group.defaultLabel} className="mb-0">
                                             <ModelPicker config={config} value={config[group.modelKey]} onChange={(model) => updateConfig(group.modelKey, model)} capability={group.capability} fullWidth />
                                             <div className="mt-1 truncate text-xs text-stone-500">
-                                                {serverCatalogLoading ? "正在加载渠道模型…" : serverCatalogError ? `加载失败：${serverCatalogError}` : config[group.modelKey] ? modelOptionName(config[group.modelKey]) : "所选渠道暂无可用模型"}
+                                                {serverCatalogLoading ? "正在加载渠道模型…" : serverCatalogError ? `加载失败：${serverCatalogError}` : config[group.modelKey] ? modelOptionName(config[group.modelKey]) : modelSelectionMigrationNotice || "所选渠道暂无可用模型"}
                                             </div>
                                         </Form.Item>
                                     ))}

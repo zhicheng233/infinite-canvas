@@ -143,6 +143,9 @@ func (r *ModelConfigRepo) SaveModelConfig(input SaveModelConfigParams) error {
 		if err := tx.Unscoped().Where("tenant_id = ? AND scope = ? AND scope_id = ?", input.TenantID, model.PricingScopeImplementation, current.ID).Delete(&model.ModelPricingRule{}).Error; err != nil {
 			return err
 		}
+		if err := tx.Where("tenant_id = ? AND channel_id = ? AND model IN ?", input.TenantID, current.ChannelID, []string{current.ModelName, current.UpstreamModelID, input.UpstreamModelID}).Delete(&model.CreditPricing{}).Error; err != nil {
+			return err
+		}
 		for index := range input.Pricing {
 			input.Pricing[index].TenantID = input.TenantID
 			input.Pricing[index].CatalogModelID = catalog.ID
@@ -150,6 +153,13 @@ func (r *ModelConfigRepo) SaveModelConfig(input SaveModelConfigParams) error {
 			input.Pricing[index].ScopeID = current.ID
 			input.Pricing[index].ConfigRevision = current.ConfigRevision + 1
 			if err := tx.Create(&input.Pricing[index]).Error; err != nil {
+				return err
+			}
+		}
+		if len(input.Pricing) > 0 {
+			pricing := input.Pricing[0]
+			shadow := model.CreditPricing{TenantID: input.TenantID, ChannelID: current.ChannelID, Model: input.UpstreamModelID, CreditsPerUnit: pricing.CreditsPerUnit, UnitType: pricing.UnitType, PricingMode: pricing.PricingMode, PricingRule: pricing.PricingRule}
+			if err := tx.Create(&shadow).Error; err != nil {
 				return err
 			}
 		}
@@ -173,6 +183,28 @@ func (r *ModelConfigRepo) SaveDefaultPricing(tenantID, actorUserID uint, catalog
 		pricing.Scope, pricing.ScopeID = model.PricingScopeDefault, 0
 		if err := tx.Save(&pricing).Error; err != nil {
 			return err
+		}
+		var catalog model.CatalogModel
+		if err := tx.First(&catalog, catalogModelID).Error; err != nil {
+			return err
+		}
+		shadowNames := []string{catalog.PublicKey}
+		var implementations []model.ChannelModel
+		if err := tx.Where("catalog_model_id = ?", catalogModelID).Find(&implementations).Error; err != nil {
+			return err
+		}
+		for _, implementation := range implementations {
+			name := implementation.UpstreamModelID
+			if name == "" {
+				name = implementation.ModelName
+			}
+			shadowNames = append(shadowNames, name)
+		}
+		for _, name := range uniqueModelNames(shadowNames) {
+			shadow := model.CreditPricing{TenantID: tenantID, ChannelID: 0, Model: name, CreditsPerUnit: pricing.CreditsPerUnit, UnitType: pricing.UnitType, PricingMode: pricing.PricingMode, PricingRule: pricing.PricingRule}
+			if err := tx.Where("tenant_id = ? AND model = ? AND channel_id = 0", tenantID, name).Assign(shadow).FirstOrCreate(&shadow).Error; err != nil {
+				return err
+			}
 		}
 		return tx.Create(&model.ModelConfigAuditLog{TenantID: tenantID, ActorUserID: actorUserID, Resource: "model_pricing", ResourceID: pricing.ID, Action: "save_default"}).Error
 	})
@@ -346,4 +378,20 @@ func normalizedModelConfigRevision(value uint) uint {
 		return 1
 	}
 	return value
+}
+
+func uniqueModelNames(values []string) []string {
+	result := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	return result
 }
