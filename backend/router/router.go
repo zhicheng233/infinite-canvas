@@ -33,6 +33,7 @@ type Dependencies struct {
 	APIConfigTransferHandler *handler.APIConfigTransferHandler
 	AutoRoutingHandler       *handler.AutoRoutingHandler
 	SiteAnnouncementHandler  *handler.SiteAnnouncementHandler
+	ModelConfigHandler       *handler.ModelConfigHandler
 }
 
 func Setup(r *gin.Engine, deps Dependencies) {
@@ -59,6 +60,7 @@ func Setup(r *gin.Engine, deps Dependencies) {
 	apiConfigTransferHandler := deps.APIConfigTransferHandler
 	autoRoutingHandler := deps.AutoRoutingHandler
 	siteAnnouncementHandler := deps.SiteAnnouncementHandler
+	modelConfigHandler := deps.ModelConfigHandler
 	r.Use(middleware.Cors())
 	healthHandler := handler.NewHealthHandler(config.BuildVersion)
 
@@ -138,6 +140,33 @@ func Setup(r *gin.Engine, deps Dependencies) {
 			admin.GET("/transactions", adminHandler.ListTransactions)
 			admin.GET("/model-health", adminHandler.GetModelHealth)
 			admin.GET("/model-call-logs", adminHandler.ListModelCallLogs)
+
+			admin.GET("/admin/model-service/channels", modelConfigHandler.ListChannels)
+			admin.POST("/admin/model-service/channels", modelConfigHandler.CreateChannel)
+			admin.PUT("/admin/model-service/channels/:channelId", modelConfigHandler.UpdateChannel)
+			admin.POST("/admin/model-service/channels/:channelId/sync", modelConfigHandler.SyncChannel)
+			admin.POST("/admin/model-service/channels/:channelId/archive", modelConfigHandler.ArchiveChannel)
+			admin.POST("/admin/model-service/channels/:channelId/restore", modelConfigHandler.RestoreChannel)
+			admin.PUT("/admin/model-service/channels/:channelId/protocol-defaults/preview", modelConfigHandler.PreviewChannelDefaults)
+			admin.PUT("/admin/model-service/channels/:channelId/protocol-defaults", modelConfigHandler.UpdateChannelDefaults)
+			admin.GET("/admin/model-service/models", modelConfigHandler.ListModels)
+			admin.GET("/admin/model-service/models/:modelId", modelConfigHandler.GetModel)
+			admin.PUT("/admin/model-service/models/:modelId", modelConfigHandler.UpdateModel)
+			admin.POST("/admin/model-service/models/:modelId/test", modelConfigHandler.TestModel)
+			admin.POST("/admin/model-service/models/:modelId/archive", modelConfigHandler.ArchiveModel)
+			admin.POST("/admin/model-service/models/:modelId/restore", modelConfigHandler.RestoreModel)
+			admin.PUT("/admin/model-service/pricing/defaults/:catalogModelId", modelConfigHandler.SaveDefaultPricing)
+			admin.POST("/admin/model-service/export", apiConfigTransferHandler.Export)
+			admin.POST("/admin/model-service/import/preview", apiConfigTransferHandler.Preview)
+			admin.POST("/admin/model-service/import", apiConfigTransferHandler.Import)
+			if autoRoutingHandler != nil {
+				admin.GET("/admin/model-service/routing/suggestions", autoRoutingHandler.Suggestions)
+				admin.GET("/admin/model-service/routing/pools", autoRoutingHandler.List)
+				admin.POST("/admin/model-service/routing/pools", autoRoutingHandler.Create)
+				admin.PUT("/admin/model-service/routing/pools/:id", autoRoutingHandler.Update)
+				admin.PUT("/admin/model-service/routing/pools/:id/members/:memberId", autoRoutingHandler.UpdateMember)
+				admin.DELETE("/admin/model-service/routing/pools/:id", autoRoutingHandler.Delete)
+			}
 		}
 
 		superAdmin := auth.Group("")

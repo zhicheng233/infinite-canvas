@@ -10,6 +10,8 @@ import (
 	"infinite-canvas-server/repository"
 )
 
+var ErrChannelConfigRevisionConflict = errors.New("渠道配置已被其他管理员修改，请刷新后重试")
+
 type ChannelService struct {
 	repo       *repository.ChannelRepo
 	encryptKey string
@@ -47,14 +49,15 @@ func (s *ChannelService) Create(input model.SaveChannelInput) (*model.ChannelAdm
 		enabled = *input.Enabled
 	}
 	channel := &model.Channel{
-		Name:            name,
-		BaseUrl:         baseURL,
-		ApiKey:          encryptedKey,
-		Enabled:         enabled,
+		Name:             name,
+		BaseUrl:          baseURL,
+		ApiKey:           encryptedKey,
+		Enabled:          enabled,
 		VideoAPIStandard: videoAPIStandard,
-		NewApiChannelID: input.NewApiChannelID,
-		MetricsBaseUrl:  input.MetricsBaseUrl,
-		Remark:          input.Remark,
+		NewApiChannelID:  input.NewApiChannelID,
+		MetricsBaseUrl:   input.MetricsBaseUrl,
+		Remark:           input.Remark,
+		ConfigRevision:   1,
 	}
 	if err := s.repo.Create(channel); err != nil {
 		return nil, err
@@ -73,6 +76,13 @@ func (s *ChannelService) Update(id uint, input model.SaveChannelInput) (*model.C
 	channel, err := s.repo.FindByID(id)
 	if err != nil {
 		return nil, err
+	}
+	currentRevision := channel.ConfigRevision
+	if currentRevision == 0 {
+		currentRevision = 1
+	}
+	if input.ExpectedRevision != nil && *input.ExpectedRevision != currentRevision {
+		return nil, ErrChannelConfigRevisionConflict
 	}
 
 	if len([]rune(input.Remark)) > 500 {
@@ -105,9 +115,14 @@ func (s *ChannelService) Update(id uint, input model.SaveChannelInput) (*model.C
 		}
 		channel.ApiKey = encryptedKey
 	}
+	channel.ConfigRevision = currentRevision + 1
 
-	if err := s.repo.Save(channel); err != nil {
+	saved, err := s.repo.SaveWithRevision(channel, currentRevision)
+	if err != nil {
 		return nil, err
+	}
+	if !saved {
+		return nil, ErrChannelConfigRevisionConflict
 	}
 
 	info := channelToAdminInfo(channel)
@@ -209,15 +224,15 @@ func channelsToAdminInfo(channels []model.Channel) []model.ChannelAdminInfo {
 
 func channelToInfo(channel *model.Channel) model.ChannelInfo {
 	return model.ChannelInfo{
-		ID:              channel.ID,
-		Name:            channel.Name,
-		Enabled:         channel.Enabled,
+		ID:               channel.ID,
+		Name:             channel.Name,
+		Enabled:          channel.Enabled,
 		VideoAPIStandard: normalizeChannelVideoAPIStandard(channel.VideoAPIStandard),
-		NewApiChannelID: channel.NewApiChannelID,
-		MetricsBaseUrl:  channel.MetricsBaseUrl,
-		SyncStatus:      channel.SyncStatus,
-		SyncError:       channel.SyncError,
-		SyncedAt:        channel.SyncedAt,
+		NewApiChannelID:  channel.NewApiChannelID,
+		MetricsBaseUrl:   channel.MetricsBaseUrl,
+		SyncStatus:       channel.SyncStatus,
+		SyncError:        channel.SyncError,
+		SyncedAt:         channel.SyncedAt,
 	}
 }
 

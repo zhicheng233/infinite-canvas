@@ -70,6 +70,7 @@ func main() {
 	mergeGroupRepo := repository.NewMergeGroupRepo(db)
 	apiConfigTransferRepo := repository.NewAPIConfigTransferRepo(db)
 	siteAnnouncementRepo := repository.NewSiteAnnouncementRepo(db)
+	modelConfigRepo := repository.NewModelConfigRepo(db)
 
 	captchaService := service.NewCaptchaService()
 
@@ -95,6 +96,7 @@ func main() {
 	paymentGateway := service.NewMockPaymentGateway(rechargeRepo, creditService)
 	mergeGroupService := service.NewMergeGroupService(mergeGroupRepo)
 	apiConfigTransferService := service.NewAPIConfigTransferService(apiConfigTransferRepo, cfg.ApiKeyEncryptKey)
+	modelConfigService := service.NewModelConfigService(modelConfigRepo, channelService, generateService)
 
 	authHandler := handler.NewAuthHandler(authService, userService)
 	adminHandler := handler.NewAdminHandler(tenantRepo, userRepo, creditService, creditRepo, rechargeRepo, modelCallLogRepo, modelCallLogService)
@@ -118,6 +120,7 @@ func main() {
 	apiConfigTransferHandler := handler.NewAPIConfigTransferHandler(apiConfigTransferService)
 	autoRoutingHandler := handler.NewAutoRoutingHandler(autoChannelService)
 	siteAnnouncementHandler := handler.NewSiteAnnouncementHandler(siteAnnouncementService)
+	modelConfigHandler := handler.NewModelConfigHandler(modelConfigService)
 
 	r := gin.Default()
 	router.Setup(r, router.Dependencies{
@@ -130,6 +133,7 @@ func main() {
 		MergeGroupHandler: mergeGroupHandler, APIConfigTransferHandler: apiConfigTransferHandler,
 		AutoRoutingHandler:      autoRoutingHandler,
 		SiteAnnouncementHandler: siteAnnouncementHandler,
+		ModelConfigHandler:      modelConfigHandler,
 	})
 
 	log.Printf("Server starting on port %s", cfg.Port)

@@ -25,6 +25,7 @@ type ChannelAdminInfo struct {
 
 // SaveChannelInput is the request body for SuperAdmin create/update.
 type SaveChannelInput struct {
+	ExpectedRevision *uint   `json:"expected_revision,omitempty"`
 	Name             string  `json:"name"`
 	BaseUrl          string  `json:"base_url"`
 	ApiKey           string  `json:"api_key"` // empty means "keep existing"

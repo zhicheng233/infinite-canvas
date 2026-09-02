@@ -17,6 +17,16 @@ func (r *ChannelRepo) Save(channel *model.Channel) error {
 	return r.db.Save(channel).Error
 }
 
+func (r *ChannelRepo) SaveWithRevision(channel *model.Channel, expectedRevision uint) (bool, error) {
+	result := r.db.Model(&model.Channel{}).Where("id = ? AND config_revision = ?", channel.ID, expectedRevision).Updates(map[string]any{
+		"name": channel.Name, "base_url": channel.BaseUrl, "api_key": channel.ApiKey,
+		"enabled": channel.Enabled, "video_api_standard": channel.VideoAPIStandard,
+		"new_api_channel_id": channel.NewApiChannelID, "metrics_base_url": channel.MetricsBaseUrl,
+		"remark": channel.Remark, "config_revision": channel.ConfigRevision,
+	})
+	return result.RowsAffected == 1, result.Error
+}
+
 func (r *ChannelRepo) FindByID(id uint) (*model.Channel, error) {
 	var channel model.Channel
 	err := r.db.First(&channel, id).Error
