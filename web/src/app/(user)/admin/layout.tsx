@@ -3,7 +3,7 @@
 import type { ReactNode } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { Layout, Menu, Typography } from "antd";
-import { Users, CreditCard, ReceiptText, ArrowLeft, Shield, LayoutDashboard, Boxes, AlertTriangle, Bell } from "lucide-react";
+import { Users, CreditCard, ReceiptText, ArrowLeft, Shield, LayoutDashboard, Boxes, AlertTriangle, Bell, BookOpen } from "lucide-react";
 import { useUserStore } from "@/stores/use-user-store";
 import { useEffect } from "react";
 import { buildVersionLabel } from "@/lib/build-version";
@@ -21,10 +21,13 @@ const menuItems = [
     { key: "/admin/transactions", icon: <ReceiptText className="size-4" />, label: "积分流水" },
 ];
 
+const featureGuideMenuItem = { key: "/admin/feature-guides", icon: <BookOpen className="size-4" />, label: "功能引导" };
+
 export default function AdminLayout({ children }: { children: ReactNode }) {
     const pathname = usePathname();
     const router = useRouter();
     const user = useUserStore((s) => s.user);
+    const visibleMenuItems = user?.role === "super_admin" ? [...menuItems, featureGuideMenuItem] : menuItems;
 
     useEffect(() => {
         if (user && user.role !== "super_admin" && user.role !== "tenant_admin") {
@@ -33,7 +36,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
     }, [user, router]);
 
     const selectedKey =
-        menuItems.find((item) => {
+        visibleMenuItems.find((item) => {
             if (item.key === "/admin") return pathname === "/admin";
             return pathname.startsWith(item.key);
         })?.key || "/admin";
@@ -51,7 +54,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
                     <Menu
                         mode="inline"
                         selectedKeys={[selectedKey]}
-                        items={menuItems.map((item) => ({
+                        items={visibleMenuItems.map((item) => ({
                             key: item.key,
                             icon: item.icon,
                             label: item.label,

@@ -33,6 +33,7 @@ type Dependencies struct {
 	APIConfigTransferHandler *handler.APIConfigTransferHandler
 	AutoRoutingHandler       *handler.AutoRoutingHandler
 	SiteAnnouncementHandler  *handler.SiteAnnouncementHandler
+	FeatureGuideHandler       *handler.FeatureGuideHandler
 	ModelConfigHandler       *handler.ModelConfigHandler
 }
 
@@ -60,6 +61,7 @@ func Setup(r *gin.Engine, deps Dependencies) {
 	apiConfigTransferHandler := deps.APIConfigTransferHandler
 	autoRoutingHandler := deps.AutoRoutingHandler
 	siteAnnouncementHandler := deps.SiteAnnouncementHandler
+	featureGuideHandler := deps.FeatureGuideHandler
 	modelConfigHandler := deps.ModelConfigHandler
 	r.Use(middleware.Cors())
 	healthHandler := handler.NewHealthHandler(config.BuildVersion)
@@ -78,6 +80,7 @@ func Setup(r *gin.Engine, deps Dependencies) {
 	auth.Use(middleware.AuthRequired(authService))
 	{
 		auth.GET("/auth/me", authHandler.Me)
+		auth.GET("/feature-guides/:surface", featureGuideHandler.Get)
 		auth.PUT("/auth/password", authHandler.ChangePassword)
 		auth.PUT("/auth/profile", authHandler.UpdateProfile)
 
@@ -208,6 +211,8 @@ func Setup(r *gin.Engine, deps Dependencies) {
 			superAdmin.POST("/admin/metrics-config", metricsHandler.SaveConfig)
 			superAdmin.GET("/admin/announcement", siteAnnouncementHandler.AdminGet)
 			superAdmin.POST("/admin/announcement", siteAnnouncementHandler.AdminSave)
+			superAdmin.GET("/admin/feature-guides", featureGuideHandler.AdminList)
+			superAdmin.PUT("/admin/feature-guides/:surface", featureGuideHandler.AdminSave)
 
 			superAdmin.GET("/admin/webhook/config", webhookHandler.ListConfig)
 			superAdmin.PUT("/admin/webhook/config", webhookHandler.SaveConfig)

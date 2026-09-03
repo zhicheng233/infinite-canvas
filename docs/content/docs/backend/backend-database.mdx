@@ -216,6 +216,19 @@ API Key 仅用于后端代理调用，按 `API_KEY_ENCRYPTION_KEY` 配置加密�
 | content | text | 公告正文 |
 | version | int | 公告版本；公告内容、标题或启用状态更新时递增，用于前端“不再弹出直到更新” |
 
+## feature_guides 表
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | uint | 主键 |
+| surface | enum(canvas/image/video) | 工作台类型；唯一约束，每种类型一条站点级配置 |
+| enabled | bool | 是否启用该工作台引导 |
+| title | string(100) | 引导标题 |
+| pages | longtext | 多页 Markdown 内容的 JSON 文本数组 |
+| version | int | 引导版本；标题、内容或顺序变化时递增，单独启停不递增 |
+
+该表保存站点级的画布、图片和视频三套独立引导配置，与 `site_announcements` 独立。旧数据库通过 Goose 增量迁移 `00005_feature_guides.sql` 新增该表并写入三条默认配置，同时保留公告表。
+
 ## canvas_projects 表
 
 | 字段 | 类型 | 说明 |
@@ -302,7 +315,7 @@ API Key 仅用于后端代理调用，按 `API_KEY_ENCRYPTION_KEY` 配置加密�
 
 ## 数据库迁移
 
-新增结构迁移使用嵌入式 Goose SQL。`00001_canvas_and_generation_jobs.sql` 负责画布复合唯一约束、文档版本字段和生成任务表；`00002_auto_routing_pools.sql` 增加智能路由池、成员、尝试审计及生成任务结算字段；`00003_model_service_catalog.sql` 建立规范化模型目录、协议、定价、修订与审计结构并投影已有渠道模型；`00004_legacy_api_config_compatibility.sql` 登记旧 `TenantApiConfig` 的应用级兼容迁移。应用启动时先执行现有表的兼容 `AutoMigrate`，再执行有版本的增量迁移，随后幂等处理待迁移旧配置。后续表会逐步移出 `AutoMigrate`，每个增量只允许新增新的迁移版本，不修改已经发布的迁移文件。
+新增结构迁移使用嵌入式 Goose SQL。`00001_canvas_and_generation_jobs.sql` 负责画布复合唯一约束、文档版本字段和生成任务表；`00002_auto_routing_pools.sql` 增加智能路由池、成员、尝试审计及生成任务结算字段；`00003_model_service_catalog.sql` 建立规范化模型目录、协议、定价、修订与审计结构并投影已有渠道模型；`00004_legacy_api_config_compatibility.sql` 登记旧 `TenantApiConfig` 的应用级兼容迁移；`00005_feature_guides.sql` 新增站点级工作台功能引导表，并保留 `site_announcements`。应用启动时先执行现有表的兼容 `AutoMigrate`，再执行有版本的增量迁移，随后幂等处理待迁移旧配置。后续表会逐步移出 `AutoMigrate`，每个增量只允许新增新的迁移版本，不修改已经发布的迁移文件。
 
 ## generation_records 表
 

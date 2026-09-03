@@ -70,6 +70,7 @@ func main() {
 	mergeGroupRepo := repository.NewMergeGroupRepo(db)
 	apiConfigTransferRepo := repository.NewAPIConfigTransferRepo(db)
 	siteAnnouncementRepo := repository.NewSiteAnnouncementRepo(db)
+	featureGuideRepo := repository.NewFeatureGuideRepo(db)
 	modelConfigRepo := repository.NewModelConfigRepo(db)
 	apiConfigRepo := repository.NewApiConfigRepo(db)
 
@@ -91,6 +92,7 @@ func main() {
 	autoChannelService := service.NewAutoChannelService(db, channelRepo, channelModelRepo, creditRepo, autoRoutingRepo)
 	webhookService := service.NewWebhookService(webhookRepo)
 	siteAnnouncementService := service.NewSiteAnnouncementService(siteAnnouncementRepo)
+	featureGuideService := service.NewFeatureGuideService(featureGuideRepo)
 	generateService := service.NewGenerateService(creditService, creditRepo, generationBillingService, modelCallLogService, cfg.ApiKeyEncryptKey, onDemandRepairService, channelService, channelRepo, channelModelRepo, mergeGroupRepo, db, autoChannelService, webhookService)
 	tempMediaService := service.NewTempMediaService(cfg)
 	channelStatusService := service.NewChannelStatusService(modelCallLogRepo)
@@ -125,6 +127,7 @@ func main() {
 	apiConfigTransferHandler := handler.NewAPIConfigTransferHandler(apiConfigTransferService)
 	autoRoutingHandler := handler.NewAutoRoutingHandler(autoChannelService)
 	siteAnnouncementHandler := handler.NewSiteAnnouncementHandler(siteAnnouncementService)
+	featureGuideHandler := handler.NewFeatureGuideHandler(featureGuideService)
 	modelConfigHandler := handler.NewModelConfigHandler(modelConfigService)
 
 	r := gin.Default()
@@ -138,6 +141,7 @@ func main() {
 		MergeGroupHandler: mergeGroupHandler, APIConfigTransferHandler: apiConfigTransferHandler,
 		AutoRoutingHandler:      autoRoutingHandler,
 		SiteAnnouncementHandler: siteAnnouncementHandler,
+		FeatureGuideHandler:      featureGuideHandler,
 		ModelConfigHandler:      modelConfigHandler,
 	})
 

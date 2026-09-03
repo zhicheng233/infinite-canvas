@@ -156,7 +156,7 @@ func TestModelServiceMigrationsUpgradeLegacyTablesAndRollbackCompatibilityStep(t
 	if err := goose.SetDialect("mysql"); err != nil {
 		t.Fatal(err)
 	}
-	if err := goose.Down(db, "."); err != nil {
+	if err := goose.DownTo(db, ".", 3); err != nil {
 		t.Fatalf("rollback compatibility migration: %v", err)
 	}
 	assertSchemaCount(t, db, "SELECT COUNT(*) FROM model_config_migrations WHERE source = 'tenant_api_config' AND source_id = 9 AND version = 2", 0)
@@ -165,6 +165,74 @@ func TestModelServiceMigrationsUpgradeLegacyTablesAndRollbackCompatibilityStep(t
 		t.Fatalf("reapply compatibility migration: %v", err)
 	}
 	assertSchemaCount(t, db, "SELECT COUNT(*) FROM model_config_migrations WHERE source = 'tenant_api_config' AND source_id = 9 AND version = 2", 1)
+}
+
+func TestFeatureGuideMigrationPreservesSiteAnnouncements(t *testing.T) {
+	dsn := os.Getenv("CREDIT_TEST_DSN")
+	if dsn == "" {
+		t.Skip("CREDIT_TEST_DSN is not configured")
+	}
+	config, err := mysqldriver.ParseDSN(dsn)
+	if err != nil {
+		t.Fatalf("parse CREDIT_TEST_DSN: %v", err)
+	}
+	adminConfig := *config
+	adminConfig.DBName = ""
+	adminDB, err := sql.Open("mysql", adminConfig.FormatDSN())
+	if err != nil {
+		t.Fatalf("open MySQL admin connection: %v", err)
+	}
+	defer adminDB.Close()
+	databaseName := fmt.Sprintf("feature_guide_migration_test_%d_%d", os.Getpid(), time.Now().UnixNano())
+	if _, err := adminDB.Exec("CREATE DATABASE `" + databaseName + "` CHARACTER SET utf8mb4"); err != nil {
+		t.Fatalf("create test database: %v", err)
+	}
+	defer adminDB.Exec("DROP DATABASE `" + databaseName + "`")
+	testConfig := *config
+	testConfig.DBName = databaseName
+	db, err := sql.Open("mysql", testConfig.FormatDSN())
+	if err != nil {
+		t.Fatalf("open migration database: %v", err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`CREATE TABLE site_announcements (id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, content TEXT NOT NULL, PRIMARY KEY (id))`); err != nil {
+		t.Fatalf("create existing announcement table: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO site_announcements (content) VALUES ('保留公告')`); err != nil {
+		t.Fatalf("seed existing announcement: %v", err)
+	}
+	if _, err := db.Exec(`CREATE TABLE feature_guides (
+		id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+		created_at DATETIME(3) NULL,
+		updated_at DATETIME(3) NULL,
+		deleted_at DATETIME(3) NULL,
+		surface VARCHAR(20) NOT NULL,
+		enabled BOOLEAN NOT NULL DEFAULT FALSE,
+		title VARCHAR(100) NOT NULL DEFAULT '',
+		pages LONGTEXT NOT NULL,
+		version BIGINT NOT NULL DEFAULT 1,
+		PRIMARY KEY (id),
+		UNIQUE INDEX idx_feature_guides_surface (surface),
+		INDEX idx_feature_guides_deleted_at (deleted_at),
+		CONSTRAINT chk_feature_guides_surface CHECK (surface IN ('canvas', 'image', 'video'))
+	)`); err != nil {
+		t.Fatalf("create interrupted feature guide migration table: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO feature_guides (surface, enabled, title, pages, version) VALUES ('canvas', FALSE, '画布功能引导', '[]', 1)`); err != nil {
+		t.Fatalf("seed interrupted feature guide migration: %v", err)
+	}
+
+	if err := Up(db); err != nil {
+		t.Fatalf("upgrade existing database: %v", err)
+	}
+	if err := Up(db); err != nil {
+		t.Fatalf("repeat migrations: %v", err)
+	}
+	assertSchemaCount(t, db, "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'feature_guides'", 1)
+	assertSchemaCount(t, db, "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'feature_guides' AND column_name IN ('surface', 'enabled', 'title', 'pages', 'version')", 5)
+	assertSchemaCount(t, db, "SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = 'feature_guides' AND index_name = 'idx_feature_guides_surface' AND non_unique = 0", 1)
+	assertSchemaCount(t, db, "SELECT COUNT(*) FROM feature_guides WHERE enabled = FALSE AND pages = '[]' AND version = 1 AND ((surface = 'canvas' AND title = '画布功能引导') OR (surface = 'image' AND title = '图片生成功能引导') OR (surface = 'video' AND title = '视频生成功能引导'))", 3)
+	assertSchemaCount(t, db, "SELECT COUNT(*) FROM site_announcements WHERE content = '保留公告'", 1)
 }
 
 func assertSchemaCount(t *testing.T, db *sql.DB, query string, expected int) {
