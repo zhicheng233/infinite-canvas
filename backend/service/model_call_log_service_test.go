@@ -149,7 +149,7 @@ func TestBuildModelHealthSummarySeparatesSameNameByChannel(t *testing.T) {
 	channelA, channelB := uint(1), uint(2)
 	modelA, modelB := uint(11), uint(22)
 	logs := []model.ModelCallLog{
-		{BaseModel: model.BaseModel{CreatedAt: now.Add(-time.Hour)}, Model: "same-model", Generation: "image", ChannelID: &channelA, ChannelModelID: &modelA, ChannelName: "A", ErrorMessage: "A failed"},
+		{BaseModel: model.BaseModel{CreatedAt: now.Add(-time.Hour)}, Model: "same-model", Generation: "image", ChannelID: &channelA, ChannelModelID: &modelA, ChannelName: "A", ChannelRemark: "主线路", ErrorMessage: "A failed"},
 		{BaseModel: model.BaseModel{CreatedAt: now.Add(-2 * time.Hour)}, Model: "same-model", Generation: "image", ChannelID: &channelB, ChannelModelID: &modelB, ChannelName: "B", ErrorMessage: "B failed"},
 	}
 
@@ -164,8 +164,11 @@ func TestBuildModelHealthSummarySeparatesSameNameByChannel(t *testing.T) {
 		if item.ChannelID == nil || item.ChannelModelID == nil || item.ChannelName == "" {
 			t.Fatalf("missing channel identity in health model: %#v", item)
 		}
+		if *item.ChannelID == channelA && item.ChannelRemark != "主线路" {
+			t.Fatalf("missing channel remark in health model: %#v", item)
+		}
 	}
-	if len(summary.RecentErrors) != 2 || summary.RecentErrors[0].ChannelName != "A" || summary.RecentErrors[0].ChannelID == nil || *summary.RecentErrors[0].ChannelID != channelA {
+	if len(summary.RecentErrors) != 2 || summary.RecentErrors[0].ChannelName != "A" || summary.RecentErrors[0].ChannelRemark != "主线路" || summary.RecentErrors[0].ChannelID == nil || *summary.RecentErrors[0].ChannelID != channelA {
 		t.Fatalf("missing channel identity in recent errors: %#v", summary.RecentErrors)
 	}
 }

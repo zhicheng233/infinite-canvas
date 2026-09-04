@@ -74,6 +74,7 @@ type AutoRoutingMemberInfo struct {
 	ChannelModelID    uint    `json:"channel_model_id"`
 	ChannelID         uint    `json:"channel_id"`
 	ChannelName       string  `json:"channel_name"`
+	ChannelRemark     string  `json:"channel_remark,omitempty"`
 	ModelName         string  `json:"model_name"`
 	Priority          int     `json:"priority"`
 	Enabled           bool    `json:"enabled"`
@@ -194,7 +195,7 @@ func (s *AutoChannelService) Suggestions() ([]AutoRoutingSuggestion, error) {
 					continue
 				}
 				key := groupKey{strings.TrimSpace(models[i].ModelName), capability, contract}
-				groups[key] = append(groups[key], AutoRoutingMemberInfo{ChannelModelID: models[i].ID, ChannelID: channel.ID, ChannelName: channel.Name, ModelName: models[i].ModelName, Enabled: true, ContractValid: true, CircuitStatus: "closed"})
+				groups[key] = append(groups[key], AutoRoutingMemberInfo{ChannelModelID: models[i].ID, ChannelID: channel.ID, ChannelName: channel.Name, ChannelRemark: channel.Remark, ModelName: models[i].ModelName, Enabled: true, ContractValid: true, CircuitStatus: "closed"})
 			}
 		}
 	}
@@ -556,6 +557,7 @@ func (s *AutoChannelService) memberInfo(pool *model.AutoRoutingPool, member *mod
 		return info
 	}
 	info.ChannelName = channel.Name
+	info.ChannelRemark = channel.Remark
 	contract, err := autoRoutingContract(channel, channelModel, pool.Capability)
 	info.ContractValid = err == nil && contract == pool.ContractKey && channel.Enabled && channelModel.Enabled && channelModel.ModelName == pool.PublicModelName
 	if !info.ContractValid {

@@ -44,6 +44,7 @@ type ModelConfigInfo struct {
 	ID               uint                   `json:"id"`
 	ChannelID        uint                   `json:"channel_id"`
 	ChannelName      string                 `json:"channel_name"`
+	ChannelRemark    string                 `json:"channel_remark,omitempty"`
 	CatalogModelID   uint                   `json:"catalog_model_id"`
 	PublicKey        string                 `json:"public_key"`
 	DisplayName      string                 `json:"display_name"`

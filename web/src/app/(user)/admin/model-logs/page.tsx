@@ -6,6 +6,7 @@ import type { ColumnsType } from "antd/es/table";
 import { Activity, AlertTriangle, Clock3, Copy, RotateCcw, Search, TrendingUp } from "lucide-react";
 
 import { getModelHealth, listModelCallLogs, type ModelCallLogItem, type ModelHealthSummary } from "@/services/api/admin";
+import { ChannelNameWithRemark } from "@/components/channel-name-with-remark";
 
 const { Title, Text } = Typography;
 
@@ -33,6 +34,7 @@ const statusOptions = [
 type ChannelIdentity = {
     channel_id?: number | null;
     channel_name?: string | null;
+    channel_remark?: string | null;
 };
 
 function formatChannelLabel(item: ChannelIdentity) {
@@ -158,7 +160,7 @@ export default function AdminModelLogsPage() {
             key: "channel_name",
             width: 160,
             ellipsis: true,
-            render: (_, record) => formatChannelLabel(record),
+            render: (_, record) => <ChannelNameWithRemark name={formatChannelLabel(record)} remark={record.channel_remark} />,
         },
         {
             title: "接口",
@@ -245,7 +247,7 @@ export default function AdminModelLogsPage() {
                                     <div className="min-w-0">
                                         <div className="truncate font-medium">{item.model || "未知模型"}</div>
                                         <div className="text-xs text-stone-500">
-                                            {generationLabels[item.generation] || item.generation || "未知类型"} · {formatChannelLabel(item)}
+                                            {generationLabels[item.generation] || item.generation || "未知类型"} · <ChannelNameWithRemark name={formatChannelLabel(item)} remark={item.channel_remark} />
                                         </div>
                                     </div>
                                     <Tag color="red">{item.failures} 次失败</Tag>
@@ -321,7 +323,7 @@ export default function AdminModelLogsPage() {
                             </div>
                             <div>
                                 <Text type="secondary">渠道：</Text>
-                                {formatChannelLabel(selected)}
+                                <ChannelNameWithRemark name={formatChannelLabel(selected)} remark={selected.channel_remark} />
                             </div>
                             <div>
                                 <Text type="secondary">类型：</Text>

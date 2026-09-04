@@ -18,6 +18,7 @@ export type ModelHealthModel = {
     channel_id?: number;
     channel_model_id?: number;
     channel_name?: string;
+    channel_remark?: string;
     failures: number;
     last_error: string;
 };
@@ -33,6 +34,7 @@ export type ModelHealthRecentError = {
     channel_id?: number;
     channel_model_id?: number;
     channel_name?: string;
+    channel_remark?: string;
     path: string;
     status_code: number;
     error_message: string;
@@ -133,6 +135,7 @@ export type ModelCallLogItem = {
     channel_id?: number;
     channel_model_id?: number;
     channel_name?: string;
+    channel_remark?: string;
 };
 
 export type ModelCallLogResult = {

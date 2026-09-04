@@ -86,6 +86,7 @@ export type ModelConfig = {
     id: number;
     channel_id: number;
     channel_name: string;
+    channel_remark?: string;
     catalog_model_id: number;
     public_key: string;
     display_name: string;

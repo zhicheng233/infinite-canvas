@@ -48,6 +48,7 @@ type ModelHealthModel struct {
 	ChannelID      *uint  `json:"channel_id,omitempty"`
 	ChannelModelID *uint  `json:"channel_model_id,omitempty"`
 	ChannelName    string `json:"channel_name,omitempty"`
+	ChannelRemark  string `json:"channel_remark,omitempty"`
 	Failures       int64  `json:"failures"`
 	LastError      string `json:"last_error"`
 }
@@ -63,6 +64,7 @@ type ModelHealthRecentError struct {
 	ChannelID      *uint     `json:"channel_id,omitempty"`
 	ChannelModelID *uint     `json:"channel_model_id,omitempty"`
 	ChannelName    string    `json:"channel_name,omitempty"`
+	ChannelRemark  string    `json:"channel_remark,omitempty"`
 	Path           string    `json:"path"`
 	StatusCode     int       `json:"status_code"`
 	ErrorMessage   string    `json:"error_message"`
@@ -174,7 +176,7 @@ func buildModelHealthSummary(logs []model.ModelCallLog, now time.Time) ModelHeal
 		key := modelHealthKey(item)
 		row := models[key]
 		if row == nil {
-			row = &ModelHealthModel{Model: item.Model, Generation: item.Generation, ChannelID: item.ChannelID, ChannelModelID: item.ChannelModelID, ChannelName: item.ChannelName, LastError: item.ErrorMessage}
+			row = &ModelHealthModel{Model: item.Model, Generation: item.Generation, ChannelID: item.ChannelID, ChannelModelID: item.ChannelModelID, ChannelName: item.ChannelName, ChannelRemark: item.ChannelRemark, LastError: item.ErrorMessage}
 			models[key] = row
 		}
 		row.Failures++
@@ -194,6 +196,7 @@ func buildModelHealthSummary(logs []model.ModelCallLog, now time.Time) ModelHeal
 				ChannelID:      item.ChannelID,
 				ChannelModelID: item.ChannelModelID,
 				ChannelName:    item.ChannelName,
+				ChannelRemark:  item.ChannelRemark,
 				Path:           item.Path,
 				StatusCode:     item.StatusCode,
 				ErrorMessage:   item.ErrorMessage,

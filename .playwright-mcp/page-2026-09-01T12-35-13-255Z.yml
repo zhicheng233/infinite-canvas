@@ -1,0 +1,18 @@
+- generic [active] [ref=e1]:
+  - main [ref=e4]:
+    - generic [ref=e5]:
+      - img "无限画布" [ref=e7]
+      - heading "登录" [level=1] [ref=e8]
+      - generic [ref=e9]:
+        - textbox "用户名" [ref=e15]
+        - generic [ref=e21]:
+          - textbox "密码" [ref=e22]
+          - button "显示" [ref=e24] [cursor=pointer]:
+            - img "eye-invisible" [ref=e25]
+        - button "登 录" [ref=e34] [cursor=pointer]
+      - paragraph [ref=e36]:
+        - text: 还没有账号？
+        - link "注册" [ref=e37] [cursor=pointer]:
+          - /url: /auth/register
+      - paragraph [ref=e38]: 版本 ba8dcda-2609011203Z
+  - alert [ref=e39]

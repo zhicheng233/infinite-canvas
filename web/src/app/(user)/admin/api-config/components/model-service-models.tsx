@@ -21,6 +21,7 @@ import {
     type UpdateModelConfigInput,
 } from "@/services/api/model-service";
 import type { ApiModelTestResult } from "@/services/api/api-config";
+import { ChannelNameWithRemark } from "@/components/channel-name-with-remark";
 
 const DynamicVideoFields = dynamic(() => import("./model-video-config-fields").then((module) => module.ModelVideoConfigFields), { ssr: false });
 
@@ -99,7 +100,7 @@ export function ModelServiceModels({ view, onViewChange, refreshToken, onChanged
             columns={[
                 { title: "显示名称", dataIndex: "display_name", render: (value, item) => <div><div className="font-medium">{value}</div><Typography.Text type="secondary" className="text-xs">{item.public_key}</Typography.Text></div> },
                 { title: "上游模型 ID", dataIndex: "upstream_model_id", ellipsis: true },
-                { title: "渠道", dataIndex: "channel_name", width: 150 },
+                { title: "渠道", dataIndex: "channel_name", width: 150, render: (_, item) => <ChannelNameWithRemark name={item.channel_name} remark={item.channel_remark} /> },
                 { title: "能力", width: 210, render: (_, item) => operationCapabilities(item).map((value) => <Tag key={value}>{capabilityLabels[value]}</Tag>) },
                 { title: "状态", width: 100, render: (_, item) => <StatusTag item={item} /> },
                 { title: "就绪", width: 100, render: (_, item) => item.ready ? <Tag color="green">可用</Tag> : <Tooltip title={item.readiness_issues.map((issue) => issue.message).join("；")}><Tag icon={<CircleAlert className="size-3" />} color="warning">{item.readiness_issues.length} 项</Tag></Tooltip> },
@@ -145,7 +146,7 @@ export function ModelServiceModels({ view, onViewChange, refreshToken, onChanged
                     pagination={false}
                     expandable={{ defaultExpandAllRows: true, expandedRowRender: (group) => modelTable(group.models) }}
                     columns={[
-                        { title: "渠道", dataIndex: "name", render: (value) => <span className="font-medium">{value}</span> },
+                        { title: "渠道", dataIndex: "name", render: (_, group) => <ChannelNameWithRemark name={group.name} remark={group.remark} className="font-medium" /> },
                         { title: "模型", width: 100, render: (_, group) => group.models.length },
                         { title: "已就绪", width: 100, render: (_, group) => group.models.filter((item) => item.ready).length },
                         { title: "待复核", width: 100, render: (_, group) => group.models.filter((item) => item.legacy_unreviewed).length },
@@ -162,7 +163,7 @@ export function ModelServiceModels({ view, onViewChange, refreshToken, onChanged
                         { title: "公开模型", render: (_, group) => <div><div className="font-medium">{group.displayName}</div><Typography.Text type="secondary" className="text-xs">{group.publicKey}</Typography.Text></div> },
                         { title: "渠道实现", width: 120, render: (_, group) => group.models.length },
                         { title: "可用实现", width: 120, render: (_, group) => group.models.filter((item) => item.status === "active" && item.ready).length },
-                        { title: "覆盖渠道", width: 280, render: (_, group) => group.models.map((item) => <Tag key={item.id}>{item.channel_name}</Tag>) },
+                        { title: "覆盖渠道", width: 280, render: (_, group) => group.models.map((item) => <Tag key={item.id}><ChannelNameWithRemark name={item.channel_name} remark={item.channel_remark} /></Tag>) },
                     ]}
                 />
             )}
@@ -284,7 +285,7 @@ function ModelConfigDrawer({ item, onClose, onSaved }: { readonly item?: ModelCo
         <Drawer
             width={760}
             open={Boolean(item)}
-            title={<div><div>{item?.display_name}</div><Typography.Text type="secondary" className="text-xs">{item?.channel_name}</Typography.Text></div>}
+            title={<div><div>{item?.display_name}</div><Typography.Text type="secondary" className="text-xs"><ChannelNameWithRemark name={item?.channel_name ?? ""} remark={item?.channel_remark} /></Typography.Text></div>}
             onClose={close}
             extra={<Space><Button icon={<Play className="size-4" />} loading={testing} onClick={() => void runTest()}>测试草稿</Button><Button type="primary" icon={<Save className="size-4" />} loading={saving} onClick={() => void save()}>保存</Button></Space>}
         >
@@ -366,9 +367,9 @@ function PricingEditor({ operations, pricing, onChange }: { operations: SaveMode
 }
 
 export function groupModelsByChannel(items: ModelConfig[]) {
-    const grouped = new Map<number, { id: number; name: string; models: ModelConfig[] }>();
+    const grouped = new Map<number, { id: number; name: string; remark?: string; models: ModelConfig[] }>();
     for (const item of items) {
-        const group = grouped.get(item.channel_id) ?? { id: item.channel_id, name: item.channel_name, models: [] };
+        const group = grouped.get(item.channel_id) ?? { id: item.channel_id, name: item.channel_name, remark: item.channel_remark, models: [] };
         group.models.push(item);
         grouped.set(item.channel_id, group);
     }

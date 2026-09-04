@@ -9,6 +9,7 @@ const baseModel: ModelConfig = {
     id: 11,
     channel_id: 1,
     channel_name: "Channel A",
+    channel_remark: "Primary channel",
     catalog_model_id: 7,
     public_key: "public-image",
     display_name: "Public image",
@@ -30,9 +31,9 @@ const baseModel: ModelConfig = {
 describe("model service admin domain helpers", () => {
     it("groups the same catalog by channel view and model view without losing implementations", () => {
         const second = { ...baseModel, id: 22, channel_id: 2, channel_name: "Channel B", upstream_model_id: "upstream-b" };
-        expect(groupModelsByChannel([baseModel, second]).map((group) => [group.name, group.models.length])).toEqual([
-            ["Channel A", 1],
-            ["Channel B", 1],
+        expect(groupModelsByChannel([baseModel, second]).map((group) => [group.name, group.remark, group.models.length])).toEqual([
+            ["Channel A", "Primary channel", 1],
+            ["Channel B", "Primary channel", 1],
         ]);
         expect(groupModelsByCatalog([baseModel, second])).toMatchObject([{ id: 7, publicKey: "public-image", models: [{ id: 11 }, { id: 22 }] }]);
     });

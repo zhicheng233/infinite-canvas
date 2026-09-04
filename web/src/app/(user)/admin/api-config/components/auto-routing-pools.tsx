@@ -5,6 +5,7 @@ import { Alert, App, Button, Empty, InputNumber, Popconfirm, Switch, Table, Tag 
 import { RefreshCw, Route, Trash2 } from "lucide-react";
 
 import { createAutoRoutingPool, deleteAutoRoutingPool, listAutoRoutingPools, listAutoRoutingSuggestions, updateAutoRoutingMember, updateAutoRoutingPool, type AutoRoutingPool, type AutoRoutingSuggestion } from "@/services/api/auto-routing-admin";
+import { ChannelNameWithRemark } from "@/components/channel-name-with-remark";
 
 const capabilityLabel: Record<string, string> = { image: "图片", video: "视频", text: "文本", audio: "音频" };
 
@@ -58,7 +59,7 @@ export function AutoRoutingPools() {
                     columns={[
                         { title: "系统建议", dataIndex: "model" },
                         { title: "能力", dataIndex: "capability", width: 90, render: (value: string) => capabilityLabel[value] || value },
-                        { title: "候选", width: 260, render: (_, item) => item.members.map((member) => <Tag key={member.channel_model_id}>{member.channel_name}</Tag>) },
+                        { title: "候选", width: 260, render: (_, item) => item.members.map((member) => <Tag key={member.channel_model_id}><ChannelNameWithRemark name={member.channel_name} remark={member.channel_remark} /></Tag>) },
                         { title: "操作", width: 120, render: (_, item) => {
                             const pool = pools.find((candidate) => candidate.model === item.model && candidate.capability === item.capability);
                             const key = `members:${item.model}:${item.capability}`;
@@ -76,7 +77,7 @@ export function AutoRoutingPools() {
                 dataSource={pools}
                 expandable={{ expandedRowRender: (pool) => (
                     <Table rowKey="id" size="small" pagination={false} dataSource={pool.members} columns={[
-                        { title: "渠道", dataIndex: "channel_name" },
+                        { title: "渠道", dataIndex: "channel_name", render: (_, member) => <ChannelNameWithRemark name={member.channel_name} remark={member.channel_remark} /> },
                         { title: "合同", width: 100, render: (_, member) => member.contract_valid ? <Tag color="green">有效</Tag> : <Tag color="red">需确认</Tag> },
                         { title: "可靠性", width: 110, render: (_, member) => `${Math.round(member.success_rate)}% / ${member.sample_count} 次` },
                         { title: "P95", width: 90, render: (_, member) => member.p95_latency_ms ? `${member.p95_latency_ms}ms` : "暂无" },

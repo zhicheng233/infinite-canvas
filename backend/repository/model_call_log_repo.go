@@ -36,7 +36,7 @@ func (r *ModelCallLogRepo) List(tenantID uint, query ModelCallLogQuery) ([]model
 	}
 	base.Count(&total)
 
-	q := r.db.Select("model_call_logs.*, channels.name as channel_name").
+	q := r.db.Select("model_call_logs.*, channels.name as channel_name, channels.remark as channel_remark").
 		Where("tenant_id = ?", tenantID).
 		Joins("LEFT JOIN channels ON channels.id = model_call_logs.channel_id")
 	q = applyModelCallLogStatusFilter(q, query.Status)
@@ -73,7 +73,7 @@ func (r *ModelCallLogRepo) ListSince(tenantID uint, since time.Time, limit int) 
 	if limit <= 0 {
 		limit = 500
 	}
-	err := r.db.Select("model_call_logs.id, model_call_logs.created_at, model_call_logs.tenant_id, model_call_logs.user_id, model_call_logs.username, model_call_logs.display_name, model_call_logs.generation, model_call_logs.model, model_call_logs.method, model_call_logs.path, model_call_logs.status_code, model_call_logs.error_message, model_call_logs.is_success, model_call_logs.response_time, model_call_logs.channel_id, model_call_logs.channel_model_id, channels.name as channel_name").
+	err := r.db.Select("model_call_logs.id, model_call_logs.created_at, model_call_logs.tenant_id, model_call_logs.user_id, model_call_logs.username, model_call_logs.display_name, model_call_logs.generation, model_call_logs.model, model_call_logs.method, model_call_logs.path, model_call_logs.status_code, model_call_logs.error_message, model_call_logs.is_success, model_call_logs.response_time, model_call_logs.channel_id, model_call_logs.channel_model_id, channels.name as channel_name, channels.remark as channel_remark").
 		Joins("LEFT JOIN channels ON channels.id = model_call_logs.channel_id").
 		Where("model_call_logs.tenant_id = ? AND model_call_logs.created_at >= ?", tenantID, since).
 		Order("model_call_logs.id DESC").

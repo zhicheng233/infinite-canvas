@@ -16,6 +16,7 @@ import {
     type ProtocolDefault,
     type SaveModelServiceChannelInput,
 } from "@/services/api/model-service";
+import { ChannelNameWithRemark } from "@/components/channel-name-with-remark";
 import { ApiConfigTransfer } from "./api-config-transfer";
 
 const protocolRows = [
@@ -181,8 +182,9 @@ export function ModelServiceChannels({ refreshToken, onChanged }: Props) {
                         title: "渠道",
                         render: (_, item) => (
                             <div className="min-w-48">
-                                <div className="flex items-center gap-2 font-medium"><span>{item.name}</span>{item.archived ? <Tag>已归档</Tag> : item.enabled ? <Tag color="green">已启用</Tag> : <Tag>已停用</Tag>}</div>
+                                <div className="flex items-center gap-2 font-medium"><ChannelNameWithRemark name={item.name} remark={item.remark} />{item.archived ? <Tag>已归档</Tag> : item.enabled ? <Tag color="green">已启用</Tag> : <Tag>已停用</Tag>}</div>
                                 <Typography.Text type="secondary" className="block max-w-80 truncate text-xs">{item.base_url}</Typography.Text>
+                                {item.remark ? <Tooltip title={item.remark}><Typography.Text type="secondary" className="block max-w-80 truncate text-xs">备注：{item.remark}</Typography.Text></Tooltip> : null}
                             </div>
                         ),
                     },
@@ -228,7 +230,7 @@ export function ModelServiceChannels({ refreshToken, onChanged }: Props) {
                 </Form>
             </Modal>
 
-            <Modal width={760} open={Boolean(defaultsChannel)} title={`渠道默认协议：${defaultsChannel?.name ?? ""}`} okText="预览并保存" confirmLoading={busy === "defaults"} onCancel={() => setDefaultsChannel(undefined)} onOk={() => void saveDefaults()}>
+            <Modal width={760} open={Boolean(defaultsChannel)} title={<span>渠道默认协议：<ChannelNameWithRemark name={defaultsChannel?.name ?? ""} remark={defaultsChannel?.remark} /></span>} okText="预览并保存" confirmLoading={busy === "defaults"} onCancel={() => setDefaultsChannel(undefined)} onOk={() => void saveDefaults()}>
                 <Table
                     rowKey={(item) => `${item.capability}:${item.operation}`}
                     pagination={false}

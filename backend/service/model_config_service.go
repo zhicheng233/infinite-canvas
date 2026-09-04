@@ -425,6 +425,7 @@ func buildModelConfigInfo(data *repository.ModelConfigData, item *model.ChannelM
 	}
 	if channel != nil {
 		info.ChannelName = channel.Name
+		info.ChannelRemark = channel.Remark
 	}
 	if catalog != nil {
 		info.PublicKey, info.DisplayName = catalog.PublicKey, catalog.DisplayName

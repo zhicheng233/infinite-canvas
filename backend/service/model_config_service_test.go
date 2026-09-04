@@ -66,3 +66,18 @@ func TestReadinessFlagsIncompleteDraftButPreservesLegacyActiveState(t *testing.T
 		t.Fatalf("legacy active state should be preserved for review: %#v", info)
 	}
 }
+
+func TestBuildModelConfigInfoIncludesChannelRemark(t *testing.T) {
+	item := &model.ChannelModel{BaseModel: model.BaseModel{ID: 21}, ChannelID: 7, CatalogModelID: 12, ModelName: "image-model", DiscoveryStatus: model.DiscoveryStatusPresent}
+	data := repository.ModelConfigData{
+		Channels: []model.Channel{{BaseModel: model.BaseModel{ID: 7}, Name: "图片渠道", Remark: "优先用于高清图片"}},
+		Catalogs: []model.CatalogModel{{BaseModel: model.BaseModel{ID: 12}, PublicKey: "image-model", DisplayName: "图片模型"}},
+	}
+	info, err := buildModelConfigInfo(&data, item)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.ChannelName != "图片渠道" || info.ChannelRemark != "优先用于高清图片" {
+		t.Fatalf("unexpected channel identity: %#v", info)
+	}
+}

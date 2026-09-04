@@ -23,6 +23,7 @@ type ModelCallLog struct {
 	ChannelID            *uint  `gorm:"index" json:"channel_id,omitempty"`
 	ChannelModelID       *uint  `gorm:"index" json:"channel_model_id,omitempty"`
 	ChannelName          string `gorm:"column:channel_name;->;-:migration" json:"channel_name,omitempty"`
+	ChannelRemark        string `gorm:"column:channel_remark;->;-:migration" json:"channel_remark,omitempty"`
 }
 
 func (ModelCallLog) TableName() string { return "model_call_logs" }

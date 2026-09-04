@@ -5,6 +5,7 @@ export type AutoRoutingMember = {
     channel_model_id: number;
     channel_id: number;
     channel_name: string;
+    channel_remark?: string;
     model_name: string;
     priority: number;
     enabled: boolean;
