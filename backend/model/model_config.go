@@ -30,7 +30,7 @@ type ChannelModelOperation struct {
 	ChannelModelID uint   `gorm:"uniqueIndex:idx_channel_model_operation;index;not null" json:"channel_model_id"`
 	Capability     string `gorm:"size:20;uniqueIndex:idx_channel_model_operation;index;not null" json:"capability"`
 	Operation      string `gorm:"size:30;uniqueIndex:idx_channel_model_operation;not null" json:"operation"`
-	Enabled        bool   `gorm:"default:true;index" json:"enabled"`
+	Enabled        bool   `gorm:"index" json:"enabled"`
 	ProtocolMode   string `gorm:"size:20;not null" json:"protocol_mode"`
 	Adapter        string `gorm:"size:50" json:"adapter"`
 	ConfigJSON     string `gorm:"type:longtext" json:"config_json"`

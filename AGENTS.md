@@ -22,6 +22,7 @@
 ## 后端规范
 
 - 后端使用 Go + Gin + GORM。
+- 带非零默认值的 GORM 字段不能依赖 `Select` 保留零值；涉及开关或零值保存时，必须通过回归测试验证实际 SQL 参数，避免 `Create` 将显式零值替换成默认值。
 - `handler/` 只处理 HTTP 入参、调用 service、返回 `OK` / `Fail`。
 - `service/` 放业务逻辑、默认值、校验、时间、ID、鉴权等处理。
 - `repository/` 只做数据库访问和 GORM 查询。
