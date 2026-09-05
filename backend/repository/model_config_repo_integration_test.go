@@ -153,6 +153,64 @@ func TestModelConfigRepoDefaultPricingUpdatesNormalizedAndLegacyProjections(t *t
 	if len(shadows) != 3 || shadows[0].Model != "public-video" || shadows[1].Model != "video-v1" || shadows[2].Model != "video-v2" {
 		t.Fatalf("unexpected legacy pricing projections: %#v", shadows)
 	}
+	if err := db.Delete(&shadows[0]).Error; err != nil {
+		t.Fatal(err)
+	}
+	pricing.CreditsPerUnit = 8
+	if err := NewModelConfigRepo(db).SaveDefaultPricing(4, 9, catalog.ID, "video", pricing); err != nil {
+		t.Fatalf("restore soft-deleted default pricing projection: %v", err)
+	}
+	var restored model.CreditPricing
+	if err := db.Unscoped().Where("tenant_id = ? AND channel_id = 0 AND model = ?", 4, "public-video").First(&restored).Error; err != nil {
+		t.Fatal(err)
+	}
+	if restored.DeletedAt.Valid || restored.CreditsPerUnit != 8 {
+		t.Fatalf("soft-deleted projection was not restored: %#v", restored)
+	}
+}
+
+func TestModelConfigRepoRestoresSoftDeletedImplementationProjection(t *testing.T) {
+	db := openModelConfigRepoTestDB(t)
+	channel := model.Channel{Name: "Primary", BaseUrl: "https://api.example.com", ApiKey: "encrypted", Enabled: true, ConfigRevision: 1}
+	catalog := model.CatalogModel{PublicKey: "public-image", DisplayName: "Public image"}
+	implementation := model.ChannelModel{ChannelID: 1, ModelName: "gemini-omni-flash", UpstreamModelID: "gemini-omni-flash", CatalogModelID: 1, Status: model.ModelStatusActive, ConfigRevision: 1}
+	if err := db.Create(&channel).Error; err != nil {
+		t.Fatal(err)
+	}
+	implementation.ChannelID = channel.ID
+	if err := db.Create(&catalog).Error; err != nil {
+		t.Fatal(err)
+	}
+	implementation.CatalogModelID = catalog.ID
+	if err := db.Create(&implementation).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&model.CreditPricing{TenantID: 9, ChannelID: channel.ID, Model: implementation.ModelName, CreditsPerUnit: 2, UnitType: model.UnitPerImage, PricingMode: model.PricingModePerUnit}).Error; err != nil {
+		t.Fatal(err)
+	}
+	var projection model.CreditPricing
+	if err := db.Where("tenant_id = ? AND channel_id = ? AND model = ?", 9, channel.ID, implementation.ModelName).First(&projection).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Delete(&projection).Error; err != nil {
+		t.Fatal(err)
+	}
+	input := SaveModelConfigParams{
+		TenantID: 9, ActorUserID: 1, ModelID: implementation.ID, ExpectedRevision: 1,
+		PublicKey: catalog.PublicKey, DisplayName: catalog.DisplayName, UpstreamModelID: implementation.ModelName, Status: model.ModelStatusActive,
+		Capabilities: `["image"]`, ImageGenerate: "generations", ImageEdit: "generations", VideoRoute: "auto", VideoDurations: "[]",
+		Operations: []model.ChannelModelOperation{{Capability: "image", Operation: "generate", Enabled: true, ProtocolMode: model.ProtocolModeOverride, Adapter: "generations", ConfigJSON: "{}", ConfigVersion: 1}},
+		Pricing: []model.ModelPricingRule{{Capability: "image", CreditsPerUnit: 5, UnitType: model.UnitPerImage, PricingMode: model.PricingModePerUnit}},
+	}
+	if err := NewModelConfigRepo(db).SaveModelConfig(input); err != nil {
+		t.Fatalf("save model configuration: %v", err)
+	}
+	if err := db.Unscoped().Where("tenant_id = ? AND channel_id = ? AND model = ?", 9, channel.ID, implementation.ModelName).First(&projection).Error; err != nil {
+		t.Fatal(err)
+	}
+	if projection.DeletedAt.Valid || projection.CreditsPerUnit != 5 {
+		t.Fatalf("soft-deleted implementation projection was not restored: %#v", projection)
+	}
 }
 
 func TestModelConfigRepoDiscoveryPreservesExistingConfigurationAndMarksMissing(t *testing.T) {

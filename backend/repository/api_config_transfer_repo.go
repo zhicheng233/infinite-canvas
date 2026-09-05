@@ -223,27 +223,7 @@ func (r *APIConfigTransferRepo) Apply(plan *APIConfigTransferApplyPlan) error {
 				}
 				item.ChannelID = channelID
 			}
-			var existing model.CreditPricing
-			err := tx.Where("tenant_id = ? AND model = ? AND channel_id = ?", item.TenantID, item.Model, item.ChannelID).First(&existing).Error
-			if err == nil {
-				if err := tx.Model(&existing).Updates(map[string]interface{}{
-					"credits_per_unit": item.CreditsPerUnit,
-					"unit_type":        item.UnitType,
-					"pricing_mode":     item.PricingMode,
-					"pricing_rule":     item.PricingRule,
-				}).Error; err != nil {
-					return err
-				}
-				item.ID = existing.ID
-				if err := upsertLegacyTransferPricingRule(tx, item); err != nil {
-					return err
-				}
-				continue
-			}
-			if !errors.Is(err, gorm.ErrRecordNotFound) {
-				return err
-			}
-			if err := tx.Create(&item).Error; err != nil {
+			if err := upsertLegacyPricingProjection(tx, item); err != nil {
 				return err
 			}
 			if err := upsertLegacyTransferPricingRule(tx, item); err != nil {
@@ -286,7 +266,7 @@ func (r *APIConfigTransferRepo) Apply(plan *APIConfigTransferApplyPlan) error {
 				shadowChannelID = channelIDs[operation.ChannelRef]
 			}
 			shadow := model.CreditPricing{TenantID: item.TenantID, ChannelID: shadowChannelID, Model: shadowModel, CreditsPerUnit: item.CreditsPerUnit, UnitType: item.UnitType, PricingMode: item.PricingMode, PricingRule: item.PricingRule}
-			if err := tx.Where("tenant_id = ? AND model = ? AND channel_id = ?", shadow.TenantID, shadow.Model, shadow.ChannelID).Assign(shadow).FirstOrCreate(&shadow).Error; err != nil {
+			if err := upsertLegacyPricingProjection(tx, shadow); err != nil {
 				return err
 			}
 		}
@@ -394,7 +374,17 @@ func upsertLegacyTransferPricingRule(tx *gorm.DB, pricing model.CreditPricing) e
 		scope, scopeID = model.PricingScopeImplementation, channelModel.ID
 	}
 	item := model.ModelPricingRule{TenantID: pricing.TenantID, CatalogModelID: catalog.ID, Capability: capability, Scope: scope, ScopeID: scopeID, CreditsPerUnit: pricing.CreditsPerUnit, UnitType: pricing.UnitType, PricingMode: pricing.PricingMode, PricingRule: pricing.PricingRule, ConfigRevision: 1}
-	return tx.Where("tenant_id = ? AND catalog_model_id = ? AND capability = ? AND scope = ? AND scope_id = ?", item.TenantID, item.CatalogModelID, item.Capability, item.Scope, item.ScopeID).Assign(item).FirstOrCreate(&item).Error
+	var existing model.ModelPricingRule
+	err := tx.Unscoped().Where("tenant_id = ? AND catalog_model_id = ? AND capability = ? AND scope = ? AND scope_id = ?", item.TenantID, item.CatalogModelID, item.Capability, item.Scope, item.ScopeID).First(&existing).Error
+	if err == nil {
+		item.ID, item.CreatedAt = existing.ID, existing.CreatedAt
+		item.DeletedAt = gorm.DeletedAt{}
+		return tx.Unscoped().Save(&item).Error
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
+	return tx.Create(&item).Error
 }
 
 func transferImportedModelKey(channelRef, upstreamModelID string) string {

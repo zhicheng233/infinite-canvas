@@ -143,8 +143,11 @@ func (r *ModelConfigRepo) SaveModelConfig(input SaveModelConfigParams) error {
 		if err := tx.Unscoped().Where("tenant_id = ? AND scope = ? AND scope_id = ?", input.TenantID, model.PricingScopeImplementation, current.ID).Delete(&model.ModelPricingRule{}).Error; err != nil {
 			return err
 		}
-		if err := tx.Where("tenant_id = ? AND channel_id = ? AND model IN ?", input.TenantID, current.ChannelID, []string{current.ModelName, current.UpstreamModelID, input.UpstreamModelID}).Delete(&model.CreditPricing{}).Error; err != nil {
-			return err
+		oldNames := uniqueModelNames([]string{current.ModelName, current.UpstreamModelID})
+		if len(oldNames) > 0 {
+			if err := tx.Unscoped().Where("tenant_id = ? AND channel_id = ? AND model IN ? AND model NOT IN ?", input.TenantID, current.ChannelID, oldNames, []string{input.UpstreamModelID}).Delete(&model.CreditPricing{}).Error; err != nil {
+				return err
+			}
 		}
 		for index := range input.Pricing {
 			input.Pricing[index].TenantID = input.TenantID
@@ -159,7 +162,7 @@ func (r *ModelConfigRepo) SaveModelConfig(input SaveModelConfigParams) error {
 		if len(input.Pricing) > 0 {
 			pricing := input.Pricing[0]
 			shadow := model.CreditPricing{TenantID: input.TenantID, ChannelID: current.ChannelID, Model: input.UpstreamModelID, CreditsPerUnit: pricing.CreditsPerUnit, UnitType: pricing.UnitType, PricingMode: pricing.PricingMode, PricingRule: pricing.PricingRule}
-			if err := tx.Create(&shadow).Error; err != nil {
+			if err := upsertLegacyPricingProjection(tx, shadow); err != nil {
 				return err
 			}
 		}
@@ -202,7 +205,7 @@ func (r *ModelConfigRepo) SaveDefaultPricing(tenantID, actorUserID uint, catalog
 		}
 		for _, name := range uniqueModelNames(shadowNames) {
 			shadow := model.CreditPricing{TenantID: tenantID, ChannelID: 0, Model: name, CreditsPerUnit: pricing.CreditsPerUnit, UnitType: pricing.UnitType, PricingMode: pricing.PricingMode, PricingRule: pricing.PricingRule}
-			if err := tx.Where("tenant_id = ? AND model = ? AND channel_id = 0", tenantID, name).Assign(shadow).FirstOrCreate(&shadow).Error; err != nil {
+			if err := upsertLegacyPricingProjection(tx, shadow); err != nil {
 				return err
 			}
 		}

@@ -260,21 +260,7 @@ func (r *CreditRepo) FindPricingMap(tenantID uint) (map[string]map[uint]model.Cr
 }
 
 func (r *CreditRepo) SavePricing(pricing *model.CreditPricing) error {
-	var existing model.CreditPricing
-	err := r.db.Where("tenant_id = ? AND model = ? AND channel_id = ?",
-		pricing.TenantID, pricing.Model, pricing.ChannelID).First(&existing).Error
-	if err == nil {
-		return r.db.Model(&existing).Updates(map[string]interface{}{
-			"credits_per_unit": pricing.CreditsPerUnit,
-			"unit_type":        pricing.UnitType,
-			"pricing_mode":     pricing.PricingMode,
-			"pricing_rule":     pricing.PricingRule,
-		}).Error
-	}
-	if err != gorm.ErrRecordNotFound {
-		return err
-	}
-	return r.db.Create(pricing).Error
+	return upsertLegacyPricingProjection(r.db, *pricing)
 }
 
 func (r *CreditRepo) ListPricing(tenantID uint, channelID uint) ([]model.CreditPricing, error) {
