@@ -58,6 +58,36 @@ func TestModelConfigRepoSavesModelAndLegacyPricingProjectionAtomically(t *testin
 	if operation.Adapter != "generations" || operation.ContractKey != "contract" {
 		t.Fatalf("unexpected operation: %#v", operation)
 	}
+	secondParams := params
+	secondParams.ExpectedRevision = 2
+	secondParams.Operations = []model.ChannelModelOperation{
+		{Capability: "image", Operation: "generate", Enabled: false, ProtocolMode: model.ProtocolModeOverride, Adapter: "generations", ConfigJSON: "{}", ConfigVersion: 1, ContractKey: "contract"},
+		{Capability: "image", Operation: "edit", Enabled: true, ProtocolMode: model.ProtocolModeOverride, Adapter: "edits", ConfigJSON: "{}", ConfigVersion: 1, ContractKey: "edit-contract"},
+	}
+	if err := repo.SaveModelConfig(secondParams); err != nil {
+		t.Fatalf("save model configuration with disabled operation: %v", err)
+	}
+	var operations []model.ChannelModelOperation
+	if err := db.Where("channel_model_id = ?", implementation.ID).Find(&operations).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(operations) != 2 {
+		t.Fatalf("saved operations=%d, want 2", len(operations))
+	}
+	for _, saved := range operations {
+		switch saved.Operation {
+		case "generate":
+			if saved.Enabled {
+				t.Fatalf("disabled operation was re-enabled: %#v", saved)
+			}
+		case "edit":
+			if !saved.Enabled {
+				t.Fatalf("enabled operation was disabled: %#v", saved)
+			}
+		default:
+			t.Fatalf("unexpected operation: %#v", saved)
+		}
+	}
 	var pricing model.ModelPricingRule
 	if err := db.Where("tenant_id = ? AND catalog_model_id = ? AND scope = ? AND scope_id = ?", 3, savedCatalog.ID, model.PricingScopeImplementation, implementation.ID).First(&pricing).Error; err != nil {
 		t.Fatal(err)

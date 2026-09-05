@@ -135,7 +135,17 @@ func (r *ModelConfigRepo) SaveModelConfig(input SaveModelConfigParams) error {
 		}
 		for index := range input.Operations {
 			input.Operations[index].ChannelModelID = current.ID
-			if err := tx.Create(&input.Operations[index]).Error; err != nil {
+			if err := tx.Select(
+				"channel_model_id",
+				"capability",
+				"operation",
+				"enabled",
+				"protocol_mode",
+				"adapter",
+				"config_json",
+				"config_version",
+				"contract_key",
+			).Create(&input.Operations[index]).Error; err != nil {
 				return err
 			}
 		}
